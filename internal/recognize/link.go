@@ -48,7 +48,7 @@ func (f *linkFinder) containsKeyword(s string) (string, bool) {
 }
 
 func (f *linkFinder) find(msg *mailparse.Message, tr *Trace) string {
-	kw, ok := f.containsKeyword(strings.ToLower(msg.Subject + "\n" + msg.Text))
+	kw, ok := f.containsKeyword(strings.ToLower(string(scanRunes(msg))))
 	if !ok {
 		tr.Addf("連結：沒有找到連結關鍵字")
 		return ""

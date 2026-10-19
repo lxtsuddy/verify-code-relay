@@ -2,6 +2,7 @@ package recognize
 
 import (
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"unicode"
@@ -47,9 +48,110 @@ type codeCand struct {
 	value string
 }
 
+// maxScanRunes caps how much of Subject+"\n"+Text the builtin finders look at.
+// Codes sit near the top of real mail; the cap bounds work on huge messages.
+const maxScanRunes = 64 << 10
+
+// phoneScanLimit bounds how far a phone-number run is followed in each direction.
+const phoneScanLimit = 32
+
+// scanRunes returns Subject+"\n"+Text as runes, truncated to maxScanRunes.
+func scanRunes(msg *mailparse.Message) []rune {
+	rs := []rune(msg.Subject + "\n" + msg.Text)
+	if len(rs) > maxScanRunes {
+		rs = rs[:maxScanRunes]
+	}
+	return rs
+}
+
+// codeText holds the per-message data the candidate checks share, so that each
+// candidate costs O(log n) instead of O(line) or O(keywords).
+type codeText struct {
+	rs, lower []rune
+	lines     []span // every line, in order; end is the '\n' offset (or len)
+	trimmed   []span // lines[i] with surrounding white space removed
+	kws       []span // keyword occurrences sorted by start
+	maxKwLen  int
+	blocked   []span // URL and e-mail spans, merged and sorted
+	yearLine  map[int]bool
+}
+
+func newCodeText(rs, lower []rune, kws, blocked []span) *codeText {
+	t := &codeText{rs: rs, lower: lower, yearLine: map[int]bool{}}
+	for s := 0; ; {
+		e := s
+		for e < len(rs) && rs[e] != '\n' {
+			e++
+		}
+		ts, te := s, e
+		for ts < te && unicode.IsSpace(rs[ts]) {
+			ts++
+		}
+		for te > ts && unicode.IsSpace(rs[te-1]) {
+			te--
+		}
+		t.lines = append(t.lines, span{s, e})
+		t.trimmed = append(t.trimmed, span{ts, te})
+		if e >= len(rs) {
+			break
+		}
+		s = e + 1
+	}
+	t.kws = append([]span(nil), kws...)
+	sort.Slice(t.kws, func(i, j int) bool { return t.kws[i].start < t.kws[j].start })
+	for _, k := range t.kws {
+		t.maxKwLen = max(t.maxKwLen, k.end-k.start)
+	}
+	t.blocked = mergeSpans(blocked)
+	return t
+}
+
+// line returns the index of the line containing pos.
+func (t *codeText) line(pos int) int {
+	return sort.Search(len(t.lines), func(i int) bool { return t.lines[i].end >= pos })
+}
+
+// aloneOnLine reports whether the candidate is the only thing on its line.
+func (t *codeText) aloneOnLine(c span) bool {
+	return t.trimmed[t.line(c.start)] == c
+}
+
+// dateLine reports whether the line containing pos looks like it holds a date.
+func (t *codeText) dateLine(pos int) bool {
+	ln := t.lines[t.line(pos)]
+	if v, ok := t.yearLine[ln.start]; ok {
+		return v
+	}
+	line := string(t.lower[ln.start:ln.end])
+	v := strings.Contains(line, "年") || monthRe.MatchString(line) || dateNumRe.MatchString(line)
+	t.yearLine[ln.start] = v
+	return v
+}
+
+// blockedAt reports whether c overlaps a URL or e-mail address.
+func (t *codeText) blockedAt(c span) bool {
+	i := sort.Search(len(t.blocked), func(i int) bool { return t.blocked[i].end > c.start })
+	return i < len(t.blocked) && t.blocked[i].start < c.end
+}
+
+// mergeSpans returns the union of list as sorted, disjoint spans.
+func mergeSpans(list []span) []span {
+	s := append([]span(nil), list...)
+	sort.Slice(s, func(i, j int) bool { return s[i].start < s[j].start })
+	var out []span
+	for _, b := range s {
+		if n := len(out); n > 0 && b.start <= out[n-1].end {
+			out[n-1].end = max(out[n-1].end, b.end)
+			continue
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
 func (f *codeFinder) find(msg *mailparse.Message, tr *Trace) string {
-	full := msg.Subject + "\n" + msg.Text
-	rs := []rune(full)
+	rs := scanRunes(msg)
+	full := string(rs)
 	lower := lowerRunes(rs)
 	subjLen := len([]rune(msg.Subject))
 	kws := findKeywords(lower, f.keywords)
@@ -62,6 +164,7 @@ func (f *codeFinder) find(msg *mailparse.Message, tr *Trace) string {
 	}
 	b2r := byteToRune(full)
 	blocked := append(regexpSpans(urlLikeRe, full, b2r), regexpSpans(emailRe, full, b2r)...)
+	t := newCodeText(rs, lower, kws, blocked)
 
 	var cands []codeCand
 	for _, sp := range regexpSpans(digitsRe, full, b2r) {
@@ -78,15 +181,15 @@ func (f *codeFinder) find(msg *mailparse.Message, tr *Trace) string {
 			cands = append(cands, codeCand{sp, raw, raw})
 		}
 	}
-	sortCands(cands)
+	sort.SliceStable(cands, func(i, j int) bool { return cands[i].start < cands[j].start })
 
 	best, bestScore := "", -1e9
 	for _, c := range cands {
-		if reason := excludeReason(c, rs, lower, blocked); reason != "" {
+		if reason := excludeReason(c, t); reason != "" {
 			tr.Addf("  候選 %q：排除（%s）", c.raw, reason)
 			continue
 		}
-		d, ok := keywordDistance(c.span, kws)
+		d, ok := t.keywordDistance(c.span)
 		if !ok {
 			tr.Addf("  候選 %q：離關鍵字超過 %d 字元", c.raw, codeMaxDistance)
 			continue
@@ -95,7 +198,7 @@ func (f *codeFinder) find(msg *mailparse.Message, tr *Trace) string {
 		if c.start < subjLen {
 			score += 30
 		}
-		if ln := lineAt(rs, c.start); strings.TrimSpace(string(rs[ln.start:ln.end])) == c.raw {
+		if t.aloneOnLine(c.span) {
 			score += 20
 		}
 		if len(c.value) == 6 && isAllDigits(c.value) {
@@ -114,19 +217,16 @@ func (f *codeFinder) find(msg *mailparse.Message, tr *Trace) string {
 	return best
 }
 
-func sortCands(c []codeCand) {
-	for i := 1; i < len(c); i++ {
-		for j := i; j > 0 && c[j].start < c[j-1].start; j-- {
-			c[j], c[j-1] = c[j-1], c[j]
-		}
-	}
-}
-
 // keywordDistance returns the weighted distance to the nearest keyword; candidates
 // before a keyword count double. ok is false when every keyword is >200 runes away.
-func keywordDistance(c span, kws []span) (int, bool) {
+// Only keywords starting in [c.start-200-maxKwLen, c.end+200] can be within 200
+// runes, so the scan starts at a binary-searched index and stops past that window.
+func (t *codeText) keywordDistance(c span) (int, bool) {
 	best, ok := 0, false
-	for _, k := range kws {
+	lo := c.start - codeMaxDistance - t.maxKwLen
+	i := sort.Search(len(t.kws), func(i int) bool { return t.kws[i].start >= lo })
+	for ; i < len(t.kws) && t.kws[i].start <= c.end+codeMaxDistance; i++ {
+		k := t.kws[i]
 		var raw, d int
 		switch {
 		case c.start >= k.end:
@@ -161,8 +261,9 @@ func isPhoneRune(r rune) bool {
 	return (r >= '0' && r <= '9') || r == ' ' || r == '-' || r == '(' || r == ')'
 }
 
-func excludeReason(c codeCand, rs, lower []rune, blocked []span) string {
-	if overlaps(c.span, blocked) {
+func excludeReason(c codeCand, t *codeText) string {
+	rs, lower := t.rs, t.lower
+	if t.blockedAt(c.span) {
 		return "位於網址或 email 中"
 	}
 	before := strings.ReplaceAll(string(lower[max(0, c.start-5):c.start]), " ", "")
@@ -184,18 +285,16 @@ func excludeReason(c codeCand, rs, lower []rune, blocked []span) string {
 	}
 	if len(c.value) == 4 && isAllDigits(c.value) {
 		if y, _ := strconv.Atoi(c.value); y >= 1900 && y <= 2099 {
-			ln := lineAt(lower, c.start)
-			line := string(lower[ln.start:ln.end])
-			if strings.Contains(line, "年") || monthRe.MatchString(line) || dateNumRe.MatchString(line) {
+			if t.dateLine(c.start) {
 				return "日期中的年份"
 			}
 		}
 	}
 	l, r := c.start, c.end
-	for l > 0 && isPhoneRune(rs[l-1]) {
+	for l > 0 && c.start-l < phoneScanLimit && isPhoneRune(rs[l-1]) {
 		l--
 	}
-	for r < len(rs) && isPhoneRune(rs[r]) {
+	for r < len(rs) && r-c.end < phoneScanLimit && isPhoneRune(rs[r]) {
 		r++
 	}
 	if l > 0 && rs[l-1] == '+' {

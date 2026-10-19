@@ -88,24 +88,3 @@ func regexpSpans(re *regexp.Regexp, s string, b2r []int) []span {
 	}
 	return out
 }
-
-func overlaps(a span, list []span) bool {
-	for _, b := range list {
-		if a.start < b.end && b.start < a.end {
-			return true
-		}
-	}
-	return false
-}
-
-// lineAt returns the rune span of the line containing position pos.
-func lineAt(rs []rune, pos int) span {
-	s, e := pos, pos
-	for s > 0 && rs[s-1] != '\n' {
-		s--
-	}
-	for e < len(rs) && rs[e] != '\n' {
-		e++
-	}
-	return span{s, e}
-}
