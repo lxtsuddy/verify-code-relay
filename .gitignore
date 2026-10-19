@@ -1,0 +1,6 @@
+/relay
+/data/
+.env
+config.yaml
+*.db
+*.db-*
