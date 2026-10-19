@@ -35,7 +35,11 @@ const maxPartBytes = 5 << 20
 
 func Parse(raw []byte) (*Message, error) {
 	r, err := mail.CreateReader(bytes.NewReader(raw))
-	if err != nil && !message.IsUnknownCharset(err) && !message.IsUnknownEncoding(err) {
+	if r == nil {
+		// Unknown transfer encodings and malformed headers yield no reader at all.
+		return nil, err
+	}
+	if err != nil && !message.IsUnknownCharset(err) {
 		return nil, err
 	}
 	m := &Message{}
@@ -53,14 +57,21 @@ func Parse(raw []byte) (*Message, error) {
 	}
 	seen := map[string]bool{}
 	for _, key := range []string{"To", "Cc", "Delivered-To"} {
-		list, _ := h.AddressList(key)
-		for _, a := range list {
-			k := strings.ToLower(a.Address)
-			if a.Address == "" || seen[k] {
+		// Repeated headers (forwarding, mailing lists) each carry addresses; read every field.
+		fields := h.FieldsByKey(key)
+		for fields.Next() {
+			list, err := mail.ParseAddressList(fields.Value())
+			if err != nil {
 				continue
 			}
-			seen[k] = true
-			m.To = append(m.To, Address{Name: a.Name, Addr: a.Address})
+			for _, a := range list {
+				k := strings.ToLower(a.Address)
+				if a.Address == "" || seen[k] {
+					continue
+				}
+				seen[k] = true
+				m.To = append(m.To, Address{Name: a.Name, Addr: a.Address})
+			}
 		}
 	}
 
@@ -104,7 +115,9 @@ func Parse(raw []byte) (*Message, error) {
 	}
 	if havePlain {
 		m.Text = normalizeText(plain)
-	} else {
+	}
+	if m.Text == "" {
+		// An empty text/plain part must not hide a populated HTML alternative.
 		m.Text = htmlText
 	}
 	m.Links = mergeLinks(htmlLinks, ExtractURLs(m.Text))

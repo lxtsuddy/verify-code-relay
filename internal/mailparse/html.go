@@ -43,6 +43,7 @@ func HTMLToText(src string) (string, []Link) {
 	}
 	var b strings.Builder
 	var links []Link
+	pre := 0 // depth of enclosing <pre> elements; whitespace is kept verbatim inside them
 	var walk func(n *html.Node)
 	walk = func(n *html.Node) {
 		if n.Type == html.ElementNode {
@@ -52,6 +53,10 @@ func HTMLToText(src string) (string, []Link) {
 			if n.DataAtom == atom.Br {
 				b.WriteByte('\n')
 				return
+			}
+			if n.DataAtom == atom.Pre {
+				pre++
+				defer func() { pre-- }()
 			}
 			if blockAtoms[n.DataAtom] {
 				b.WriteByte('\n')
@@ -72,7 +77,11 @@ func HTMLToText(src string) (string, []Link) {
 			}
 		}
 		if n.Type == html.TextNode {
-			b.WriteString(strings.ReplaceAll(n.Data, "\u00a0", " "))
+			s := strings.ReplaceAll(n.Data, "\u00a0", " ")
+			if pre == 0 {
+				s = htmlSpaceRun.ReplaceAllString(s, " ")
+			}
+			b.WriteString(s)
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			walk(c)
@@ -100,6 +109,9 @@ func isHTTP(u string) bool {
 }
 
 var spaceRun = regexp.MustCompile(`[ \t\r\f\v]+`)
+
+// htmlSpaceRun collapses source whitespace (including newlines) inside HTML text nodes.
+var htmlSpaceRun = regexp.MustCompile(`[ \t\r\n\f\v]+`)
 
 func collapseSpaces(s string) string {
 	return strings.TrimSpace(spaceRun.ReplaceAllString(strings.ReplaceAll(s, "\n", " "), " "))

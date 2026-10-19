@@ -40,3 +40,17 @@ func TestExtractURLs(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+func TestHTMLSourceNewlinesCollapsed(t *testing.T) {
+	text, _ := HTMLToText("<p>Your code is\n123456 ok</p>")
+	if !strings.Contains(text, "Your code is 123456 ok") {
+		t.Errorf("text = %q", text)
+	}
+}
+
+func TestHTMLPreKeepsLineBreaks(t *testing.T) {
+	text, _ := HTMLToText("<pre>line one\nline two</pre>")
+	if !strings.Contains(text, "line one\nline two") {
+		t.Errorf("text = %q", text)
+	}
+}

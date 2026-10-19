@@ -135,3 +135,62 @@ func TestParseUnknownCharsetStillReturnsMessage(t *testing.T) {
 		t.Errorf("text = %q", m.Text)
 	}
 }
+
+func TestParseUnknownTransferEncodingNoPanic(t *testing.T) {
+	raw := crlf("From: a@b.c\nSubject: s\nContent-Transfer-Encoding: x-foo\nContent-Type: text/plain\n\ncode 1234\n")
+	var m *Message
+	var err error
+	func() {
+		defer func() {
+			if p := recover(); p != nil {
+				t.Fatalf("Parse panicked: %v", p)
+			}
+		}()
+		m, err = Parse(raw)
+	}()
+	if err == nil && m == nil {
+		t.Fatal("Parse returned neither a message nor an error")
+	}
+}
+
+func TestParseMultipleDeliveredTo(t *testing.T) {
+	raw := crlf("From: a@b.c\nTo: list@x.org\nDelivered-To: one@example.com\nDelivered-To: two@example.com\n" +
+		"Subject: s\n\nbody\n")
+	m, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	have := map[string]bool{}
+	for _, a := range m.To {
+		have[a.Addr] = true
+	}
+	for _, want := range []string{"list@x.org", "one@example.com", "two@example.com"} {
+		if !have[want] {
+			t.Errorf("to missing %s: %+v", want, m.To)
+		}
+	}
+}
+
+func TestParseEmptyPlainFallsBackToHTML(t *testing.T) {
+	raw := crlf(`From: a@b.c
+Subject: s
+Content-Type: multipart/alternative; boundary="b"
+
+--b
+Content-Type: text/plain; charset=utf-8
+
+
+--b
+Content-Type: text/html; charset=utf-8
+
+<p>Code 1234</p>
+--b--
+`)
+	m, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(m.Text, "Code 1234") {
+		t.Errorf("text should fall back to html: %q", m.Text)
+	}
+}
