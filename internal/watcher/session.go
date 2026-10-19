@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"mime"
 	"sort"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
+	"github.com/emersion/go-message/charset"
 
 	"verify-code-relay/internal/auth"
 	"verify-code-relay/internal/pipeline"
@@ -34,23 +36,32 @@ func (w *Watcher) await(c *imapclient.Client, d time.Duration, f func() error) e
 	}
 }
 
+// clientOptions signals sig (without blocking) whenever the server reports a
+// changed message count, and decodes RFC 2047 words in ENVELOPE fields with
+// go-message's charsets (Big5, GB2312, ISO-2022-JP, ...).
+func clientOptions(sig chan<- struct{}) *imapclient.Options {
+	return &imapclient.Options{
+		WordDecoder: &mime.WordDecoder{CharsetReader: charset.Reader},
+		UnilateralDataHandler: &imapclient.UnilateralDataHandler{
+			// Runs on the client's read goroutine: only signal, never call client methods here.
+			Mailbox: func(d *imapclient.UnilateralDataMailbox) {
+				if d.NumMessages != nil {
+					select {
+					case sig <- struct{}{}:
+					default:
+					}
+				}
+			},
+		},
+	}
+}
+
 // session runs one connection until it fails or ctx is cancelled. connected is
 // called once the folder is selected and the first catch-up has succeeded, so a
 // message that keeps failing does not reset the reconnect backoff.
 func (w *Watcher) session(ctx context.Context, connected func()) error {
 	sig := make(chan struct{}, 1)
-	opts := &imapclient.Options{UnilateralDataHandler: &imapclient.UnilateralDataHandler{
-		// Runs on the client's read goroutine: only signal, never call client methods here.
-		Mailbox: func(d *imapclient.UnilateralDataMailbox) {
-			if d.NumMessages != nil {
-				select {
-				case sig <- struct{}{}:
-				default:
-				}
-			}
-		},
-	}}
-	c, err := w.cfg.Dial(ctx, opts)
+	c, err := w.cfg.Dial(ctx, clientOptions(sig))
 	if err != nil {
 		return fmt.Errorf("連線：%w", err)
 	}
