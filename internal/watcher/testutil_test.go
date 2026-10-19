@@ -172,6 +172,7 @@ type fakeProc struct {
 	skipped   []uint32
 	skip      map[uint32]string
 	failOnce  map[uint32]bool
+	failAll   atomic.Bool // every Process call fails
 }
 
 func (f *fakeProc) Decide(_ pipeline.Mailbox, env pipeline.Envelope) string {
@@ -192,6 +193,9 @@ func (f *fakeProc) Process(ctx context.Context, mb pipeline.Mailbox, folder stri
 	defer f.mu.Unlock()
 	if f.failOnce[env.UID] {
 		delete(f.failOnce, env.UID)
+		return errors.New("boom")
+	}
+	if f.failAll.Load() {
 		return errors.New("boom")
 	}
 	if !strings.Contains(string(raw), "Subject:") {

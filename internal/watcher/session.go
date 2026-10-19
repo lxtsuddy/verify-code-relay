@@ -35,7 +35,8 @@ func (w *Watcher) await(c *imapclient.Client, d time.Duration, f func() error) e
 }
 
 // session runs one connection until it fails or ctx is cancelled. connected is
-// called once the folder is selected and the watermark is initialised.
+// called once the folder is selected and the first catch-up has succeeded, so a
+// message that keeps failing does not reset the reconnect backoff.
 func (w *Watcher) session(ctx context.Context, connected func()) error {
 	sig := make(chan struct{}, 1)
 	opts := &imapclient.Options{UnilateralDataHandler: &imapclient.UnilateralDataHandler{
@@ -88,10 +89,10 @@ func (w *Watcher) session(ctx context.Context, connected func()) error {
 		}
 		w.log.Info("初始化信箱狀態，既有信件不轉發", "uidvalidity", st.UIDValidity, "last_uid", st.LastUID)
 	}
-	connected()
 	if err := w.drain(ctx, c, &st); err != nil {
 		return err
 	}
+	connected()
 
 	caps := c.Caps()
 	if caps == nil {

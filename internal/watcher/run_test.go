@@ -181,3 +181,75 @@ func TestJitterBounds(t *testing.T) {
 		}
 	}
 }
+
+// initWatermark runs one session on the empty mailbox so that mail appended
+// afterwards counts as new instead of being skipped as first-run backlog.
+func initWatermark(t *testing.T, e *env) {
+	t.Helper()
+	stop, _, _ := runSession(t, e)
+	stop()
+}
+
+// Backoff is reset only after a session's first catch-up succeeds: a message
+// that keeps failing must not turn into a reconnect loop at MinBackoff.
+func TestRunBackoffGrowsWhileProcessingFails(t *testing.T) {
+	e := newEnv(t, nil, func(c *Config) {
+		c.MinBackoff = 50 * time.Millisecond
+		c.MaxBackoff = 400 * time.Millisecond
+	})
+	initWatermark(t, e)
+	e.srv.appendMsg(t, "always fails")
+	e.proc.failAll.Store(true)
+	base := e.dialer.count.Load()
+	stop := startRun(t, e)
+	defer stop()
+	time.Sleep(1200 * time.Millisecond)
+	// 50+100+200+400 ms (±20 %) between dials: at most 6 dials fit in 1.2 s,
+	// whereas resetting the backoff at SELECT redials every ~50 ms (20+).
+	if n := e.dialer.count.Load() - base; n < 3 || n > 6 {
+		t.Fatalf("dials in 1.2s = %d, want 3..6 (exponential backoff)", n)
+	}
+	if e.w.Status() == StatusConnected {
+		t.Errorf("status = %s while catch-up keeps failing", e.w.Status())
+	}
+	if len(e.proc.got()) != 0 {
+		t.Errorf("processed = %v", e.proc.got())
+	}
+}
+
+// The recovered notice is sent only once a session has caught up, not merely
+// because SELECT succeeded.
+func TestRunRecoveredOnlyAfterSuccessfulCatchUp(t *testing.T) {
+	e := newEnv(t, nil, func(c *Config) {
+		c.MinBackoff = 50 * time.Millisecond
+		c.MaxBackoff = 200 * time.Millisecond
+		c.AlertAfter = 100 * time.Millisecond
+	})
+	initWatermark(t, e)
+	e.srv.appendMsg(t, "fails until fixed")
+	e.proc.failAll.Store(true)
+	e.dialer.fail.Store(true)
+	stop := startRun(t, e)
+	defer stop()
+	eventually(t, "disconnected alert", func() bool {
+		a, _ := e.alerts.snapshot()
+		return len(a) == 1 && a[0] == "disconnected:mb/INBOX"
+	})
+	base := e.dialer.count.Load()
+	e.dialer.fail.Store(false) // SELECT now succeeds, but the catch-up keeps failing
+	eventually(t, "sessions reach the failing catch-up", func() bool { return e.dialer.count.Load()-base >= 3 })
+	if _, r := e.alerts.snapshot(); len(r) != 0 {
+		t.Fatalf("recovered = %v before any catch-up succeeded", r)
+	}
+	if e.w.Status() == StatusConnected {
+		t.Errorf("status = %s while catch-up keeps failing", e.w.Status())
+	}
+	e.proc.failAll.Store(false)
+	eventually(t, "recovered after catch-up", func() bool {
+		_, r := e.alerts.snapshot()
+		return len(r) == 1 && r[0] == "disconnected:mb/INBOX" && e.w.Status() == StatusConnected
+	})
+	if !equalUIDs(e.proc.got(), 1) {
+		t.Errorf("processed = %v, want [1]", e.proc.got())
+	}
+}
