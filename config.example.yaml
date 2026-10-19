@@ -38,7 +38,7 @@ mailboxes:
     username: me@outlook.com
     auth:
       type: microsoft_oauth
-      client_id: "00000000-0000-0000-0000-000000000000"   # 見 README「Microsoft 信箱」
+      client_id: "00000000-0000-0000-0000-000000000000"   # 見 README「信箱設定 → Microsoft」
       tenant: consumers      # 個人帳號 consumers；公司帳號 organizations 或租戶 ID
     targets: [me, work_chan]
     max_age: 5m

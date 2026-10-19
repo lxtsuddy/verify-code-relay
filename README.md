@@ -41,7 +41,7 @@ Microsoft 已停用 IMAP 的帳號密碼登入，必須使用 OAuth2：
 3. 「API 權限」→ 新增權限 → 委派的權限：`IMAP.AccessAsUser.All`、`offline_access`。
 4. 把「應用程式（用戶端）識別碼」填入 `auth.client_id`；個人帳號 `tenant: consumers`。
 5. 授權：`docker compose run --rm relay login outlook`，依畫面在瀏覽器輸入代碼。
-6. `docker compose restart`。之後 token 會自動更新；若授權失效，`admin` 目標會收到告警，重新執行第 5 步即可。
+6. `docker compose restart`。之後 token 會自動更新；若授權失效，`admin` 目標會收到告警，重新執行第 5 步，再重新啟動服務（第 6 步）即可。
 
 ## 指令
 
