@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -146,28 +147,51 @@ func TestDecideAndRecordSkipped(t *testing.T) {
 	}
 }
 
-// The verification code must never reach forward_log, but the Telegram text must keep it.
+// The verification code must never reach forward_log or the slog output, but the
+// Telegram text must keep the real subject and code.
 func TestProcessRedactsCodeInLogButNotInMessage(t *testing.T) {
 	p, st, _, now := newProc(t)
 	cs := &capturingStore{Store: st}
 	p.Store = cs
+	var buf bytes.Buffer
+	p.Log = slog.New(slog.NewTextHandler(&buf, nil))
+	const subject = "839201 is your code (839201)"
 	raw := eml("Facebook <security@facebookmail.com>", "me@gmail.com",
-		"839201 is your Facebook confirmation code", "Someone tried to log in.")
+		subject, "Your verification code is 839201.")
 	if err := p.Process(ctx, mb, "INBOX", 7, Envelope{UID: 15, InternalDate: now, Size: int64(len(raw))}, raw); err != nil {
 		t.Fatal(err)
 	}
+
+	// Telegram text: real subject kept verbatim, no redaction markers.
 	items, _ := st.DueOutbox(ctx, now, 10)
 	if len(items) == 0 {
 		t.Fatal("no outbox items enqueued")
 	}
-	if !strings.Contains(items[0].Text, "839201") {
-		t.Errorf("outbox text lost the code: %q", items[0].Text)
+	if !strings.Contains(items[0].Text, subject) {
+		t.Errorf("outbox text lost the real subject %q: %q", subject, items[0].Text)
 	}
+	if strings.Contains(items[0].Text, "******") {
+		t.Errorf("outbox text was redacted: %q", items[0].Text)
+	}
+
+	// forward_log: every occurrence of the code replaced.
 	if len(cs.entries) != 1 {
 		t.Fatalf("entries = %d, want 1", len(cs.entries))
 	}
-	subj := cs.entries[0].Subject
-	if strings.Contains(subj, "839201") || !strings.Contains(subj, "******") {
-		t.Errorf("forward_log subject = %q, want code redacted", subj)
+	const wantSubj = "****** is your code (******)"
+	if got := cs.entries[0].Subject; got != wantSubj {
+		t.Errorf("forward_log subject = %q, want %q", got, wantSubj)
+	}
+
+	// slog output: logged, code absent, redaction marker present.
+	logged := buf.String()
+	if logged == "" {
+		t.Fatal("expected slog output")
+	}
+	if strings.Contains(logged, "839201") {
+		t.Errorf("slog output leaked the code: %q", logged)
+	}
+	if !strings.Contains(logged, "******") {
+		t.Errorf("slog output not redacted: %q", logged)
 	}
 }
