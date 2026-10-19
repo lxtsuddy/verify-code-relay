@@ -106,16 +106,17 @@ func (d *Dispatcher) RunOnce(ctx context.Context) error {
 			return nil
 		}
 		key := chatKey{it.Bot, it.ChatID}
-		if last, ok := d.lastSent[key]; ok && now.Sub(last) < perChatGap {
+		if last, ok := d.lastSent[key]; ok && d.o.Now().Sub(last) < perChatGap {
 			continue
 		}
-		d.send(sctx, it, now)
+		// Recorded at send start so the per-chat gap is measured start-to-start.
 		d.lastSent[key] = d.o.Now()
+		d.send(sctx, it)
 	}
 	return nil
 }
 
-func (d *Dispatcher) send(ctx context.Context, it store.OutboxItem, now time.Time) {
+func (d *Dispatcher) send(ctx context.Context, it store.OutboxItem) {
 	token, ok := d.o.Tokens[it.Bot]
 	if !ok {
 		d.o.Log.Error("找不到 Bot，丟棄訊息", "bot", it.Bot, "target", it.Target)
@@ -129,8 +130,12 @@ func (d *Dispatcher) send(ctx context.Context, it store.OutboxItem, now time.Tim
 	sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
 	err := d.o.Sender.Send(sendCtx, req)
 	cancel()
+	// Retry times count from when the failure was observed, not from the start of the run.
+	failedAt := d.o.Now()
 	if err == nil {
-		d.o.Store.DeleteOutbox(ctx, it.ID)
+		if !d.storeOK(it, "刪除已送出的待發訊息失敗", d.o.Store.DeleteOutbox(ctx, it.ID)) {
+			return
+		}
 		d.setResult(ctx, it, "sent")
 		d.o.Log.Info("已轉發", "target", it.Target, "log_id", it.LogID)
 		return
@@ -142,11 +147,11 @@ func (d *Dispatcher) send(ctx context.Context, it store.OutboxItem, now time.Tim
 	attempts := it.Attempts + 1
 	switch se.Kind {
 	case telegram.RateLimited:
-		d.o.Store.RescheduleOutbox(ctx, it.ID, attempts, now.Add(se.RetryAfter), it.PlainFallback)
+		d.storeOK(it, "重新排程失敗", d.o.Store.RescheduleOutbox(ctx, it.ID, attempts, failedAt.Add(se.RetryAfter), it.PlainFallback))
 	case telegram.BadRequest:
 		if !it.PlainFallback {
 			d.o.Log.Warn("Telegram 拒絕 HTML 格式，改用純文字重送", "target", it.Target, "err", se.Description)
-			d.o.Store.RescheduleOutbox(ctx, it.ID, attempts, now, true)
+			d.storeOK(it, "重新排程失敗", d.o.Store.RescheduleOutbox(ctx, it.ID, attempts, failedAt, true))
 			return
 		}
 		d.fail(ctx, it, se.Description, true)
@@ -158,12 +163,24 @@ func (d *Dispatcher) send(ctx context.Context, it store.OutboxItem, now time.Tim
 			delay = backoffMax
 		}
 		d.o.Log.Warn("發送失敗，稍後重試", "target", it.Target, "err", se.Description, "retry_in", delay)
-		d.o.Store.RescheduleOutbox(ctx, it.ID, attempts, now.Add(delay), it.PlainFallback)
+		d.storeOK(it, "重新排程失敗", d.o.Store.RescheduleOutbox(ctx, it.ID, attempts, failedAt.Add(delay), it.PlainFallback))
 	}
 }
 
+// storeOK logs a failed outbox write and reports whether the caller may run its follow-up writes.
+// On failure the row is left as it is and the caller skips the result record, alert and "sent" log.
+func (d *Dispatcher) storeOK(it store.OutboxItem, msg string, err error) bool {
+	if err == nil {
+		return true
+	}
+	d.o.Log.Error(msg, "target", it.Target, "log_id", it.LogID, "err", err)
+	return false
+}
+
 func (d *Dispatcher) fail(ctx context.Context, it store.OutboxItem, reason string, alert bool) {
-	d.o.Store.DeleteOutbox(ctx, it.ID)
+	if !d.storeOK(it, "刪除失敗待發訊息失敗", d.o.Store.DeleteOutbox(ctx, it.ID)) {
+		return
+	}
 	d.setResult(ctx, it, "failed")
 	d.o.Log.Error("訊息發送失敗，已放棄", "target", it.Target, "log_id", it.LogID, "err", reason)
 	if alert && it.LogID != 0 && d.o.Alert != nil {

@@ -2,6 +2,7 @@ package dispatcher
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -14,11 +15,15 @@ import (
 )
 
 type fakeSender struct {
-	errs []error // consumed in order; nil = success
-	reqs []telegram.SendRequest
+	errs   []error // consumed in order; nil = success
+	reqs   []telegram.SendRequest
+	before func() // optional hook run at the start of each Send
 }
 
 func (f *fakeSender) Send(_ context.Context, r telegram.SendRequest) error {
+	if f.before != nil {
+		f.before()
+	}
 	f.reqs = append(f.reqs, r)
 	if len(f.errs) == 0 {
 		return nil
@@ -185,5 +190,122 @@ func TestUnknownBotFailsItem(t *testing.T) {
 	d.RunOnce(ctx)
 	if len(fs.reqs) != 0 || len(pending(t, st, ck.t)) != 0 || len(al.keys) != 0 {
 		t.Fatalf("reqs=%d alerts=%v", len(fs.reqs), al.keys)
+	}
+}
+
+// flakyStore wraps a real store, failing DeleteOutbox / RescheduleOutbox once on request
+// and recording every SetLogResult call.
+type flakyStore struct {
+	*store.Store
+	failDelete     bool
+	failReschedule bool
+	results        []string
+}
+
+func (f *flakyStore) DeleteOutbox(ctx context.Context, id int64) error {
+	if f.failDelete {
+		f.failDelete = false
+		return errors.New("disk I/O error")
+	}
+	return f.Store.DeleteOutbox(ctx, id)
+}
+
+func (f *flakyStore) RescheduleOutbox(ctx context.Context, id int64, attempts int, next time.Time, plainFallback bool) error {
+	if f.failReschedule {
+		f.failReschedule = false
+		return errors.New("disk I/O error")
+	}
+	return f.Store.RescheduleOutbox(ctx, id, attempts, next, plainFallback)
+}
+
+func (f *flakyStore) SetLogResult(ctx context.Context, logID int64, result string) error {
+	f.results = append(f.results, result)
+	return f.Store.SetLogResult(ctx, logID, result)
+}
+
+func TestDeleteErrorAfterSendIsNotMarkedSent(t *testing.T) {
+	d, st, fs, ck, al := setup(t)
+	record(t, st, ck.t, 1)
+	fl := &flakyStore{Store: st, failDelete: true}
+	d.o.Store = fl
+	if err := d.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(fs.reqs) != 1 {
+		t.Fatalf("sent %d, want 1", len(fs.reqs))
+	}
+	if len(fl.results) != 0 || len(al.keys) != 0 {
+		t.Errorf("follow-ups after failed delete: results=%v alerts=%v", fl.results, al.keys)
+	}
+	if len(pending(t, st, ck.t)) != 1 {
+		t.Error("item should remain in outbox after failed delete")
+	}
+}
+
+func TestRescheduleErrorSkipsFollowUps(t *testing.T) {
+	d, st, fs, ck, al := setup(t, &telegram.SendError{Kind: telegram.Transient})
+	record(t, st, ck.t, 1)
+	fl := &flakyStore{Store: st, failReschedule: true}
+	d.o.Store = fl
+	if err := d.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(fs.reqs) != 1 || len(fl.results) != 0 || len(al.keys) != 0 {
+		t.Errorf("reqs=%d results=%v alerts=%v", len(fs.reqs), fl.results, al.keys)
+	}
+}
+
+func TestDeleteErrorOnFailureSkipsResultAndAlert(t *testing.T) {
+	d, st, _, ck, al := setup(t, &telegram.SendError{Kind: telegram.Forbidden})
+	record(t, st, ck.t, 1)
+	fl := &flakyStore{Store: st, failDelete: true}
+	d.o.Store = fl
+	if err := d.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(fl.results) != 0 || len(al.keys) != 0 {
+		t.Errorf("follow-ups after failed delete: results=%v alerts=%v", fl.results, al.keys)
+	}
+}
+
+func TestRetryScheduledFromFailureTime(t *testing.T) {
+	d, st, fs, ck, _ := setup(t, &telegram.SendError{Kind: telegram.RateLimited, RetryAfter: 7 * time.Second})
+	start := ck.t
+	record(t, st, start, 1)
+	// The send itself takes 5 s; retry_after must count from when the failure was observed.
+	fs.before = func() { ck.t = ck.t.Add(5 * time.Second) }
+	if err := d.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	ck.t = start.Add(11 * time.Second)
+	if n := len(dueAt(t, st, ck.t)); n != 0 {
+		t.Fatalf("due at start+11s = %d, want 0", n)
+	}
+	ck.t = start.Add(12 * time.Second)
+	if n := len(dueAt(t, st, ck.t)); n != 1 {
+		t.Fatalf("due at start+12s = %d, want 1", n)
+	}
+}
+
+func dueAt(t *testing.T, st *store.Store, now time.Time) []store.OutboxItem {
+	t.Helper()
+	items, err := st.DueOutbox(ctx, now, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return items
+}
+
+func TestPerChatGapMeasuredFromSendStart(t *testing.T) {
+	d, st, fs, ck, _ := setup(t)
+	record(t, st, ck.t, 1)
+	record(t, st, ck.t, 1)
+	// Each send takes 5 s. The gap is start-to-start, so the second message is due as soon as
+	// the first send has finished, with no extra wait.
+	fs.before = func() { ck.t = ck.t.Add(5 * time.Second) }
+	d.RunOnce(ctx) // starts at T, ends at T+5
+	d.RunOnce(ctx) // clock is T+5: 5 s since the last send started, so it must go out now
+	if len(fs.reqs) != 2 {
+		t.Fatalf("sent %d, want 2", len(fs.reqs))
 	}
 }
