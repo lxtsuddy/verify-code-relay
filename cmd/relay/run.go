@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"verify-code-relay/internal/dispatcher"
 	"verify-code-relay/internal/health"
 	"verify-code-relay/internal/pipeline"
+	"verify-code-relay/internal/store"
 	"verify-code-relay/internal/watcher"
 )
 
@@ -49,22 +51,6 @@ func cmdRun(configPath string, args []string, stdout, stderr io.Writer) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	tokens := map[string]string{}
-	for name, b := range cfg.Bots {
-		tokens[name] = b.Token
-	}
-	var alerter *alert.Alerter
-	disp := dispatcher.New(dispatcher.Options{Store: st, Sender: telegramClient(), Tokens: tokens, Log: log,
-		Alert: func(key, text string) { alerter.Alert(key, text) }})
-	var admin *alert.Target
-	if cfg.Admin != "" {
-		t := cfg.Targets[cfg.Admin]
-		admin = &alert.Target{Name: cfg.Admin, Bot: t.Bot, ChatID: t.ChatID}
-	}
-	alerter = alert.New(st, admin, cfg.Defaults.AlertTTL.Duration, disp.Wake, log)
-
-	proc := &pipeline.Processor{Store: st, Recognizer: a.recognizer, Renderer: a.renderer, Notify: disp.Wake, Log: log}
-
 	// Bind synchronously so a port conflict or bad address fails startup instead of
 	// silently running without /healthz.
 	var httpLn net.Listener
@@ -76,8 +62,69 @@ func cmdRun(configPath string, args []string, stdout, stderr io.Writer) int {
 		defer httpLn.Close()
 	}
 
-	var watchers []*watcher.Watcher
-	var sources []health.Source
+	svc := newService(a, st, log, telegramClient(), tlsDial)
+	wait := svc.start(ctx)
+
+	var httpSrv *http.Server
+	if httpLn != nil {
+		httpSrv = &http.Server{Handler: health.Handler(svc.sources), ReadHeaderTimeout: 5 * time.Second}
+		go func() {
+			if err := httpSrv.Serve(httpLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("HTTP 服務失敗", "err", err)
+			}
+		}()
+	}
+	log.Info("服務已啟動", "watchers", len(svc.watchers), "http", cfg.HTTPListen)
+
+	<-ctx.Done()
+	stop() // restore default signal handling: a second signal kills a hung shutdown
+	log.Info("收到停止訊號，正在關閉")
+	wait()
+	if httpSrv != nil {
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		httpSrv.Shutdown(sctx)
+		cancel()
+	}
+	log.Info("已停止")
+	return 0
+}
+
+// dialFactory returns the IMAP dialer for a mailbox host.
+type dialFactory func(host string, port int) watcher.DialFunc
+
+func tlsDial(host string, port int) watcher.DialFunc {
+	return watcher.TLSDialer(net.JoinHostPort(host, strconv.Itoa(port)))
+}
+
+// service wires the store, recognizer, renderer, pipeline, dispatcher, alerter and
+// one watcher per mailbox folder. Process concerns (flags, signals, HTTP) stay in cmdRun.
+type service struct {
+	st       *store.Store
+	log      *slog.Logger
+	disp     *dispatcher.Dispatcher
+	watchers []*watcher.Watcher
+	sources  []health.Source
+}
+
+func newService(a *app, st *store.Store, log *slog.Logger, sender dispatcher.Sender, dial dialFactory) *service {
+	cfg := a.cfg
+	tokens := map[string]string{}
+	for name, b := range cfg.Bots {
+		tokens[name] = b.Token
+	}
+	var alerter *alert.Alerter
+	disp := dispatcher.New(dispatcher.Options{Store: st, Sender: sender, Tokens: tokens, Log: log,
+		Alert: func(key, text string) { alerter.Alert(key, text) }})
+	var admin *alert.Target
+	if cfg.Admin != "" {
+		t := cfg.Targets[cfg.Admin]
+		admin = &alert.Target{Name: cfg.Admin, Bot: t.Bot, ChatID: t.ChatID}
+	}
+	alerter = alert.New(st, admin, cfg.Defaults.AlertTTL.Duration, disp.Wake, log)
+
+	proc := &pipeline.Processor{Store: st, Recognizer: a.recognizer, Renderer: a.renderer, Notify: disp.Wake, Log: log}
+
+	s := &service{st: st, log: log, disp: disp}
 	for _, name := range cfg.SortedMailboxNames() {
 		m := cfg.Mailboxes[name]
 		var targets []pipeline.Target
@@ -94,48 +141,33 @@ func cmdRun(configPath string, args []string, stdout, stderr io.Writer) int {
 		for _, folder := range m.Folders {
 			w := watcher.New(watcher.Config{
 				Mailbox: mb, Folder: folder,
-				Dial:      watcher.TLSDialer(net.JoinHostPort(m.Host, strconv.Itoa(m.Port))),
+				Dial:      dial(m.Host, m.Port),
 				Auth:      authn,
 				Processor: proc, State: st, Alert: alerter, Log: log,
 				PollInterval: m.PollInterval.Duration, AlertAfter: cfg.Defaults.AlertAfter.Duration,
 			})
-			watchers = append(watchers, w)
-			sources = append(sources, healthAdapter{w})
+			s.watchers = append(s.watchers, w)
+			s.sources = append(s.sources, healthAdapter{w})
 		}
 	}
+	return s
+}
 
+// start runs the watchers, the dispatcher and the log pruner until ctx is
+// cancelled; wait blocks until the watchers and the dispatcher have stopped.
+func (s *service) start(ctx context.Context) (wait func()) {
 	var wg sync.WaitGroup
-	for _, w := range watchers {
+	for _, w := range s.watchers {
 		wg.Add(1)
 		go func() { defer wg.Done(); w.Run(ctx) }()
 	}
 	dispDone := make(chan struct{})
-	go func() { disp.Run(ctx); close(dispDone) }()
-	go pruneLoop(ctx, st, log)
-
-	var httpSrv *http.Server
-	if httpLn != nil {
-		httpSrv = &http.Server{Handler: health.Handler(sources), ReadHeaderTimeout: 5 * time.Second}
-		go func() {
-			if err := httpSrv.Serve(httpLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Error("HTTP 服務失敗", "err", err)
-			}
-		}()
+	go func() { s.disp.Run(ctx); close(dispDone) }()
+	go pruneLoop(ctx, s.st, s.log)
+	return func() {
+		wg.Wait()
+		<-dispDone
 	}
-	log.Info("服務已啟動", "watchers", len(watchers), "http", cfg.HTTPListen)
-
-	<-ctx.Done()
-	stop() // restore default signal handling: a second signal kills a hung shutdown
-	log.Info("收到停止訊號，正在關閉")
-	wg.Wait()
-	<-dispDone
-	if httpSrv != nil {
-		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		httpSrv.Shutdown(sctx)
-		cancel()
-	}
-	log.Info("已停止")
-	return 0
 }
 
 type pruner interface {
