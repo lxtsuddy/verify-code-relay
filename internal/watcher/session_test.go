@@ -35,6 +35,15 @@ func runSession(t *testing.T, e *env) (cancel func(), connected chan struct{}, d
 	}, connected, done
 }
 
+// waitIdle blocks until the session has sent IDLE. imapmemserver only announces
+// mail that arrives once its IDLE loop is registered; a message appended while
+// the session is still catching up (before IDLE) is not announced until the next
+// event. Real servers do not have that gap, so tests append only once idling.
+func waitIdle(t *testing.T, e *env) {
+	t.Helper()
+	eventually(t, "session idling", func() bool { return e.dialer.last().idles.Load() >= 1 })
+}
+
 func TestFirstRunSkipsBacklogThenIdleDelivers(t *testing.T) {
 	e := newEnv(t, nil, nil)
 	e.srv.appendMsg(t, "old") // uid 1: backlog, must not be processed
@@ -44,6 +53,7 @@ func TestFirstRunSkipsBacklogThenIdleDelivers(t *testing.T) {
 	if !ok || st.LastUID != 1 || st.UIDValidity == 0 {
 		t.Fatalf("watermark = %+v ok=%v", st, ok)
 	}
+	waitIdle(t, e)
 	e.srv.appendMsg(t, "new") // uid 2 arrives during IDLE
 	eventually(t, "uid 2 processed", func() bool { return equalUIDs(e.proc.got(), 2) })
 	if n := e.srv.seenFlags(t); n != 0 {
@@ -78,6 +88,7 @@ func TestDecideSkipsWithoutFetchingBody(t *testing.T) {
 	e := newEnv(t, nil, nil)
 	stop, _, _ := runSession(t, e)
 	defer stop()
+	waitIdle(t, e)
 	e.proc.mu.Lock()
 	e.proc.skip[1] = "skipped_age"
 	e.proc.mu.Unlock()
@@ -95,6 +106,7 @@ func TestBurstWhileBusyIsDrained(t *testing.T) {
 	e := newEnv(t, nil, nil)
 	stop, _, _ := runSession(t, e)
 	defer stop()
+	waitIdle(t, e)
 	for i := 0; i < 5; i++ {
 		e.srv.appendMsg(t, "burst") // some land while the watcher is fetching, not idling
 	}
@@ -168,6 +180,7 @@ func TestProcessErrorEndsSession(t *testing.T) {
 	e := newEnv(t, nil, nil)
 	e.proc.failOnce[1] = true
 	_, _, done := runSession(t, e)
+	waitIdle(t, e)
 	e.srv.appendMsg(t, "will fail")
 	select {
 	case err := <-done:
