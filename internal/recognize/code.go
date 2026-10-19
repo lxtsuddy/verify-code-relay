@@ -24,7 +24,7 @@ var (
 	alnumRe    = regexp.MustCompile(`\b[A-Z0-9]{4,8}\b`)
 	urlLikeRe  = regexp.MustCompile(`(?i)(https?://|www\.)\S+`)
 	emailRe    = regexp.MustCompile(`[\w.+-]+@[\w-]+(\.[\w-]+)+`)
-	monthRe    = regexp.MustCompile(`(?i)\b(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\b`)
+	monthRe    = regexp.MustCompile(`(?i)\b(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|june?|july?|aug(ust)?|sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?)\b|\bmay\s+\d|\d\s+may\b`)
 	dateNumRe  = regexp.MustCompile(`\d{4}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}`)
 	currencies = []string{"$", "¥", "￥", "€", "£", "twd", "usd", "rmb", "cny"}
 	orderWords = []string{"訂單", "订单", "order", "invoice", "#"}

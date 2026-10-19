@@ -24,7 +24,9 @@ func TestCodeFinder(t *testing.T) {
 		{"year excluded", "Verification code", "Date: Oct 19, 2026\nThat's all.", ""},
 		{"url excluded", "Verification code", "Visit https://ex.com/a/123456 now", ""},
 		{"phone excluded", "OTP", "Call +1 415 555 0100 for help", ""},
-		{"time excluded", "Login code", "Valid until 12:34 only", ""},
+		{"time excluded", "Login code", "Sent at 9:1234 today", ""},
+		{"month-like words", "Verification code", "Your code is 2048. Please decide to separate.", "2048"},
+		{"may as month", "Verification code", "Sent 19 May 2026", ""},
 		{"too far", "Your verification code", longPad(300) + "123456", ""},
 		{"word boundary", "Hotpot recipes", "Serves 4 people, 1234 calories", ""},
 	}
