@@ -1,0 +1,146 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"os/signal"
+	"strconv"
+	"sync"
+	"syscall"
+	"time"
+
+	"verify-code-relay/internal/alert"
+	"verify-code-relay/internal/auth"
+	"verify-code-relay/internal/dispatcher"
+	"verify-code-relay/internal/health"
+	"verify-code-relay/internal/pipeline"
+	"verify-code-relay/internal/watcher"
+)
+
+type healthAdapter struct{ w *watcher.Watcher }
+
+func (h healthAdapter) Key() string          { return h.w.Key() }
+func (h healthAdapter) StatusString() string { return string(h.w.Status()) }
+
+func cmdRun(configPath string, args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("run", &configPath, stderr)
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	restrictUmask()
+	a, err := loadApp(configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "設定檔有誤（%s）：\n%v\n", configPath, err)
+		return 1
+	}
+	cfg := a.cfg
+	log := newLogger(cfg.LogLevel, stdout)
+	st, err := openStore(cfg)
+	if err != nil {
+		return fail(stderr, err)
+	}
+	defer st.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	tokens := map[string]string{}
+	for name, b := range cfg.Bots {
+		tokens[name] = b.Token
+	}
+	var alerter *alert.Alerter
+	disp := dispatcher.New(dispatcher.Options{Store: st, Sender: telegramClient(), Tokens: tokens, Log: log,
+		Alert: func(key, text string) { alerter.Alert(key, text) }})
+	var admin *alert.Target
+	if cfg.Admin != "" {
+		t := cfg.Targets[cfg.Admin]
+		admin = &alert.Target{Name: cfg.Admin, Bot: t.Bot, ChatID: t.ChatID}
+	}
+	alerter = alert.New(st, admin, cfg.Defaults.AlertTTL.Duration, disp.Wake, log)
+
+	proc := &pipeline.Processor{Store: st, Recognizer: a.recognizer, Renderer: a.renderer, Notify: disp.Wake, Log: log}
+
+	var watchers []*watcher.Watcher
+	var sources []health.Source
+	for _, name := range cfg.SortedMailboxNames() {
+		m := cfg.Mailboxes[name]
+		var targets []pipeline.Target
+		for _, tn := range m.Targets {
+			t := cfg.Targets[tn]
+			targets = append(targets, pipeline.Target{Name: tn, Bot: t.Bot, ChatID: t.ChatID})
+		}
+		var authn auth.Authenticator = auth.Password{Username: m.Username, Password: m.Auth.Password}
+		if m.Auth.Type == "microsoft_oauth" {
+			authn = &auth.Microsoft{Mailbox: name, Username: m.Username, ClientID: m.Auth.ClientID, Tenant: m.Auth.Tenant, Store: st}
+		}
+		mb := pipeline.Mailbox{Name: name, DisplayName: m.DisplayName, Username: m.Username, Targets: targets,
+			MaxAge: m.MaxAge.Duration, TTL: m.TTL.Duration}
+		for _, folder := range m.Folders {
+			w := watcher.New(watcher.Config{
+				Mailbox: mb, Folder: folder,
+				Dial:      watcher.TLSDialer(net.JoinHostPort(m.Host, strconv.Itoa(m.Port))),
+				Auth:      authn,
+				Processor: proc, State: st, Alert: alerter, Log: log,
+				PollInterval: m.PollInterval.Duration, AlertAfter: cfg.Defaults.AlertAfter.Duration,
+			})
+			watchers = append(watchers, w)
+			sources = append(sources, healthAdapter{w})
+		}
+	}
+
+	var wg sync.WaitGroup
+	for _, w := range watchers {
+		wg.Add(1)
+		go func() { defer wg.Done(); w.Run(ctx) }()
+	}
+	dispDone := make(chan struct{})
+	go func() { disp.Run(ctx); close(dispDone) }()
+	go pruneLoop(ctx, st, log)
+
+	var httpSrv *http.Server
+	if cfg.HTTPListen != "" {
+		httpSrv = &http.Server{Addr: cfg.HTTPListen, Handler: health.Handler(sources), ReadHeaderTimeout: 5 * time.Second}
+		go func() {
+			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("HTTP 服務失敗", "err", err)
+			}
+		}()
+	}
+	log.Info("服務已啟動", "watchers", len(watchers), "http", cfg.HTTPListen)
+
+	<-ctx.Done()
+	log.Info("收到停止訊號，正在關閉")
+	wg.Wait()
+	<-dispDone
+	if httpSrv != nil {
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		httpSrv.Shutdown(sctx)
+		cancel()
+	}
+	log.Info("已停止")
+	return 0
+}
+
+type pruner interface {
+	PruneLog(ctx context.Context, before time.Time) (int64, error)
+}
+
+func pruneLoop(ctx context.Context, st pruner, log interface{ Info(string, ...any) }) {
+	t := time.NewTicker(24 * time.Hour)
+	defer t.Stop()
+	for {
+		if n, err := st.PruneLog(ctx, time.Now().Add(-30*24*time.Hour)); err == nil && n > 0 {
+			log.Info("已清理舊轉發紀錄", "rows", n)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
