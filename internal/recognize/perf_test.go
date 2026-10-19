@@ -26,12 +26,16 @@ func TestRecognizeLargeInputIsFast(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	limit := 500 * time.Millisecond
+	if raceEnabled {
+		limit *= 4
+	}
 	for name, text := range map[string]string{"one line": oneLine.String(), "otp lines": otpLines.String()} {
 		t.Run(name, func(t *testing.T) {
 			start := time.Now()
 			chain.Recognize(&mailparse.Message{Subject: "Security notice", Text: text})
-			if d := time.Since(start); d > 500*time.Millisecond {
-				t.Fatalf("Recognize took %s on %d bytes, want < 500ms", d, len(text))
+			if d := time.Since(start); d > limit {
+				t.Fatalf("Recognize took %s on %d bytes, want < %s", d, len(text), limit)
 			}
 		})
 	}
