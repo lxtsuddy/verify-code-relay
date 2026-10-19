@@ -195,3 +195,31 @@ func TestProcessRedactsCodeInLogButNotInMessage(t *testing.T) {
 		t.Errorf("slog output not redacted: %q", logged)
 	}
 }
+
+// recognize strips separators from split codes, so the subject's "123 456" and
+// "123-456" forms must be masked too.
+func TestProcessRedactsSplitCodeInSubject(t *testing.T) {
+	p, st, _, now := newProc(t)
+	cs := &capturingStore{Store: st}
+	p.Store = cs
+	var buf bytes.Buffer
+	p.Log = slog.New(slog.NewTextHandler(&buf, nil))
+	const subject = "Your code 123 456 (123-456)"
+	raw := eml("Example <no-reply@example.com>", "me@gmail.com", subject, "Your security code is 123 456.")
+	if err := p.Process(ctx, mb, "INBOX", 7, Envelope{UID: 16, InternalDate: now, Size: int64(len(raw))}, raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(cs.entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(cs.entries))
+	}
+	if got, want := cs.entries[0].Subject, "Your code ****** (******)"; got != want {
+		t.Errorf("forward_log subject = %q, want %q", got, want)
+	}
+	if logged := buf.String(); strings.Contains(logged, "123 456") || strings.Contains(logged, "123-456") {
+		t.Errorf("slog output leaked the code: %q", logged)
+	}
+	items, _ := st.DueOutbox(ctx, now, 10)
+	if len(items) == 0 || !strings.Contains(items[0].Text, subject) || !strings.Contains(items[0].Text, "<code>123456</code>") {
+		t.Errorf("outbox text must keep the real subject and code: %+v", items)
+	}
+}

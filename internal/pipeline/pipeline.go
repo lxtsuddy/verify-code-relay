@@ -4,6 +4,7 @@ package pipeline
 import (
 	"context"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -84,12 +85,33 @@ func (p *Processor) RecordSkipped(ctx context.Context, mb Mailbox, folder string
 	return err
 }
 
-// redact removes a verification code from text that is stored or logged.
+// redact removes a verification code from text that is stored or logged. An
+// all-digit code is also masked in its split forms ("123 456", "123-456"),
+// because recognize strips those separators from the code it returns.
 func redact(s, code string) string {
 	if code == "" {
 		return s
 	}
-	return strings.ReplaceAll(s, code, "******")
+	if !isAllDigits(code) {
+		return strings.ReplaceAll(s, code, "******")
+	}
+	var b strings.Builder
+	for i, d := range code {
+		if i > 0 {
+			b.WriteString("[ -]?")
+		}
+		b.WriteRune(d)
+	}
+	return regexp.MustCompile(b.String()).ReplaceAllLiteralString(s, "******")
+}
+
+func isAllDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 func (p *Processor) Process(ctx context.Context, mb Mailbox, folder string, uidValidity uint32, env Envelope, raw []byte) error {
