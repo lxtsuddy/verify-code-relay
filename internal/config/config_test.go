@@ -114,3 +114,30 @@ func TestLoadFile(t *testing.T) {
 		t.Fatalf("Load = %+v, %v", c, err)
 	}
 }
+
+func TestParseBadDurationLineNumber(t *testing.T) {
+	// The bad value is on line 5; a re-encode of the tree would report a different line.
+	_, err := Parse([]byte("\n\n# comment\ndefaults:\n  ttl: banana\n"), lookupFrom(nil))
+	if err == nil || !strings.Contains(err.Error(), "第 5 行") {
+		t.Fatalf("want error mentioning 第 5 行, got %v", err)
+	}
+}
+
+func TestParseUnquotedSecret(t *testing.T) {
+	const y = `
+mailboxes:
+  m:
+    host: h
+    username: u
+    auth:
+      type: password
+      password: ${PW}
+`
+	c, err := Parse([]byte(y), lookupFrom(map[string]string{"PW": `p"w#: x`}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Mailboxes["m"].Auth.Password; got != `p"w#: x` {
+		t.Fatalf("password = %q, want %q", got, `p"w#: x`)
+	}
+}

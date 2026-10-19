@@ -26,7 +26,7 @@ func expandString(s string, lookup func(string) (string, bool)) (string, error) 
 		case '{':
 			end := strings.IndexByte(s[i+2:], '}')
 			if end < 0 {
-				return "", fmt.Errorf("未結束的 ${：%q", s)
+				return "", fmt.Errorf("未結束的 ${")
 			}
 			name := s[i+2 : i+2+end]
 			v, ok := lookup(name)

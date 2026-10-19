@@ -5,11 +5,14 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+var yamlLineRe = regexp.MustCompile(`line \d+: `)
 
 type Duration struct{ time.Duration }
 
@@ -115,15 +118,22 @@ func Parse(data []byte, lookup func(string) (string, bool)) (*Config, error) {
 	}
 	var c Config
 	if len(root.Content) > 0 {
+		// Decode straight from the node tree so nodes keep their original line numbers.
+		if err := root.Decode(&c); err != nil {
+			return nil, fmt.Errorf("解析設定：%w", err)
+		}
+		// Re-encoding is only used to detect unknown fields (yaml.Node.Decode lacks KnownFields).
+		// Its line numbers refer to the re-encoded text, so they are stripped from the message.
 		var buf bytes.Buffer
 		enc := yaml.NewEncoder(&buf)
 		if err := enc.Encode(&root); err != nil {
 			return nil, err
 		}
+		var check Config
 		dec := yaml.NewDecoder(&buf)
 		dec.KnownFields(true)
-		if err := dec.Decode(&c); err != nil {
-			return nil, fmt.Errorf("解析設定：%w", err)
+		if err := dec.Decode(&check); err != nil {
+			return nil, fmt.Errorf("解析設定：%s", yamlLineRe.ReplaceAllString(err.Error(), ""))
 		}
 	}
 	c.applyDefaults()
