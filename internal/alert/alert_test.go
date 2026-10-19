@@ -2,11 +2,13 @@ package alert
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"verify-code-relay/internal/store"
 )
@@ -60,5 +62,61 @@ func TestNoAdminLogsOnly(t *testing.T) {
 	a.Recovered("k", "y")
 	if len(q.items) != 0 {
 		t.Fatal("must not enqueue without admin")
+	}
+}
+
+// flakyQ fails the first `fail` Enqueue calls, then succeeds.
+type flakyQ struct {
+	fail  int
+	items []store.OutboxItem
+}
+
+func (f *flakyQ) Enqueue(_ context.Context, it store.OutboxItem) (int64, error) {
+	if f.fail > 0 {
+		f.fail--
+		return 0, errors.New("boom")
+	}
+	f.items = append(f.items, it)
+	return int64(len(f.items)), nil
+}
+
+func TestFailedEnqueueDoesNotSuppressKey(t *testing.T) {
+	q := &flakyQ{fail: 1}
+	woke := 0
+	a := New(q, &Target{Name: "me", Bot: "main", ChatID: 42}, time.Hour, func() { woke++ }, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	a.Alert("k", "first")
+	if len(q.items) != 0 || woke != 0 {
+		t.Fatalf("failed enqueue must not produce an item or wake: items=%d woke=%d", len(q.items), woke)
+	}
+	a.Alert("k", "second")
+	if len(q.items) != 1 || woke != 1 {
+		t.Fatalf("key must be retried after failed enqueue: items=%d woke=%d", len(q.items), woke)
+	}
+	if !strings.Contains(q.items[0].Text, "second") {
+		t.Errorf("retried item text = %q", q.items[0].Text)
+	}
+}
+
+func TestAlertTextCapped(t *testing.T) {
+	q := &fakeQ{}
+	a := New(q, &Target{Name: "me", Bot: "main", ChatID: 42}, time.Hour, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	long := strings.Repeat("<", 5000)
+	a.Alert("k", long)
+	a.Recovered("k2", long)
+	if len(q.items) != 2 {
+		t.Fatalf("items = %d", len(q.items))
+	}
+	for _, it := range q.items {
+		if n := utf8.RuneCountInString(it.Text); n > 4096 {
+			t.Errorf("text is %d runes, want <= 4096", n)
+		}
+		if !strings.HasSuffix(it.Text, "…") {
+			t.Errorf("truncated text must end with …: %q", it.Text[len(it.Text)-10:])
+		}
+		if !strings.Contains(it.Text, "&lt;") {
+			t.Errorf("text must be escaped")
+		}
 	}
 }

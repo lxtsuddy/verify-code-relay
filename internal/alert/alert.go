@@ -5,8 +5,10 @@ import (
 	"context"
 	"html"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"verify-code-relay/internal/store"
 )
@@ -21,7 +23,10 @@ type Target struct {
 	ChatID int64
 }
 
-const dedupWindow = time.Hour
+const (
+	dedupWindow = time.Hour
+	maxText     = 4096 // Telegram sendMessage limit, in runes
+)
 
 type Alerter struct {
 	q     Enqueuer
@@ -52,7 +57,14 @@ func (a *Alerter) Alert(key, text string) {
 	a.last[key] = now
 	a.mu.Unlock()
 	a.log.Warn("告警", "key", key, "text", text)
-	a.enqueue("⚠️ " + html.EscapeString(text))
+	if !a.enqueue(fit("⚠️ ", text)) {
+		// Release the key so the next Alert retries instead of being suppressed for an hour.
+		a.mu.Lock()
+		if t, ok := a.last[key]; ok && t.Equal(now) {
+			delete(a.last, key)
+		}
+		a.mu.Unlock()
+	}
 }
 
 func (a *Alerter) Recovered(key, text string) {
@@ -60,12 +72,13 @@ func (a *Alerter) Recovered(key, text string) {
 	delete(a.last, key)
 	a.mu.Unlock()
 	a.log.Info("已恢復", "key", key, "text", text)
-	a.enqueue("✅ " + html.EscapeString(text))
+	a.enqueue(fit("✅ ", text))
 }
 
-func (a *Alerter) enqueue(text string) {
+// enqueue reports whether the alert was stored (or there is no admin target to store it for).
+func (a *Alerter) enqueue(text string) bool {
 	if a.admin == nil {
-		return
+		return true
 	}
 	now := a.now()
 	_, err := a.q.Enqueue(context.Background(), store.OutboxItem{
@@ -74,7 +87,31 @@ func (a *Alerter) enqueue(text string) {
 	})
 	if err != nil {
 		a.log.Error("寫入告警失敗", "err", err)
-		return
+		return false
 	}
 	a.wake()
+	return true
+}
+
+// fit returns prefix plus the HTML-escaped text, truncated so the whole result is at most
+// maxText runes. Truncation is done on the escaped output, whole runes at a time, so an
+// entity such as &lt; is never split and escaping cannot push the result over the limit.
+func fit(prefix, text string) string {
+	budget := maxText - utf8.RuneCountInString(prefix)
+	esc := html.EscapeString(text)
+	if utf8.RuneCountInString(esc) <= budget {
+		return prefix + esc
+	}
+	var b strings.Builder
+	n := 0
+	for _, r := range text {
+		e := html.EscapeString(string(r))
+		en := utf8.RuneCountInString(e)
+		if n+en > budget-1 { // reserve one rune for the ellipsis
+			break
+		}
+		b.WriteString(e)
+		n += en
+	}
+	return prefix + b.String() + "…"
 }
