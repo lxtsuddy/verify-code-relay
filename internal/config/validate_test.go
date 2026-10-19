@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func validConfig() *Config {
@@ -56,6 +57,16 @@ func TestValidateErrors(t *testing.T) {
 		{"bad subject regex", func(c *Config) { c.Rules[0].Subject = "[" }, "rules[0].subject: "},
 		{"empty folder", func(c *Config) { c.Mailboxes["gmail"].Folders = []string{""} }, "mailboxes.gmail.folders[0]: 不可為空"},
 		{"bad log level", func(c *Config) { c.LogLevel = "loud" }, `log_level: 必須是 debug、info、warn 或 error`},
+		{"dup folder", func(c *Config) { c.Mailboxes["gmail"].Folders = []string{"INBOX", "INBOX"} }, `mailboxes.gmail.folders[1]: 資料夾 "INBOX" 重複`},
+		{"dup target", func(c *Config) { c.Mailboxes["gmail"].Targets = []string{"me", "me"} }, `mailboxes.gmail.targets[1]: 目標 "me" 重複`},
+		{"negative default max_age", func(c *Config) { c.Defaults.MaxAge.Duration = -time.Minute }, "defaults.max_age: 必須大於 0"},
+		{"negative default ttl", func(c *Config) { c.Defaults.TTL.Duration = -time.Second }, "defaults.ttl: 必須大於 0"},
+		{"negative default alert_ttl", func(c *Config) { c.Defaults.AlertTTL.Duration = -time.Hour }, "defaults.alert_ttl: 必須大於 0"},
+		{"negative default poll_interval", func(c *Config) { c.Defaults.PollInterval.Duration = -time.Second }, "defaults.poll_interval: 必須大於 0"},
+		{"negative default alert_after", func(c *Config) { c.Defaults.AlertAfter.Duration = -time.Minute }, "defaults.alert_after: 必須大於 0"},
+		{"negative mailbox max_age", func(c *Config) { c.Mailboxes["gmail"].MaxAge.Duration = -time.Minute }, "mailboxes.gmail.max_age: 必須大於 0"},
+		{"negative mailbox ttl", func(c *Config) { c.Mailboxes["gmail"].TTL.Duration = -time.Minute }, "mailboxes.gmail.ttl: 必須大於 0"},
+		{"negative mailbox poll_interval", func(c *Config) { c.Mailboxes["gmail"].PollInterval.Duration = -time.Second }, "mailboxes.gmail.poll_interval: 必須大於 0"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -74,5 +85,30 @@ func TestValidateNoMailboxes(t *testing.T) {
 	c.Mailboxes = nil
 	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "mailboxes: 至少需要一個信箱") {
 		t.Fatalf("got %v", err)
+	}
+}
+
+// A negative duration in the YAML survives applyDefaults (only zero is replaced).
+func TestValidateNegativeDurationFromYAML(t *testing.T) {
+	c, err := Parse([]byte(`
+defaults: { ttl: -5m }
+bots: { main: { token: "t" } }
+targets: { me: { bot: main, chat_id: 1 } }
+mailboxes:
+  gmail:
+    host: imap.gmail.com
+    username: me@gmail.com
+    auth: { type: password, password: pw }
+    targets: [me]
+    poll_interval: -1s
+`), lookupFrom(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = c.Validate()
+	for _, want := range []string{"defaults.ttl: 必須大於 0", "mailboxes.gmail.poll_interval: 必須大於 0"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("want %q in error, got %v", want, err)
+		}
 	}
 }

@@ -55,6 +55,17 @@ func (c *Config) Validate() error {
 			p.add("targets."+name+".chat_id", "不可為 0")
 		}
 	}
+	positive := func(path string, d Duration) {
+		// applyDefaults replaces zero, so a non-positive value here was negative in the YAML.
+		if d.Duration <= 0 {
+			p.add(path, "必須大於 0")
+		}
+	}
+	positive("defaults.max_age", c.Defaults.MaxAge)
+	positive("defaults.ttl", c.Defaults.TTL)
+	positive("defaults.alert_ttl", c.Defaults.AlertTTL)
+	positive("defaults.poll_interval", c.Defaults.PollInterval)
+	positive("defaults.alert_after", c.Defaults.AlertAfter)
 	if c.Admin != "" {
 		if _, ok := c.Targets[c.Admin]; !ok {
 			p.add("admin", "找不到目標 %q", c.Admin)
@@ -85,19 +96,34 @@ func (c *Config) Validate() error {
 		default:
 			p.add(base+".auth.type", "未知的認證類型 %q（可用：password、microsoft_oauth）", m.Auth.Type)
 		}
+		seenFolder := map[string]bool{}
 		for i, f := range m.Folders {
-			if f == "" {
-				p.add(fmt.Sprintf("%s.folders[%d]", base, i), "不可為空")
+			path := fmt.Sprintf("%s.folders[%d]", base, i)
+			switch {
+			case f == "":
+				p.add(path, "不可為空")
+			case seenFolder[f]:
+				p.add(path, "資料夾 %q 重複", f)
 			}
+			seenFolder[f] = true
 		}
 		if len(m.Targets) == 0 {
 			p.add(base+".targets", "至少需要一個目標")
 		}
+		seenTarget := map[string]bool{}
 		for i, t := range m.Targets {
+			path := fmt.Sprintf("%s.targets[%d]", base, i)
 			if _, ok := c.Targets[t]; !ok {
-				p.add(fmt.Sprintf("%s.targets[%d]", base, i), "找不到目標 %q", t)
+				p.add(path, "找不到目標 %q", t)
 			}
+			if seenTarget[t] {
+				p.add(path, "目標 %q 重複", t)
+			}
+			seenTarget[t] = true
 		}
+		positive(base+".max_age", m.MaxAge)
+		positive(base+".ttl", m.TTL)
+		positive(base+".poll_interval", m.PollInterval)
 	}
 	seen := map[string]bool{}
 	for i, r := range c.Rules {
