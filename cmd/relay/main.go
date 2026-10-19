@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 const usage = `用法：relay [--config 路徑] <指令> [參數]
@@ -28,9 +29,19 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 		configPath = "config.yaml"
 	}
 	// global --config before the subcommand
-	for len(args) >= 2 && (args[0] == "--config" || args[0] == "-config") {
-		configPath, args = args[1], args[2:]
+	for len(args) > 0 {
+		switch {
+		case len(args) >= 2 && (args[0] == "--config" || args[0] == "-config"):
+			configPath, args = args[1], args[2:]
+		case strings.HasPrefix(args[0], "--config="):
+			configPath, args = strings.TrimPrefix(args[0], "--config="), args[1:]
+		case strings.HasPrefix(args[0], "-config="):
+			configPath, args = strings.TrimPrefix(args[0], "-config="), args[1:]
+		default:
+			goto parsed
+		}
 	}
+parsed:
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2

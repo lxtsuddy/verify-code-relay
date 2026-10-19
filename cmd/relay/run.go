@@ -65,6 +65,17 @@ func cmdRun(configPath string, args []string, stdout, stderr io.Writer) int {
 
 	proc := &pipeline.Processor{Store: st, Recognizer: a.recognizer, Renderer: a.renderer, Notify: disp.Wake, Log: log}
 
+	// Bind synchronously so a port conflict or bad address fails startup instead of
+	// silently running without /healthz.
+	var httpLn net.Listener
+	if cfg.HTTPListen != "" {
+		httpLn, err = net.Listen("tcp", cfg.HTTPListen)
+		if err != nil {
+			return fail(stderr, fmt.Errorf("http_listen %q：%w", cfg.HTTPListen, err))
+		}
+		defer httpLn.Close()
+	}
+
 	var watchers []*watcher.Watcher
 	var sources []health.Source
 	for _, name := range cfg.SortedMailboxNames() {
@@ -103,10 +114,10 @@ func cmdRun(configPath string, args []string, stdout, stderr io.Writer) int {
 	go pruneLoop(ctx, st, log)
 
 	var httpSrv *http.Server
-	if cfg.HTTPListen != "" {
-		httpSrv = &http.Server{Addr: cfg.HTTPListen, Handler: health.Handler(sources), ReadHeaderTimeout: 5 * time.Second}
+	if httpLn != nil {
+		httpSrv = &http.Server{Handler: health.Handler(sources), ReadHeaderTimeout: 5 * time.Second}
 		go func() {
-			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			if err := httpSrv.Serve(httpLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
 				log.Error("HTTP 服務失敗", "err", err)
 			}
 		}()
@@ -114,6 +125,7 @@ func cmdRun(configPath string, args []string, stdout, stderr io.Writer) int {
 	log.Info("服務已啟動", "watchers", len(watchers), "http", cfg.HTTPListen)
 
 	<-ctx.Done()
+	stop() // restore default signal handling: a second signal kills a hung shutdown
 	log.Info("收到停止訊號，正在關閉")
 	wg.Wait()
 	<-dispDone
@@ -130,11 +142,20 @@ type pruner interface {
 	PruneLog(ctx context.Context, before time.Time) (int64, error)
 }
 
-func pruneLoop(ctx context.Context, st pruner, log interface{ Info(string, ...any) }) {
+func pruneLoop(ctx context.Context, st pruner, log interface {
+	Info(string, ...any)
+	Warn(string, ...any)
+}) {
 	t := time.NewTicker(24 * time.Hour)
 	defer t.Stop()
 	for {
-		if n, err := st.PruneLog(ctx, time.Now().Add(-30*24*time.Hour)); err == nil && n > 0 {
+		n, err := st.PruneLog(ctx, time.Now().Add(-30*24*time.Hour))
+		switch {
+		case err != nil:
+			if ctx.Err() == nil {
+				log.Warn("清理轉發紀錄失敗", "err", err)
+			}
+		case n > 0:
 			log.Info("已清理舊轉發紀錄", "rows", n)
 		}
 		select {

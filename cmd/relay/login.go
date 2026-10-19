@@ -14,6 +14,7 @@ import (
 )
 
 func cmdLogin(configPath string, args []string, stdout, stderr io.Writer) int {
+	restrictUmask() // the db holds OAuth tokens
 	fs := newFlags("login", &configPath, stderr)
 	if err := fs.Parse(args); err != nil || fs.NArg() != 1 {
 		fmt.Fprintln(stderr, "用法：relay login <信箱>")

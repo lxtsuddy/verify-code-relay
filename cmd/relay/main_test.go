@@ -129,3 +129,13 @@ func TestHealthcheck(t *testing.T) {
 		t.Fatalf("code=%d", code)
 	}
 }
+
+func TestGlobalConfigEqualsForm(t *testing.T) {
+	p := writeConfig(t, "")
+	for _, flagName := range []string{"--config=", "-config="} {
+		code, stdout, stderr := run(flagName+p, "config", "validate")
+		if code != 0 || !strings.Contains(stdout, "設定檔正確") {
+			t.Fatalf("%s: code=%d out=%q err=%q", flagName, code, stdout, stderr)
+		}
+	}
+}

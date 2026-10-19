@@ -59,3 +59,35 @@ func TestRunSmoke(t *testing.T) {
 		t.Fatal("did not shut down")
 	}
 }
+
+// TestRunFailsFastOnHTTPBindError: a port already in use must stop startup with exit 1.
+func TestRunFailsFastOnHTTPBindError(t *testing.T) {
+	occupied, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer occupied.Close()
+	p := writeConfig(t, "http_listen: \""+occupied.Addr().String()+"\"\n")
+	cfg, _ := os.ReadFile(p)
+	os.WriteFile(p, []byte(strings.Replace(string(cfg), "host: imap.gmail.com", "host: 127.0.0.1\n    port: 1", 1)), 0o600)
+
+	type result struct {
+		code   int
+		stderr string
+	}
+	done := make(chan result, 1)
+	go func() {
+		var errb strings.Builder
+		c := realMain([]string{"--config", p, "run"}, io.Discard, &errb)
+		done <- result{c, errb.String()}
+	}()
+	select {
+	case r := <-done:
+		if r.code != 1 || r.stderr == "" {
+			t.Fatalf("code=%d stderr=%q, want 1 with an error message", r.code, r.stderr)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("run did not fail fast on HTTP bind error")
+		// (the leaked run goroutine is acceptable: the test has already failed)
+	}
+}
