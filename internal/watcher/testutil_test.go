@@ -1,6 +1,7 @@
 package watcher
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -108,6 +109,8 @@ func (s *testServer) seenFlags(t *testing.T) int {
 type ctlConn struct {
 	net.Conn
 	frozen atomic.Bool
+	idles  atomic.Int32 // IDLE commands written by the client
+	noops  atomic.Int32 // NOOP commands written by the client
 }
 
 func (c *ctlConn) Read(p []byte) (int, error) {
@@ -122,6 +125,12 @@ func (c *ctlConn) Read(p []byte) (int, error) {
 func (c *ctlConn) Write(p []byte) (int, error) {
 	if c.frozen.Load() {
 		return len(p), nil
+	}
+	if bytes.Contains(p, []byte(" IDLE\r\n")) {
+		c.idles.Add(1)
+	}
+	if bytes.Contains(p, []byte(" NOOP\r\n")) {
+		c.noops.Add(1)
 	}
 	return c.Conn.Write(p)
 }

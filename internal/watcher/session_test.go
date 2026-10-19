@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/emersion/go-imap/v2"
-
 	"verify-code-relay/internal/auth"
 	"verify-code-relay/internal/store"
 )
@@ -104,11 +102,35 @@ func TestBurstWhileBusyIsDrained(t *testing.T) {
 }
 
 func TestPollingWhenNoIdle(t *testing.T) {
-	e := newEnv(t, imap.CapSet{imap.CapIMAP4rev1: {}}, nil)
+	// imapserver advertises IDLE after login regardless of Options.Caps, so force polling.
+	e := newEnv(t, nil, nil)
+	e.w.forcePoll = true
 	stop, _, _ := runSession(t, e)
 	defer stop()
 	e.srv.appendMsg(t, "polled")
 	eventually(t, "uid 1 processed by polling", func() bool { return equalUIDs(e.proc.got(), 1) })
+	c := e.dialer.last()
+	if n := c.idles.Load(); n != 0 {
+		t.Errorf("IDLE issued %d times while polling", n)
+	}
+	if n := c.noops.Load(); n < 1 {
+		t.Errorf("NOOP issued %d times, want >= 1", n)
+	}
+}
+
+func TestLargeBacklogIsProcessedInChunks(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	stop, _, _ := runSession(t, e) // initialises the watermark on the empty mailbox
+	stop()
+	const n = 120
+	want := make([]uint32, n)
+	for i := range want {
+		want[i] = uint32(i + 1)
+		e.srv.appendMsg(t, "bulk")
+	}
+	stop, _, _ = runSession(t, e)
+	defer stop()
+	eventually(t, "all 120 processed in order", func() bool { return equalUIDs(e.proc.got(), want...) })
 }
 
 func TestIdleCycleKeepsHealthyConnection(t *testing.T) {

@@ -86,6 +86,9 @@ type Watcher struct {
 	log    *slog.Logger
 	status atomic.Value
 	now    func() time.Time
+
+	// forcePoll makes session poll with NOOP even if the server supports IDLE (test hook).
+	forcePoll bool
 }
 
 func orDefault(v *time.Duration, def time.Duration) {

@@ -93,7 +93,11 @@ func (w *Watcher) session(ctx context.Context, connected func()) error {
 		return err
 	}
 
-	useIdle := c.Caps().Has(imap.CapIdle) || c.Caps().Has(imap.CapIMAP4rev2)
+	caps := c.Caps()
+	if caps == nil {
+		return fmt.Errorf("取得伺服器能力失敗")
+	}
+	useIdle := !w.forcePoll && (caps.Has(imap.CapIdle) || caps.Has(imap.CapIMAP4rev2))
 	if !useIdle {
 		w.log.Info("伺服器不支援 IDLE，改用輪詢", "interval", w.cfg.PollInterval)
 	}
@@ -120,10 +124,9 @@ func (w *Watcher) session(ctx context.Context, connected func()) error {
 	}
 }
 
-// drain repeats catchUp until a pass finds nothing new. Some servers (including
-// go-imap's imapmemserver) only report EXISTS for changes that happen *during*
-// IDLE, so mail that arrives while we are fetching must be picked up here
-// before we go back to IDLE.
+// drain repeats catchUp until a pass finds nothing new. It guards against
+// servers that hold back untagged updates outside IDLE: mail that arrives while
+// we are fetching must be picked up here before we go back to IDLE.
 func (w *Watcher) drain(ctx context.Context, c *imapclient.Client, st *store.MailboxState) error {
 	for {
 		n, err := w.catchUp(ctx, c, st)
@@ -142,6 +145,9 @@ func (w *Watcher) uidNext(c *imapclient.Client, sd *imap.SelectData) (uint32, er
 		status, err = c.Status(w.cfg.Folder, &imap.StatusOptions{UIDNext: true}).Wait()
 		return err
 	})
+	if errors.Is(err, errDead) {
+		return 0, err
+	}
 	if err == nil && status.UIDNext != 0 {
 		return uint32(status.UIDNext), nil
 	}
@@ -213,23 +219,61 @@ func toEnvelope(b *imapclient.FetchMessageBuffer) pipeline.Envelope {
 	return env
 }
 
-// catchUp handles every message with UID > st.LastUID and returns how many it handled.
+// catchChunk is how many messages' metadata catchUp fetches per command.
+const catchChunk = 50
+
+// catchUp handles every message with UID > st.LastUID and returns how many it
+// handled. The pending UIDs are listed with UID SEARCH and their metadata is
+// fetched in chunks, so a long outage cannot exceed a single command timeout.
 func (w *Watcher) catchUp(ctx context.Context, c *imapclient.Client, st *store.MailboxState) (int, error) {
-	mb, folder := w.cfg.Mailbox, w.cfg.Folder
 	var set imap.UIDSet
 	set.AddRange(imap.UID(st.LastUID+1), 0) // LastUID+1:*
-	var bufs []*imapclient.FetchMessageBuffer
+	var sr *imap.SearchData
 	if err := w.await(c, w.cfg.CmdTimeout, func() (err error) {
-		bufs, err = c.Fetch(set, &imap.FetchOptions{UID: true, InternalDate: true, RFC822Size: true, Envelope: true}).Collect()
+		sr, err = c.UIDSearch(&imap.SearchCriteria{UID: []imap.UIDSet{set}}, nil).Wait()
 		return err
 	}); err != nil {
-		return 0, fmt.Errorf("抓取新信清單：%w", err)
+		return 0, fmt.Errorf("搜尋新信：%w", err)
 	}
+	var uids []imap.UID
+	for _, u := range sr.AllUIDs() {
+		if uint32(u) > st.LastUID { // servers return the last message for n:* when n > max
+			uids = append(uids, u)
+		}
+	}
+	sort.Slice(uids, func(i, j int) bool { return uids[i] < uids[j] })
 	n := 0
-	sort.Slice(bufs, func(i, j int) bool { return bufs[i].UID < bufs[j].UID })
+	for len(uids) > 0 {
+		k := min(catchChunk, len(uids))
+		var chunk imap.UIDSet
+		for _, u := range uids[:k] {
+			chunk.AddNum(u)
+		}
+		uids = uids[k:]
+		var bufs []*imapclient.FetchMessageBuffer
+		if err := w.await(c, w.cfg.FetchTimeout, func() (err error) {
+			bufs, err = c.Fetch(chunk, &imap.FetchOptions{UID: true, InternalDate: true, RFC822Size: true, Envelope: true}).Collect()
+			return err
+		}); err != nil {
+			return n, fmt.Errorf("抓取新信清單：%w", err)
+		}
+		sort.Slice(bufs, func(i, j int) bool { return bufs[i].UID < bufs[j].UID })
+		got, err := w.handle(ctx, c, st, bufs)
+		n += got
+		if err != nil {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+// handle processes one chunk of fetched metadata in UID order.
+func (w *Watcher) handle(ctx context.Context, c *imapclient.Client, st *store.MailboxState, bufs []*imapclient.FetchMessageBuffer) (int, error) {
+	mb, folder := w.cfg.Mailbox, w.cfg.Folder
+	n := 0
 	for _, b := range bufs {
 		uid := uint32(b.UID)
-		if uid <= st.LastUID { // servers return the last message for n:* when n > max
+		if uid <= st.LastUID {
 			continue
 		}
 		n++
