@@ -10,6 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/imapclient"
+
 	"verify-code-relay/internal/store"
 )
 
@@ -167,5 +170,38 @@ func TestDeviceLoginDeclined(t *testing.T) {
 	err := m.PollDeviceLogin(context.Background(), &DeviceCode{DeviceCode: "DC", ExpiresIn: 900})
 	if err == nil {
 		t.Fatal("want error")
+	}
+}
+
+// A cached access token that the IMAP server rejects (e.g. revoked) must not be
+// reused until its expiry: the next session refreshes it.
+func TestAuthenticateRejectedCachedTokenIsRefreshedNextTime(t *testing.T) {
+	ts := newTokenServer(t, func(url.Values) (int, string) {
+		return 200, `{"access_token":"a2","refresh_token":"r2","expires_in":3600}`
+	})
+	toks := &memTokens{m: map[string]store.OAuthToken{"outlook": {RefreshToken: "r", AccessToken: "a", ExpiresAt: now0.Add(time.Hour)}}}
+	m := newMS(ts, toks)
+	c, err := imapclient.DialInsecure(memServer(t), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	err = m.Authenticate(context.Background(), c)
+	var ie *imap.Error
+	if !errors.As(err, &ie) {
+		t.Fatalf("want *imap.Error from the server, got %T %v", err, err)
+	}
+	if len(ts.forms) != 0 {
+		t.Fatalf("token endpoint called %d times; the cached token should have been tried first", len(ts.forms))
+	}
+	if toks.m["outlook"].RefreshToken != "r" {
+		t.Fatalf("refresh token lost: %+v", toks.m["outlook"])
+	}
+	tok, err := m.AccessToken(context.Background())
+	if err != nil || tok != "a2" {
+		t.Fatalf("tok=%q err=%v, want a refreshed token", tok, err)
+	}
+	if len(ts.forms) != 1 || ts.forms[0].Get("grant_type") != "refresh_token" || ts.forms[0].Get("refresh_token") != "r" {
+		t.Fatalf("forms = %v", ts.forms)
 	}
 }

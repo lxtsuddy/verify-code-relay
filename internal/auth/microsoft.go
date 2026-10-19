@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 
 	"verify-code-relay/internal/store"
@@ -104,15 +106,22 @@ func (m *Microsoft) save(ctx context.Context, tr tokenResponse, oldRefresh strin
 }
 
 func (m *Microsoft) AccessToken(ctx context.Context) (string, error) {
+	tok, _, err := m.accessToken(ctx)
+	return tok, err
+}
+
+// accessToken returns a usable access token; cached reports whether it came from
+// the store rather than a refresh just now.
+func (m *Microsoft) accessToken(ctx context.Context) (token string, cached bool, err error) {
 	tok, ok, err := m.Store.GetOAuthToken(ctx, m.Mailbox)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	if !ok || tok.RefreshToken == "" {
-		return "", fmt.Errorf("信箱 %s 尚未授權：%w", m.Mailbox, ErrNeedsLogin)
+		return "", false, fmt.Errorf("信箱 %s 尚未授權：%w", m.Mailbox, ErrNeedsLogin)
 	}
 	if tok.AccessToken != "" && tok.ExpiresAt.Sub(m.now()) > refreshMargin {
-		return tok.AccessToken, nil
+		return tok.AccessToken, true, nil
 	}
 	var tr tokenResponse
 	status, err := m.post(ctx, "token", url.Values{
@@ -122,26 +131,47 @@ func (m *Microsoft) AccessToken(ctx context.Context) (string, error) {
 		"scope":         {Scope},
 	}, &tr)
 	if err != nil {
-		return "", fmt.Errorf("更新 OAuth token：%w", err)
+		return "", false, fmt.Errorf("更新 OAuth token：%w", err)
 	}
 	if tr.Error == "invalid_grant" || tr.Error == "interaction_required" {
-		return "", fmt.Errorf("信箱 %s 的授權已失效（%s）：%w", m.Mailbox, tr.Error, ErrNeedsLogin)
+		return "", false, fmt.Errorf("信箱 %s 的授權已失效（%s）：%w", m.Mailbox, tr.Error, ErrNeedsLogin)
 	}
 	if status != http.StatusOK || tr.AccessToken == "" {
-		return "", fmt.Errorf("更新 OAuth token 失敗：HTTP %d %s", status, tr.Error)
+		return "", false, fmt.Errorf("更新 OAuth token 失敗：HTTP %d %s", status, tr.Error)
 	}
 	if err := m.save(ctx, tr, tok.RefreshToken); err != nil {
-		return "", err
+		return "", false, err
 	}
-	return tr.AccessToken, nil
+	return tr.AccessToken, false, nil
 }
 
+// Authenticate logs in with XOAUTH2. When the server rejects a cached access
+// token (for example because it was revoked), the token is marked expired so
+// that the next session refreshes it instead of retrying it until its expiry.
 func (m *Microsoft) Authenticate(ctx context.Context, c *imapclient.Client) error {
-	tok, err := m.AccessToken(ctx)
+	tok, cached, err := m.accessToken(ctx)
 	if err != nil {
 		return err
 	}
-	return c.Authenticate(NewXOAUTH2(m.Username, tok))
+	err = c.Authenticate(NewXOAUTH2(m.Username, tok))
+	var ie *imap.Error
+	if err != nil && cached && errors.As(err, &ie) {
+		if ierr := m.expire(ctx, tok); ierr != nil {
+			return errors.Join(err, ierr)
+		}
+	}
+	return err
+}
+
+// expire marks the stored access token as expired, keeping the refresh token.
+// A token that another session has already replaced is left alone.
+func (m *Microsoft) expire(ctx context.Context, access string) error {
+	cur, ok, err := m.Store.GetOAuthToken(ctx, m.Mailbox)
+	if err != nil || !ok || cur.AccessToken != access {
+		return err
+	}
+	cur.ExpiresAt = m.now()
+	return m.Store.SaveOAuthToken(ctx, m.Mailbox, cur)
 }
 
 func (m *Microsoft) StartDeviceLogin(ctx context.Context) (*DeviceCode, error) {
