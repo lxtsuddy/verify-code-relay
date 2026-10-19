@@ -108,9 +108,12 @@ func (s *testServer) seenFlags(t *testing.T) int {
 // ctlConn lets tests kill a connection or turn it into a black hole.
 type ctlConn struct {
 	net.Conn
-	frozen atomic.Bool
-	idles  atomic.Int32 // IDLE commands written by the client
-	noops  atomic.Int32 // NOOP commands written by the client
+	// killBody, when set and true, is cleared and the connection closed right
+	// after the client writes a BODY.PEEK[] fetch, so the fetch is in flight.
+	killBody *atomic.Bool
+	frozen   atomic.Bool
+	idles    atomic.Int32 // IDLE commands written by the client
+	noops    atomic.Int32 // NOOP commands written by the client
 }
 
 func (c *ctlConn) Read(p []byte) (int, error) {
@@ -132,15 +135,22 @@ func (c *ctlConn) Write(p []byte) (int, error) {
 	if bytes.Contains(p, []byte(" NOOP\r\n")) {
 		c.noops.Add(1)
 	}
+	if c.killBody != nil && bytes.Contains(p, []byte("BODY.PEEK[]")) && c.killBody.CompareAndSwap(true, false) {
+		n, err := c.Conn.Write(p)
+		c.Conn.Close()
+		return n, err
+	}
 	return c.Conn.Write(p)
 }
 
 type testDialer struct {
-	addr  string
-	fail  atomic.Bool
-	count atomic.Int32
-	mu    sync.Mutex
-	conns []*ctlConn
+	addr string
+	fail atomic.Bool
+	// killBodyFetch kills the connection during the next body FETCH (one shot).
+	killBodyFetch atomic.Bool
+	count         atomic.Int32
+	mu            sync.Mutex
+	conns         []*ctlConn
 }
 
 func (d *testDialer) dial(_ context.Context, opts *imapclient.Options) (*imapclient.Client, error) {
@@ -152,7 +162,7 @@ func (d *testDialer) dial(_ context.Context, opts *imapclient.Options) (*imapcli
 	if err != nil {
 		return nil, err
 	}
-	cc := &ctlConn{Conn: nc}
+	cc := &ctlConn{Conn: nc, killBody: &d.killBodyFetch}
 	d.mu.Lock()
 	d.conns = append(d.conns, cc)
 	d.mu.Unlock()

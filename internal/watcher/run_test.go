@@ -253,3 +253,30 @@ func TestRunRecoveredOnlyAfterSuccessfulCatchUp(t *testing.T) {
 		t.Errorf("processed = %v, want [1]", e.proc.got())
 	}
 }
+
+// Spec §13: a disconnect while a message body is being fetched must not lose
+// or duplicate the message; the next session fetches it again, exactly once.
+func TestRunDisconnectDuringBodyFetch(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	stop := startRun(t, e)
+	defer stop()
+	eventually(t, "connected", func() bool { return e.w.Status() == StatusConnected })
+	waitIdle(t, e)
+	e.dialer.killBodyFetch.Store(true)
+	e.srv.appendMsg(t, "interrupted")
+	eventually(t, "uid 1 processed after reconnect", func() bool { return equalUIDs(e.proc.got(), 1) })
+	if e.dialer.killBodyFetch.Load() {
+		t.Fatal("the body FETCH was never interrupted")
+	}
+	if n := e.dialer.count.Load(); n < 2 {
+		t.Fatalf("dials = %d, want a reconnect", n)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if !equalUIDs(e.proc.got(), 1) {
+		t.Fatalf("processed = %v (must be exactly once)", e.proc.got())
+	}
+	st, _, _ := e.st.GetMailboxState(context.Background(), "mb", "INBOX")
+	if st.LastUID != 1 {
+		t.Fatalf("watermark = %+v, want last_uid 1", st)
+	}
+}
