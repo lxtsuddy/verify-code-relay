@@ -1,0 +1,12 @@
+services:
+  relay:
+    build: .
+    image: verify-code-relay:latest
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./config.yaml:/config.yaml:ro
+      - ./data:/data
+    # 只有需要從主機查看 /healthz 時才開放
+    # ports:
+    #   - "127.0.0.1:8080:8080"
