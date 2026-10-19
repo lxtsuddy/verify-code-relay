@@ -89,6 +89,9 @@ func (s *Store) migrate(ctx context.Context) error {
 	if err := s.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
+	if version > len(migrations) {
+		return fmt.Errorf("資料庫版本 %d 高於程式支援的 %d，請更新程式", version, len(migrations))
+	}
 	for i := version; i < len(migrations); i++ {
 		tx, err := s.db.BeginTx(ctx, nil)
 		if err != nil {

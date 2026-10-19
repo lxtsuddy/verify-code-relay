@@ -62,7 +62,10 @@ func (s *Store) RecordMessage(ctx context.Context, e LogEntry, items []OutboxIte
 	if err := setState(ctx, tx, e.Mailbox, e.Folder, st); err != nil {
 		return 0, err
 	}
-	return logID, tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return logID, nil
 }
 
 func (s *Store) Enqueue(ctx context.Context, it OutboxItem) (int64, error) {

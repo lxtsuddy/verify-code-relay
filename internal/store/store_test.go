@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -160,5 +161,47 @@ func TestOAuthToken(t *testing.T) {
 	got, ok, err := s.GetOAuthToken(ctx, "o")
 	if !ok || err != nil || got.RefreshToken != "r2" || !got.ExpiresAt.Equal(tok.ExpiresAt) {
 		t.Fatalf("got %+v %v %v", got, ok, err)
+	}
+}
+
+func TestOpenRejectsNewerSchema(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "relay.db")
+	s, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`PRAGMA user_version = 99`); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	s2, err := Open(p)
+	if err == nil {
+		s2.Close()
+		t.Fatal("want error for newer schema version")
+	}
+	if !strings.Contains(err.Error(), "99") {
+		t.Fatalf("error should mention version 99, got: %v", err)
+	}
+}
+
+func TestRecordMessageRollsBackOnFailure(t *testing.T) {
+	s := openTest(t)
+	now := time.Unix(1_800_000_000, 0)
+	if _, err := s.db.Exec(`DROP TABLE outbox`); err != nil {
+		t.Fatal(err)
+	}
+	e := LogEntry{At: now, Mailbox: "g", Folder: "INBOX", UID: 9, Kind: "code", Result: "pending"}
+	if _, err := s.RecordMessage(ctx, e, []OutboxItem{item("me", 1, now)}, MailboxState{UIDValidity: 3, LastUID: 9}); err == nil {
+		t.Fatal("want error when outbox insert fails")
+	}
+	if _, ok, err := s.GetMailboxState(ctx, "g", "INBOX"); ok || err != nil {
+		t.Fatalf("mailbox state must not persist: ok=%v err=%v", ok, err)
+	}
+	var n int
+	if err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM forward_log`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Fatalf("forward_log rows = %d, want 0", n)
 	}
 }
