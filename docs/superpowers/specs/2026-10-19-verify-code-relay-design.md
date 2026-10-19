@@ -102,6 +102,8 @@ Web UI、LLM 辨識、依信箱分別設定的自訂規則、設定檔熱重載�
    5. 回到 IDLE
 
    注意：`UID FETCH n:*` 在沒有新信時仍可能回傳最後一封信，因此必須過濾 `uid > last_uid`。
+
+   每次被喚醒後，重複執行補抓，直到某一輪沒有任何新 UID，才回到 IDLE。原因是有些伺服器（例如 go-imap 的 imapmemserver）只回報 IDLE 期間發生的變化；處理信件期間到達的新信若不這樣補抓，要等到 25 分鐘的存活檢查才會被發現。
 7. **存活偵測**：IDLE 期間伺服器可以長達約 29 分鐘不送出任何資料，所以**不能**設定一般的讀取逾時，否則會誤殺正常連線。改用以下做法：
    - watcher 每 25 分鐘主動循環一次：`Close` IDLE → `NOOP` → 重新 `Idle`。整個循環 30 秒內沒有收到伺服器回應，就視為連線失效，進入重連。
    - 同時啟用 TCP keepalive。
@@ -129,7 +131,7 @@ type Authenticator interface {
 - **`password`**：`LOGIN username password`。
 - **`microsoft_oauth`**：
   - 端點：`https://login.microsoftonline.com/{tenant}/oauth2/v2.0/devicecode` 與 `.../token`
-  - scope：`https://outlook.office.com/IMAP.AccessScope offline_access`
+  - scope：`https://outlook.office.com/IMAP.AccessAsUser.All offline_access`
   - `relay login <信箱>`：執行 device code 流程，在終端機顯示驗證網址與代碼，輪詢 token 端點直到取得授權，把 refresh token、access token 與到期時間存入 `oauth_tokens`。
   - 執行期間，access token 剩不到 5 分鐘到期時，用 refresh token 更新；新的 refresh token 若有回傳，就覆蓋舊的（Microsoft 會輪替 refresh token）。
   - 以 SASL `XOAUTH2` 認證，初始回應格式為 `"user=" + username + "\x01auth=Bearer " + access_token + "\x01\x01"`。
