@@ -1,0 +1,11 @@
+From: Billing <billing@saas.example>
+To: me@gmail.com
+Subject: Your invoice #20261019 is ready
+Date: Mon, 19 Oct 2026 08:00:00 +0800
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+SW52b2ljZSAjMjAyNjEwMTkKQW1vdW50IGR1ZTogJDEsMjM0LjAwIG9uIDIwMjYtMTEtMDEKUXVl
+c3Rpb25zPyBDYWxsICsxICg4MDApIDU1NS0wMTk5LgpWaWV3IGludm9pY2U6IGh0dHBzOi8vc2Fh
+cy5leGFtcGxlL2ludm9pY2VzLzIwMjYxMDE5Cg==

@@ -1,0 +1,25 @@
+From: "GitHub" <noreply@github.com>
+To: me@gmail.com
+Subject: [GitHub] Please verify your device
+Date: Mon, 19 Oct 2026 08:00:00 +0800
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="BOUNDARY"
+
+--BOUNDARY
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+SGV5IG1lIQoKQSBzaWduIGluIGF0dGVtcHQgcmVxdWlyZXMgZnVydGhlciB2ZXJpZmljYXRpb24g
+YmVjYXVzZSB3ZSBkaWQgbm90IHJlY29nbml6ZSB5b3VyIGRldmljZS4KClZlcmlmaWNhdGlvbiBj
+b2RlOiA0ODI5MTMKCklmIHlvdSBkaWQgbm90IGF0dGVtcHQgdG8gc2lnbiBpbiB0byB5b3VyIGFj
+Y291bnQsIHlvdXIgcGFzc3dvcmQgbWF5IGJlIGNvbXByb21pc2VkLgpWaXNpdCBodHRwczovL2dp
+dGh1Yi5jb20vc2V0dGluZ3Mvc2VjdXJpdHkgdG8gY3JlYXRlIGEgbmV3LCBzdHJvbmcgcGFzc3dv
+cmQuCgpUaGFua3MsClRoZSBHaXRIdWIgVGVhbQo=
+--BOUNDARY
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PHA+SGV5IG1lITwvcD48cD5WZXJpZmljYXRpb24gY29kZTogPHN0cm9uZz40ODI5MTM8L3N0cm9u
+Zz48L3A+PHA+PGEgaHJlZj0iaHR0cHM6Ly9naXRodWIuY29tL3NldHRpbmdzL3NlY3VyaXR5Ij5D
+aGFuZ2UgcGFzc3dvcmQ8L2E+PC9wPg==
+--BOUNDARY--
