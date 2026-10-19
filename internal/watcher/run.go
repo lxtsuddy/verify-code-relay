@@ -14,6 +14,11 @@ func jitter(d time.Duration) time.Duration {
 	return time.Duration(float64(d) * (0.8 + 0.4*rand.Float64()))
 }
 
+// nextBackoff doubles cur, capped at max.
+func nextBackoff(cur, max time.Duration) time.Duration {
+	return min(cur*2, max)
+}
+
 // Run keeps a session alive with exponential backoff until ctx is cancelled or
 // the mailbox needs an interactive OAuth login.
 func (w *Watcher) Run(ctx context.Context) {
@@ -61,13 +66,19 @@ func (w *Watcher) Run(ctx context.Context) {
 		if downSince.IsZero() {
 			downSince = w.now()
 		}
-		if !alertedDown && w.now().Sub(downSince) >= w.cfg.AlertAfter {
-			w.cfg.Alert.Alert("disconnected:"+key, fmt.Sprintf("信箱 %s 已超過 %s 無法連線：%v", key, w.cfg.AlertAfter, err))
-			alertedDown = true
-		}
 		wait := jitter(backoff)
+		// An auth failure is already covered by the auth:<key> alert.
+		if ae == nil && !alertedDown {
+			if w.now().Sub(downSince) >= w.cfg.AlertAfter {
+				w.cfg.Alert.Alert("disconnected:"+key, fmt.Sprintf("信箱 %s 已超過 %s 無法連線：%v", key, w.cfg.AlertAfter, err))
+				alertedDown = true
+			} else if rem := w.cfg.AlertAfter - w.now().Sub(downSince); rem < wait {
+				// Wake at the alert deadline instead of sleeping past it.
+				wait = rem
+			}
+		}
 		w.log.Warn("連線中斷，稍後重試", "err", err, "retry_in", wait.Round(time.Millisecond))
-		backoff = min(backoff*2, w.cfg.MaxBackoff)
+		backoff = nextBackoff(backoff, w.cfg.MaxBackoff)
 		select {
 		case <-ctx.Done():
 			w.setStatus(StatusStopped)

@@ -72,15 +72,22 @@ func TestRunDetectsBlackHoleAndRecovers(t *testing.T) {
 }
 
 func TestRunAuthFailedAlertsOnceAndKeepsRetrying(t *testing.T) {
-	e := newEnv(t, nil, func(c *Config) { c.Auth = auth.Password{Username: "me@example.com", Password: "nope"} })
+	e := newEnv(t, nil, func(c *Config) {
+		c.Auth = auth.Password{Username: "me@example.com", Password: "nope"}
+		c.AlertAfter = 50 * time.Millisecond
+	})
 	stop := startRun(t, e)
 	defer stop()
-	eventually(t, "auth_failed and retrying", func() bool { return e.w.Status() == StatusAuthFailed && e.dialer.count.Load() >= 3 })
+	// Retry long enough (backoff 20-100ms) that AlertAfter has elapsed several times over.
+	eventually(t, "auth_failed and retrying", func() bool { return e.w.Status() == StatusAuthFailed && e.dialer.count.Load() >= 6 })
 	alerts, _ := e.alerts.snapshot()
 	n := 0
 	for _, k := range alerts {
 		if k == "auth:mb/INBOX" {
 			n++
+		}
+		if strings.HasPrefix(k, "disconnected:") {
+			t.Fatalf("auth failure must not also raise a disconnected alert: %v", alerts)
 		}
 	}
 	if n != 1 {
@@ -129,4 +136,48 @@ func TestRunDisconnectedAlertAndRecovery(t *testing.T) {
 		_, r := e.alerts.snapshot()
 		return len(r) == 1 && r[0] == "disconnected:mb/INBOX"
 	})
+}
+
+func TestRunDisconnectedAlertFiresAtDeadlineNotAfterBackoff(t *testing.T) {
+	e := newEnv(t, nil, func(c *Config) {
+		c.MinBackoff = 2 * time.Second
+		c.MaxBackoff = 2 * time.Second
+		c.AlertAfter = 300 * time.Millisecond
+	})
+	e.dialer.fail.Store(true)
+	start := time.Now()
+	stop := startRun(t, e)
+	defer stop()
+	for {
+		if a, _ := e.alerts.snapshot(); len(a) == 1 && strings.HasPrefix(a[0], "disconnected:mb/INBOX") {
+			break
+		}
+		if time.Since(start) > 1500*time.Millisecond {
+			t.Fatal("disconnected alert not raised within 1.5s (backoff overshoots AlertAfter)")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func TestNextBackoff(t *testing.T) {
+	cases := []struct{ cur, max, want time.Duration }{
+		{time.Second, time.Minute, 2 * time.Second},
+		{20 * time.Second, time.Minute, 40 * time.Second},
+		{40 * time.Second, time.Minute, time.Minute},
+		{time.Minute, time.Minute, time.Minute},
+		{5 * time.Minute, time.Minute, time.Minute},
+	}
+	for _, c := range cases {
+		if got := nextBackoff(c.cur, c.max); got != c.want {
+			t.Errorf("nextBackoff(%s, %s) = %s, want %s", c.cur, c.max, got, c.want)
+		}
+	}
+}
+
+func TestJitterBounds(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		if d := jitter(time.Second); d < 800*time.Millisecond || d > 1200*time.Millisecond {
+			t.Fatalf("jitter(1s) = %s, outside [0.8s, 1.2s]", d)
+		}
+	}
 }
