@@ -33,8 +33,8 @@ type Message struct {
 	Text    string
 	Links   []Link
 	// Warnings lists non-fatal problems met while reading the body (unreadable
-	// or truncated parts). They name parts and errors only, never body content,
-	// so they are safe to log.
+	// or truncated parts). They carry the part index, content type and decoder
+	// error but no body text; a malformed-header error may quote that header line.
 	Warnings []string
 }
 
