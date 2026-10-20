@@ -111,6 +111,7 @@ func (ps probeStore) GetOAuthToken(ctx context.Context, mailbox string) (store.O
 
 func (ps probeStore) SaveOAuthToken(ctx context.Context, mailbox string, t store.OAuthToken) error {
 	s := ps.s
+	ctx = context.WithoutCancel(ctx) // a rotated refresh token is not lost to the test's deadline
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
 	raw, _, err := runtime.LoadConfig(ctx, s.o.Store)
