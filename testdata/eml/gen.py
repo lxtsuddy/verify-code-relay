@@ -110,4 +110,21 @@ write("ignored-promo",
       [("text/plain", "utf-8", "Use promo code SAVE2026 to get 20% off.\n")],
       "ignore: true")
 
+# Harder distractors: a number right before the keyword, a code inside a table
+# among dates/serials/amounts, and a Big5-encoded link mail.
+write("code-after-reference-en",
+      [("From", "Example <security@example.com>"), ("To", "me@gmail.com"), ("Subject", "Sign-in attempt"), DATE],
+      [("text/plain", "utf-8", "Hi,\nWe received a sign-in request.\nRef 482019 — your code is 731596 and expires in 10 minutes.\nIf this wasn't you, call 0800-123-456.\n")],
+      'code: "731596"')
+
+write("code-in-table-zh-tw",
+      [("From", word("範例支付", "utf-8") + " <notify@pay.example.com.tw>"), ("To", "me@example.com"), ("Subject", word("交易通知", "utf-8")), DATE],
+      [("text/html", "utf-8", "<p>您好，以下為本次交易資訊：</p><table><tr><td>交易時間</td><td>2026/10/19 08:00</td></tr><tr><td>交易序號</td><td>88120934</td></tr><tr><td>驗證碼</td><td><b>590274</b></td></tr><tr><td>金額</td><td>NT$ 1500</td></tr></table><p>請勿將驗證碼提供給他人。</p>")],
+      'code: "590274"')
+
+write("activate-link-zh-tw-big5",
+      [("From", word("範例論壇", "big5") + " <noreply@forum.example.com.tw>"), ("To", "me@example.com"), ("Subject", word("請啟用您的帳號", "big5")), DATE],
+      [("text/html", "big5", "<p>感謝註冊！請點擊下方按鈕啟用帳號：</p><p><a href=\"https://forum.example.com.tw/account/activate?key=Qm9yZWFsaXNEaWdpdGFs\">啟用帳號</a></p><p>如有問題請參閱<a href=\"https://forum.example.com.tw/help\">說明</a>。<a href=\"https://forum.example.com.tw/unsubscribe\">取消訂閱</a></p><p>2026年10月19日</p>")],
+      'url: "https://forum.example.com.tw/account/activate?key=Qm9yZWFsaXNEaWdpdGFs"')
+
 print("ok")

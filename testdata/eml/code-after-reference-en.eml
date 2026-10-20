@@ -1,0 +1,11 @@
+From: Example <security@example.com>
+To: me@gmail.com
+Subject: Sign-in attempt
+Date: Mon, 19 Oct 2026 08:00:00 +0800
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+SGksCldlIHJlY2VpdmVkIGEgc2lnbi1pbiByZXF1ZXN0LgpSZWYgNDgyMDE5IOKAlCB5b3VyIGNv
+ZGUgaXMgNzMxNTk2IGFuZCBleHBpcmVzIGluIDEwIG1pbnV0ZXMuCklmIHRoaXMgd2Fzbid0IHlv
+dSwgY2FsbCAwODAwLTEyMy00NTYuCg==
