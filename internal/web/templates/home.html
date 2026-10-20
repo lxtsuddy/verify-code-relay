@@ -1,0 +1,34 @@
+{{template "app" .}}
+{{define "content"}}
+<header class="page-head">
+  <div>
+    <h1 class="page-title">總覽</h1>
+    <p class="page-desc">服務目前的設定概況。</p>
+  </div>
+  {{if .Data.Applying}}<span class="badge badge-warn badge-live">正在套用設定</span>{{else}}<span class="badge badge-ok">服務運作中</span>{{end}}
+</header>
+
+<section class="card">
+  <header class="card-head"><h2 class="card-title">設定概況</h2></header>
+  <dl class="facts">
+    <div><dt>信箱</dt><dd>{{.Data.Mailboxes}}</dd></div>
+    <div><dt>監看中的資料夾</dt><dd>{{.Data.Watchers}}</dd></div>
+    <div><dt>Telegram Bot</dt><dd>{{.Data.Bots}}</dd></div>
+    <div><dt>轉發目標</dt><dd>{{.Data.Targets}}</dd></div>
+  </dl>
+</section>
+
+{{if eq .Data.Mailboxes 0}}
+<section class="empty">
+  <span class="empty-icon">{{template "icon" "mail"}}</span>
+  <h2 class="empty-title">還沒有要監看的信箱</h2>
+  <p class="empty-text">依序完成下面三件事，收到的驗證碼就會自動轉到 Telegram。</p>
+  <ol class="empty-steps">
+    <li>新增 Telegram Bot</li>
+    <li>新增接收訊息的目標</li>
+    <li>新增信箱並勾選目標</li>
+  </ol>
+  <a class="btn btn-primary" href="/telegram">前往 Telegram 設定{{template "icon" "arrow-right"}}</a>
+</section>
+{{end}}
+{{end}}

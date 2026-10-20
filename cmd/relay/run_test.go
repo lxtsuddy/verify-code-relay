@@ -125,6 +125,7 @@ func getStatus(t *testing.T, url string) int {
 // is created from RELAY_ADMIN_PASSWORD, the health endpoints answer on
 // RELAY_HEALTH_LISTEN, the web placeholder on RELAY_LISTEN, and shutdown is graceful.
 func TestRunSmoke(t *testing.T) {
+	t.Setenv("RELAY_DATA_DIR", t.TempDir()) // never the developer's real data dir
 	healthAddr, webAddr, log, stop := startRun(t, "a-long-enough-password")
 
 	// 沒有信箱：全部健康
@@ -133,8 +134,14 @@ func TestRunSmoke(t *testing.T) {
 			t.Errorf("%s = %d, want 200", path, c)
 		}
 	}
-	if c := getStatus(t, "http://"+webAddr+"/"); c != http.StatusNotFound {
-		t.Errorf("web / = %d, want the 404 placeholder", c)
+	// the admin UI is up: / redirects (followed by http.Get) to the login page
+	if resp, err := http.Get("http://" + webAddr + "/"); err != nil {
+		t.Fatal(err)
+	} else {
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || resp.Request.URL.Path != "/login" {
+			t.Errorf("web / = %d at %s, want the login page", resp.StatusCode, resp.Request.URL.Path)
+		}
 	}
 	// run 會收緊 umask；資料庫與 -wal／-shm 檔（服務執行中才存在）都不可讓其他人讀取
 	if m := umaskNow(); m != 0o077 {
@@ -326,5 +333,18 @@ func TestShutdownHTTPLogsError(t *testing.T) {
 	shutdownHTTP(srv, 50*time.Millisecond, slog.New(slog.NewJSONHandler(&buf, nil)))
 	if !strings.Contains(buf.String(), "關閉 HTTP 服務失敗") || !strings.Contains(buf.String(), "deadline") {
 		t.Fatalf("log = %q", buf.String())
+	}
+}
+
+// TestRunRejectsBadTrustedProxies: a typo in RELAY_TRUSTED_PROXIES fails startup clearly.
+func TestRunRejectsBadTrustedProxies(t *testing.T) {
+	t.Setenv("RELAY_DATA_DIR", t.TempDir())
+	t.Setenv("RELAY_TRUSTED_PROXIES", "10.42.0.0/16, not-an-ip")
+	var out, errb bytes.Buffer
+	if c := realMain([]string{"run"}, &out, &errb); c != 1 {
+		t.Fatalf("exit code %d", c)
+	}
+	if !strings.Contains(errb.String(), "RELAY_TRUSTED_PROXIES") || !strings.Contains(errb.String(), "not-an-ip") {
+		t.Errorf("stderr = %s", errb.String())
 	}
 }

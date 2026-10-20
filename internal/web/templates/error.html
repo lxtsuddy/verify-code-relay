@@ -1,0 +1,11 @@
+{{template "bare" .}}
+{{define "content"}}
+<section class="auth-card error-card" aria-labelledby="error-title">
+  <p class="postcode" aria-label="錯誤代碼 {{.Data.Status}}">{{range chars (printf "%d" .Data.Status)}}<span>{{.}}</span>{{end}}</p>
+  <h1 id="error-title" class="auth-title">{{.Data.Heading}}</h1>
+  <p class="auth-sub">{{.Data.Message}}</p>
+  <div class="auth-actions">
+    <a class="btn btn-primary" href="/">{{template "icon" "arrow-right"}}<span>回到總覽</span></a>
+  </div>
+</section>
+{{end}}

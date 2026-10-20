@@ -1,0 +1,33 @@
+{{template "bare" .}}
+{{define "content"}}
+<section class="auth-card" aria-labelledby="login-title">
+  <header class="auth-head">
+    <h1 id="login-title" class="auth-title">登入管理後台</h1>
+    {{if .Data.Bound}}<p class="auth-sub">輸入密碼，以及手機驗證器 App 上的 6 位數驗證碼。</p>
+    {{else if .Data.HasAdmin}}<p class="auth-sub">第一次登入只需要密碼，接著會帶你綁定兩步驟驗證。</p>{{end}}
+  </header>
+  {{template "form-error" .}}
+  {{if .Data.HasAdmin}}
+  <form class="form" method="post" action="/login">
+    <div class="field">
+      <label class="label" for="password">密碼</label>
+      <div class="secret">
+        <input class="input" id="password" name="password" type="password" autocomplete="current-password" required autofocus>
+        <button type="button" class="secret-toggle" data-reveal="password" aria-label="顯示密碼" aria-pressed="false">{{template "icon" "eye"}}</button>
+      </div>
+    </div>
+    {{if .Data.Bound}}
+    <div class="field">
+      <label class="label" for="code">驗證碼</label>
+      <input class="otp-input" id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required aria-describedby="code-hint" data-otp data-autosubmit>
+      <p class="hint" id="code-hint">驗證碼每 30 秒更新；輸入完 6 位數會自動送出。</p>
+    </div>
+    {{end}}
+    <button type="submit" class="btn btn-primary btn-lg btn-block" data-busy-text="登入中…">登入</button>
+  </form>
+  {{else}}
+  <div class="callout callout-warn">{{template "icon" "info"}}<p>尚未設定管理員。請在伺服器設定環境變數 <code>RELAY_ADMIN_PASSWORD</code>（至少 12 個字元）後重新啟動服務。</p></div>
+  {{end}}
+</section>
+<p class="bare-note">忘記密碼或遺失手機？在伺服器上執行 <code>relay admin reset</code> 重設管理員。</p>
+{{end}}

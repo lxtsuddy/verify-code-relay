@@ -17,12 +17,9 @@ import (
 	"verify-code-relay/internal/health"
 	"verify-code-relay/internal/runtime"
 	"verify-code-relay/internal/store"
+	"verify-code-relay/internal/web"
+	"verify-code-relay/internal/websec"
 )
-
-// webHandler is replaced by the real admin UI in Task 6.
-var webHandler = func(st *store.Store, rt *runtime.Runtime, log *slog.Logger) http.Handler {
-	return http.NotFoundHandler()
-}
 
 func cmdRun(args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("run", stderr)
@@ -32,6 +29,10 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() > 0 {
 		fmt.Fprintln(stderr, "用法：relay run")
 		return 2
+	}
+	proxies, err := websec.ParsePrefixes(os.Getenv("RELAY_TRUSTED_PROXIES"))
+	if err != nil {
+		return fail(stderr, fmt.Errorf("RELAY_TRUSTED_PROXIES 格式不正確：%w（應為以逗號分隔的 CIDR 或 IP，例如 10.42.0.0/16,192.168.1.5）", err))
 	}
 	restrictUmask()
 	level := new(slog.LevelVar) // runtime.Apply sets it from log_level
@@ -67,7 +68,7 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	}
 
 	rt := runtime.New(runtime.Options{Store: st, Log: log, Level: level, Sender: telegramClient(), Dial: runtime.TLSDial})
-	b, err := buildStored(ctx, st)
+	b, err := buildStored(context.Background(), st)
 	if err != nil {
 		log.Error("資料庫中的設定無效，改以空設定啟動，請到 Web 修正", "err", err)
 		if b, err = runtime.Build(config.Empty()); err != nil {
@@ -76,7 +77,9 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	}
 	rt.Apply(b)
 
-	webSrv := serveHTTP(webLn, webHandler(st, rt, log), "Web 服務失敗", log)
+	admin := web.New(web.Options{Store: st, Runtime: rt, Log: log, Telegram: telegramClient(), TrustedProxies: proxies, Dial: runtime.TLSDial})
+	go admin.PruneLoop(ctx)
+	webSrv := serveHTTP(webLn, admin.Handler(), "Web 服務失敗", log)
 	var healthSrv *http.Server
 	if healthLn != nil {
 		healthSrv = serveHTTP(healthLn, health.Handler(rt.Sources, st.Ping), "健康檢查服務失敗", log)
