@@ -117,7 +117,7 @@ Microsoft 已停用 IMAP 的帳號密碼登入，必須使用 OAuth2：
 
 ## 範本
 
-使用 Go `html/template`（Telegram HTML 格式），郵件內容會自動跳脫。可用變數：`.Code` `.URL` `.Service` `.FromName` `.FromAddr` `.To` `.Subject` `.Mailbox` `.Date` `.Rule`。依結果使用 `code` / `link` / `both` 範本，查找順序：信箱 `templates` → 全域 `templates` → 內建。按鈕（複製驗證碼、開啟連結）自動產生。範本只能依序輸出：不支援 `range`、`template`、`define`／`block`，`printf` 的寬度與精確度最多 3 位數。
+使用 Go `html/template`（Telegram HTML 格式），郵件內容會自動跳脫。可用變數：`.Code` `.URL` `.Service` `.FromName` `.FromAddr` `.To` `.Subject` `.Mailbox` `.Date` `.Rule`。依結果使用 `code` / `link` / `both` 範本，查找順序：信箱 `templates` → 全域 `templates` → 內建。按鈕（複製驗證碼、開啟連結）自動產生。範本只能依序輸出，可用：欄位（含 `.Date.Format "15:04"` 這類方法）、`if`／`else if`／`else`、`with .欄位`、最多兩段的管線（例如 `{{.Subject | html}}`），以及函式 `and` `or` `not` `eq` `ne` `lt` `le` `gt` `ge` `len` `index` `slice` `html` `urlquery` `js` `print` `printf` `println`（每個動作最多 10 個參數；`printf` 的格式必須直接寫在範本裡，寬度與精確度最多 3 位數）。不支援 `range`、`template`、`define`／`block`、變數（`$`）與括號內的子運算。
 
 ## 健康檢查
 

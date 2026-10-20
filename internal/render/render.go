@@ -53,7 +53,7 @@ var trialData = Data{Code: "123456", URL: "https://example.com/verify?token=abc"
 	Mailbox: "Mailbox", Rule: "builtin:code", Date: time.Unix(0, 0)}
 
 func compile(path, src string) (*template.Template, error) {
-	t, err := template.New(path).Option("missingkey=error").Funcs(funcs).Parse(src)
+	t, err := template.New(path).Option("missingkey=error").Parse(src)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
