@@ -138,7 +138,7 @@ CREATE TABLE sessions (
 ### 3.1 首次設定與救援
 
 - 資料庫沒有管理員時，以 `RELAY_ADMIN_PASSWORD` 建立（argon2id 雜湊）。之後此變數不再使用，改密碼在 Web 上進行。
-- 第一次登入（只需密碼）後，session 處於「待綁定 TOTP」狀態，除了綁定頁與登出外所有頁面都導向綁定頁。綁定頁顯示 QR code（`otpauth://` URI）與手動輸入用的 base32 金鑰，輸入一組正確驗證碼後才完成綁定。
+- 第一次登入（只需密碼）後，session 處於「待綁定 TOTP」狀態（由 `admin.totp_secret IS NULL` 推導，不另存欄位），除了綁定頁與登出外所有頁面都導向綁定頁。綁定頁顯示 QR code（`otpauth://` URI）與手動輸入用的 base32 金鑰，輸入一組正確驗證碼後才完成綁定。
 - 不提供「第一個訪客建立帳號」的流程，避免公網上被搶先建立。
 - 救援：`kubectl exec -it ... /relay admin reset`。
 
@@ -156,7 +156,7 @@ CREATE TABLE sessions (
 - **密碼正確但驗證碼錯誤**：立即發 Telegram 告警到 admin 目標（附 IP、User-Agent），內容建議立刻修改密碼。頁面上與其他失敗無法區分。
 - **登入成功通知**：發到 admin 目標，附 IP 與 User-Agent。
 - **失敗摘要**：一小時內失敗超過 10 次時發一則摘要（每小時最多一則）。
-- 告警沿用 `alert` 套件（去重、寫入 outbox）；未設定 admin 目標時只寫日誌。告警文字不含密碼或驗證碼。
+- 「密碼正確但驗證碼錯誤」走 `alert` 套件（一小時去重即可）。登入成功通知與失敗摘要**不經去重**，直接寫入 outbox 送往 admin 目標，每次登入都會通知。未設定 admin 目標時只寫日誌。通知文字不含密碼或驗證碼。
 
 ### 3.4 Session 與請求防護
 
@@ -171,6 +171,8 @@ CREATE TABLE sessions (
 ## 4. 頁面
 
 導覽：總覽、信箱、Telegram、規則與範本、轉發紀錄、系統設定。視覺與互動細節在實作時以 frontend-design skill 設計；以下為功能需求。
+
+**CSP 限制**：所有 CSS／JS 都是 `embed` 的獨立檔案，不使用 inline `<style>`、`style=` 屬性、inline `<script>` 或 `onclick` 等事件屬性；字型使用系統字型或打包進執行檔，不載入任何外部資源（CDN、Google Fonts）。
 
 ### 4.1 總覽
 
@@ -237,6 +239,7 @@ CREATE TABLE sessions (
 - 選配：K3s `HelmChartConfig` 設定 Traefik `forwardedHeaders.trustedIPs` 包含 Caddy 的 IP，否則通知中的 IP 會是 Caddy 的位址；搭配系統設定頁的「目前被判定的 IP」確認。
 - 首次部署：apply → 以 Secret 中的密碼登入 → 綁定 TOTP → 在 Web 新增設定，或 `relay config import`。
 - 從現有 ConfigMap 部署遷移：先 `kubectl exec -i ... /relay config import /dev/stdin < config.yaml`（需能展開的環境變數仍在 Secret 中），確認後再套用新的 manifests 並把機密從 `secret.env` 移除。
+- 部署後到首次登入綁定 TOTP 之前，任何知道密碼的人都能完成綁定：部署後應立即登入綁定，`RELAY_ADMIN_PASSWORD` 要夠長且隨機。
 - 資料庫含所有機密，備份需妥善保管。
 - 手動驗證清單加入 Web 相關項目（§6.4）。
 
