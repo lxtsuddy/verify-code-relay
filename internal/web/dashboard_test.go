@@ -263,3 +263,38 @@ func TestNoPageLeaksSecrets(t *testing.T) {
 		}
 	}
 }
+
+// Logs and the overview's recent forwards name a mailbox by its display name, with the
+// key as a secondary label; a mailbox deleted since keeps its key.
+func TestLogRowsShowDisplayName(t *testing.T) {
+	e := newEnv(t, withSample) // gmail: 個人 Gmail
+	e.login()
+	ctx := context.Background()
+	for i, mb := range []string{"gmail", "gone"} {
+		e.st.RecordMessage(ctx, store.LogEntry{At: e.now.Add(time.Duration(i) * time.Second), Mailbox: mb, Folder: "[Gmail]/Spam", UID: uint32(i + 1),
+			FromAddr: "a@b", Subject: "s" + mb, Kind: "none", Result: "not_forwarded"}, nil, store.MailboxState{UIDValidity: 1, LastUID: uint32(i + 1)})
+	}
+	for _, path := range []string{"/logs", "/"} {
+		_, body := e.get(path)
+		if !strings.Contains(body, `<span class="log-mb">個人 Gmail<span class="log-key mono">gmail</span></span>`) {
+			t.Errorf("%s: display name row missing", path)
+		}
+		if !strings.Contains(body, `<span class="log-mb">gone</span>`) {
+			t.Errorf("%s: deleted mailbox row missing", path)
+		}
+	}
+	_, body := e.get("/api/status")
+	if !strings.Contains(body, `"mailbox":"gmail","mailbox_label":"個人 Gmail"`) || !strings.Contains(body, `"mailbox":"gone","mailbox_label":"gone"`) {
+		t.Errorf("status recent = %s", body)
+	}
+}
+
+// The log page promises only what the pipeline does: recognised codes are masked.
+func TestLogsPageWording(t *testing.T) {
+	e := newEnv(t, nil)
+	e.login()
+	_, body := e.get("/logs")
+	if strings.Contains(body, "主旨裡的驗證碼已遮蔽") || !strings.Contains(body, "已辨識的驗證碼會在主旨中遮蔽") {
+		t.Error("log page wording")
+	}
+}

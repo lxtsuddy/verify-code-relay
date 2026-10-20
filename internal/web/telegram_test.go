@@ -180,8 +180,21 @@ func TestDeleteBotAndTarget(t *testing.T) {
 	e.login()
 	// target me: used by mailbox gmail and as the admin target
 	resp, _ := e.postForm("/telegram/targets/me/delete", nil)
-	if f := e.flash(resp); resp.StatusCode != 303 || !strings.Contains(f, "gmail") || !strings.Contains(f, "通知對象") {
+	if f := e.flash(resp); resp.StatusCode != 303 || f != "目標 me 仍被信箱 gmail 及通知對象（系統設定）使用" {
 		t.Fatalf("delete used target = %d %q", resp.StatusCode, f)
+	}
+	if _, page := e.get("/telegram"); !strings.Contains(page, "它仍被信箱 gmail 及系統通知使用") {
+		t.Error("target delete confirm text")
+	}
+	raw, _, _ := runtime.LoadConfig(context.Background(), e.st)
+	raw.Admin = ""
+	saveRaw(e, raw)
+	resp, _ = e.postForm("/telegram/targets/me/delete", nil)
+	if f := e.flash(resp); f != "目標 me 仍被信箱 gmail 使用" {
+		t.Fatalf("delete target used by a mailbox = %q", f)
+	}
+	if _, page := e.get("/telegram"); !strings.Contains(page, "它仍被信箱 gmail 使用") {
+		t.Error("target delete confirm text (mailbox only)")
 	}
 	resp, _ = e.postForm("/telegram/bots/main/delete", nil)
 	if f := e.flash(resp); resp.StatusCode != 303 || f != "Bot main 仍被目標 me 使用" {
@@ -196,7 +209,7 @@ func TestDeleteBotAndTarget(t *testing.T) {
 	if resp, _ := e.postForm("/telegram/bots/spare/delete", nil); resp.StatusCode != 303 || !strings.Contains(e.flash(resp), "已刪除") {
 		t.Fatalf("delete bot = %d %q", resp.StatusCode, e.flash(resp))
 	}
-	raw, _, _ := runtime.LoadConfig(context.Background(), e.st)
+	raw, _, _ = runtime.LoadConfig(context.Background(), e.st)
 	if _, ok := raw.Bots["spare"]; ok {
 		t.Fatal("bot not deleted")
 	}

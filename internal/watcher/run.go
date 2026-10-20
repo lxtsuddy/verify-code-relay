@@ -89,7 +89,7 @@ func (w *Watcher) Run(ctx context.Context) {
 				wait = rem
 			}
 		}
-		w.log.Warn("連線中斷，稍後重試", "err", err, "retry_in", wait.Round(time.Millisecond))
+		w.log.Warn("連線中斷，稍後重試", "err", err, "retry_in", wait.Round(time.Millisecond).String())
 		backoff = nextBackoff(backoff, w.cfg.MaxBackoff)
 		select {
 		case <-ctx.Done():

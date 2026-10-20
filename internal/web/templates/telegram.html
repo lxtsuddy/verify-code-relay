@@ -74,7 +74,7 @@
           <button type="submit" class="btn btn-sm" data-busy-text="發送中…">{{template "icon" "send"}}<span>發送測試</span></button>
         </form>
         <button type="button" class="btn btn-sm" data-modal-open="dlg-target-{{.Name}}" aria-label="編輯目標 {{.Name}}">{{template "icon" "edit"}}<span class="tg-btn-text">編輯</span></button>
-        <form method="post" action="/telegram/targets/{{.Name}}/delete" data-confirm="刪除目標 {{.Name}}？{{if or .Mailboxes .Admin}}&#10;它仍被{{if .Mailboxes}}信箱 {{range $i, $m := .Mailboxes}}{{if $i}}、{{end}}{{$m}}{{end}}{{end}}{{if and .Mailboxes .Admin}}及{{end}}{{if .Admin}}系統通知{{end}}使用，必須先改掉這些設定。{{end}}" data-confirm-ok="刪除">
+        <form method="post" action="/telegram/targets/{{.Name}}/delete" data-confirm="刪除目標 {{.Name}}？{{if or .Mailboxes .Admin}}&#10;它仍被{{if .Mailboxes}}信箱 {{range $i, $m := .Mailboxes}}{{if $i}}、{{end}}{{$m}}{{end}} {{end}}{{if and .Mailboxes .Admin}}及{{end}}{{if .Admin}}系統通知{{end}}使用，必須先改掉這些設定。{{end}}" data-confirm-ok="刪除">
           {{template "csrf" $}}
           <button type="submit" class="btn btn-sm btn-danger" aria-label="刪除目標 {{.Name}}">{{template "icon" "trash"}}<span class="tg-btn-text">刪除</span></button>
         </form>

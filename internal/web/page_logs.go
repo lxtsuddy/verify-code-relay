@@ -87,6 +87,12 @@ func (s *Server) getLogs(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		d.Rows = append(d.Rows, viewLog(row))
 	}
+	raw, _, err := runtime.LoadConfig(ctx, s.o.Store)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	labelLogs(d.Rows, raw)
 	if len(d.Rows) > 0 {
 		d.First = lq.Offset + 1
 		d.Last = lq.Offset + len(d.Rows)
@@ -100,11 +106,6 @@ func (s *Server) getLogs(w http.ResponseWriter, r *http.Request) {
 	d.Filtered = d.Mailbox != "" || d.Result != ""
 	d.ClearURL = "/logs"
 
-	raw, _, err := runtime.LoadConfig(ctx, s.o.Store)
-	if err != nil {
-		s.serverError(w, r, err)
-		return
-	}
 	names := sortedNames(raw.Mailboxes)
 	if d.Mailbox != "" && !slices.Contains(names, d.Mailbox) {
 		names = append(names, d.Mailbox) // a deleted mailbox still has its history

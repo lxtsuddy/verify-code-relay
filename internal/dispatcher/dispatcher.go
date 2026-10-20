@@ -190,7 +190,7 @@ func (d *Dispatcher) send(ctx context.Context, it store.OutboxItem) {
 		if delay > backoffMax {
 			delay = backoffMax
 		}
-		d.o.Log.Warn("發送失敗，稍後重試", "target", it.Target, "err", se.Description, "retry_in", delay)
+		d.o.Log.Warn("發送失敗，稍後重試", "target", it.Target, "err", se.Description, "retry_in", delay.String())
 		d.storeOK(it, "重新排程失敗", d.o.Store.RescheduleOutbox(ctx, it.ID, it.Attempts+1, failedAt.Add(delay), it.PlainFallback))
 	}
 }

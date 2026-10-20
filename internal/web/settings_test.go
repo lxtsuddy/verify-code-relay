@@ -411,3 +411,17 @@ func TestRestoreDropsStaleOAuthToken(t *testing.T) {
 		t.Fatal("token kept after restoring a version without the mailbox")
 	}
 }
+
+// The change-password and re-bind forms show the zh-Hant inline errors, not the browser's
+// own validation bubbles (in the browser's language).
+func TestSecurityFormsAreNovalidate(t *testing.T) {
+	e := newEnv(t, nil)
+	e.login()
+	_, body := e.get("/settings")
+	for _, action := range []string{"/settings/password#security", "/settings/totp#security"} {
+		m := regexp.MustCompile(`<form [^>]*action="` + regexp.QuoteMeta(action) + `"[^>]*>`).FindString(body)
+		if m == "" || !strings.Contains(m, " novalidate") {
+			t.Errorf("form %s = %q, want novalidate", action, m)
+		}
+	}
+}

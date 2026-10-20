@@ -188,3 +188,41 @@ func TestRecentChatsDropsChatsTheBotLeft(t *testing.T) {
 		t.Fatalf("chats = %+v, want 42 and -1002 (re-added) only", chats)
 	}
 }
+
+// A transport failure is explained without the request URL (which holds the token path)
+// and without Go's "Get "…": dial tcp …" wording, for getMe, getUpdates and sendMessage.
+func TestTransportErrorIsSummarised(t *testing.T) {
+	c := &Client{BaseURL: "http://127.0.0.1:1", HTTP: &http.Client{}}
+	check := func(what, text string) {
+		t.Helper()
+		if !strings.HasPrefix(text, "無法連線到 Telegram（") || !strings.HasSuffix(text, "）") {
+			t.Errorf("%s = %q", what, text)
+		}
+		for _, bad := range []string{"SECRET", "<token>", "http://", "/bot", "Get ", "Post ", "dial tcp"} {
+			if strings.Contains(text, bad) {
+				t.Errorf("%s contains %q: %q", what, bad, text)
+			}
+		}
+	}
+	_, err := c.GetMe(context.Background(), "123:SECRET")
+	check("getMe", err.Error())
+	_, err = c.RecentChats(context.Background(), "123:SECRET")
+	check("getUpdates", err.Error())
+	var ae *APIError
+	if !errors.As(err, &ae) || ae.Status != 0 || ae.Rejected() {
+		t.Errorf("getUpdates error = %#v", err)
+	}
+	err = c.Send(context.Background(), SendRequest{Token: "123:SECRET", ChatID: 1, Text: "x"})
+	var se *SendError
+	if !errors.As(err, &se) || se.Kind != Transient {
+		t.Fatalf("send error = %#v", err)
+	}
+	check("sendMessage", se.Description)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 0)
+	defer cancel()
+	_, err = c.GetMe(ctx, "123:SECRET")
+	if check("getMe timeout", err.Error()); !strings.Contains(err.Error(), "逾時") {
+		t.Errorf("timeout = %q", err.Error())
+	}
+}

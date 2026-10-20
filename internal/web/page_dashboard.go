@@ -151,19 +151,20 @@ func health(cards []dashMailbox, applying bool) dashHealth {
 
 // logView is one forward_log row as shown (and as sent in the JSON).
 type logView struct {
-	At          time.Time
-	Mailbox     string
-	Folder      string
-	From        string
-	Subject     string
-	Kind        string
-	KindLabel   string
-	Hit         bool // something was recognised (code, link or both)
-	Rule        string
-	Result      string
-	ResultLabel string
-	ResultClass string
-	Live        bool
+	At           time.Time
+	Mailbox      string // the config key
+	MailboxLabel string // the display name; the key when unset or the mailbox is gone (see labelLogs)
+	Folder       string
+	From         string
+	Subject      string
+	Kind         string
+	KindLabel    string
+	Hit          bool // something was recognised (code, link or both)
+	Rule         string
+	Result       string
+	ResultLabel  string
+	ResultClass  string
+	Live         bool
 }
 
 var kindLabels = map[string]string{
@@ -183,7 +184,7 @@ var resultBadges = map[string]string{
 }
 
 func viewLog(r store.LogRow) logView {
-	v := logView{At: r.At, Mailbox: r.Mailbox, Folder: r.Folder, From: r.FromAddr, Subject: r.Subject,
+	v := logView{At: r.At, Mailbox: r.Mailbox, MailboxLabel: r.Mailbox, Folder: r.Folder, From: r.FromAddr, Subject: r.Subject,
 		Kind: r.Kind, Rule: r.Rule, Result: r.Result}
 	v.KindLabel = kindLabels[r.Kind]
 	if v.KindLabel == "" {
@@ -196,6 +197,16 @@ func viewLog(r store.LogRow) logView {
 	}
 	v.Live = r.Result == "pending"
 	return v
+}
+
+// labelLogs names each row's mailbox by its display name in raw; a mailbox deleted since
+// (or without a display name) keeps its key.
+func labelLogs(rows []logView, raw *config.Config) {
+	for i := range rows {
+		if m := raw.Mailboxes[rows[i].Mailbox]; m != nil && m.DisplayName != "" {
+			rows[i].MailboxLabel = m.DisplayName
+		}
+	}
 }
 
 // dashboard is everything the overview shows, read in one go.
@@ -230,6 +241,7 @@ func (s *Server) loadDashboard(ctx context.Context, withTokens bool) (*dashboard
 	for _, r := range rows {
 		d.Recent = append(d.Recent, viewLog(r))
 	}
+	labelLogs(d.Recent, raw)
 	status := map[[2]string]watcher.Status{}
 	for _, ws := range snap.Watchers {
 		status[[2]string{ws.Mailbox, ws.Folder}] = ws.Status
@@ -311,18 +323,19 @@ type apiFolder struct {
 }
 
 type apiLog struct {
-	At          string `json:"at"`
-	Mailbox     string `json:"mailbox"`
-	Folder      string `json:"folder"`
-	From        string `json:"from"`
-	Subject     string `json:"subject"`
-	Kind        string `json:"kind"`
-	KindLabel   string `json:"kind_label"`
-	Hit         bool   `json:"hit"`
-	Result      string `json:"result"`
-	ResultLabel string `json:"result_label"`
-	ResultClass string `json:"result_class"`
-	Live        bool   `json:"live"`
+	At           string `json:"at"`
+	Mailbox      string `json:"mailbox"`
+	MailboxLabel string `json:"mailbox_label"`
+	Folder       string `json:"folder"`
+	From         string `json:"from"`
+	Subject      string `json:"subject"`
+	Kind         string `json:"kind"`
+	KindLabel    string `json:"kind_label"`
+	Hit          bool   `json:"hit"`
+	Result       string `json:"result"`
+	ResultLabel  string `json:"result_label"`
+	ResultClass  string `json:"result_class"`
+	Live         bool   `json:"live"`
 }
 
 type apiStatus struct {
@@ -359,7 +372,7 @@ func (s *Server) getAPIStatus(w http.ResponseWriter, r *http.Request) {
 			NeedsLogin: ws.Status == watcher.StatusNeedsLogin, OAuth: d.microsoft[ws.Mailbox]})
 	}
 	for _, v := range d.Recent {
-		out.Recent = append(out.Recent, apiLog{At: rfc3339(v.At), Mailbox: v.Mailbox, Folder: v.Folder, From: v.From,
+		out.Recent = append(out.Recent, apiLog{At: rfc3339(v.At), Mailbox: v.Mailbox, MailboxLabel: v.MailboxLabel, Folder: v.Folder, From: v.From,
 			Subject: v.Subject, Kind: v.Kind, KindLabel: v.KindLabel, Hit: v.Hit,
 			Result: v.Result, ResultLabel: v.ResultLabel, ResultClass: v.ResultClass, Live: v.Live})
 	}

@@ -111,7 +111,7 @@ func (c *Client) Send(ctx context.Context, req SendRequest) error {
 	}
 	resp, err := hc.Do(hreq)
 	if err != nil {
-		return &SendError{Kind: Transient, Description: redact(err.Error())}
+		return &SendError{Kind: Transient, Description: redact(transportError(err))}
 	}
 	defer resp.Body.Close()
 	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))

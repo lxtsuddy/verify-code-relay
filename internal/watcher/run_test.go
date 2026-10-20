@@ -1,8 +1,12 @@
 package watcher
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
+	"regexp"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -433,5 +437,36 @@ func TestRunDisconnectDuringBodyFetch(t *testing.T) {
 	st, _, _ := e.st.GetMailboxState(context.Background(), "mb", "INBOX")
 	if st.LastUID != 1 {
 		t.Fatalf("watermark = %+v, want last_uid 1", st)
+	}
+}
+
+// lockedBuf is a bytes.Buffer safe for the watcher's goroutine and the test.
+type lockedBuf struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (l *lockedBuf) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.Write(p)
+}
+
+func (l *lockedBuf) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.b.String()
+}
+
+// The reconnect log gives retry_in as a readable duration ("1.5s"), not nanoseconds.
+func TestRunRetryInIsReadable(t *testing.T) {
+	var buf lockedBuf
+	e := newEnv(t, nil, func(c *Config) { c.Log = slog.New(slog.NewJSONHandler(&buf, nil)) })
+	e.dialer.fail.Store(true)
+	stop := startRun(t, e)
+	eventually(t, "reconnect log", func() bool { return strings.Contains(buf.String(), "連線中斷，稍後重試") })
+	stop()
+	if !regexp.MustCompile(`"retry_in":"[0-9.]+(ms|s)"`).MatchString(buf.String()) {
+		t.Fatalf("log = %s", buf.String())
 	}
 }

@@ -1696,8 +1696,11 @@
     if (r.at) time.appendChild(timeEl(r.at));
     tr.appendChild(time);
     var mb = el("td", "c-mb");
-    mb.appendChild(el("span", "log-mb", r.mailbox));
-    mb.appendChild(el("span", "log-folder mono", r.folder));
+    var label = r.mailbox_label || r.mailbox;
+    var name = mb.appendChild(el("span", "log-mb", label));
+    if (label !== r.mailbox) name.appendChild(el("span", "log-key mono", r.mailbox));
+    var folder = mb.appendChild(el("span", "log-folder mono", r.folder));
+    folder.title = r.folder;
     tr.appendChild(mb);
     var msg = el("td", "c-msg");
     var subj = el("span", "log-subject", r.subject ? r.subject : null);

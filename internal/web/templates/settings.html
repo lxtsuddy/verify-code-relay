@@ -70,7 +70,7 @@
 
 <h2 class="section-title" id="security">登入安全</h2>
 <div class="grid-2 grid-cards">
-  <form class="card" method="post" action="/settings/password#security" aria-labelledby="pw-title">
+  <form class="card" method="post" action="/settings/password#security" novalidate aria-labelledby="pw-title">
     {{template "csrf" .}}
     <input type="text" name="username" value="admin" autocomplete="username" hidden>
     <header class="card-head">
@@ -115,7 +115,7 @@
     </footer>
   </form>
 
-  <form class="card" method="post" action="/settings/totp#security" aria-labelledby="totp-title">
+  <form class="card" method="post" action="/settings/totp#security" novalidate aria-labelledby="totp-title">
     {{template "csrf" .}}
     <header class="card-head">
       <div>

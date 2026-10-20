@@ -3,8 +3,10 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -183,7 +185,8 @@ func (c *Client) call(ctx context.Context, token, method string, params url.Valu
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
-		return fail(0, 0, "無法連線："+err.Error())
+		text := redact(transportError(err))
+		return &APIError{Method: method, Description: text, msg: text}
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
@@ -210,4 +213,29 @@ func (c *Client) call(ctx context.Context, token, method string, params url.Valu
 		return fail(resp.StatusCode, 0, "無法解讀回應內容："+err.Error())
 	}
 	return nil
+}
+
+// transportError explains a request that got no response from Telegram, as
+// 「無法連線到 Telegram（reason）」: the reason without the request URL (which holds the
+// token) and without Go's "Get "…": dial tcp …" wording.
+func transportError(err error) string {
+	var reason string
+	var dnsErr *net.DNSError
+	var opErr *net.OpError
+	var ue *url.Error
+	switch {
+	case errors.Is(err, context.DeadlineExceeded) || (errors.As(err, &ue) && ue.Timeout()):
+		reason = "逾時"
+	case errors.Is(err, context.Canceled):
+		reason = "已取消"
+	case errors.As(err, &dnsErr):
+		reason = "找不到主機 " + dnsErr.Name
+	case errors.As(err, &opErr) && opErr.Err != nil:
+		reason = opErr.Err.Error()
+	case errors.As(err, &ue):
+		reason = ue.Err.Error()
+	default:
+		reason = err.Error()
+	}
+	return "無法連線到 Telegram（" + reason + "）"
 }

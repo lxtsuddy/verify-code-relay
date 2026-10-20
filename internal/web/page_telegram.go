@@ -489,7 +489,7 @@ func (s *Server) postTargetDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		var users []string
 		if m := mailboxesUsing(raw, name); len(m) > 0 {
-			users = append(users, "信箱 "+joinNames(m))
+			users = append(users, "信箱 "+joinNames(m)+" ") // a space between the names and the next word
 		}
 		if raw.Admin == name {
 			users = append(users, "通知對象（系統設定）")

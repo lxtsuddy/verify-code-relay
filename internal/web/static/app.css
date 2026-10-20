@@ -1571,7 +1571,10 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .log-table .c-time { white-space: nowrap; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .log-table .c-mb { min-width: 7em; }
 .log-mb { display: block; font-weight: 600; overflow-wrap: anywhere; }
-.log-folder { display: block; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+/* the config key beside a display name, as on the mailbox cards */
+.log-key { margin-left: 6px; font-size: 11.5px; font-weight: 500; color: var(--muted); }
+/* a folder path never breaks mid-word ("[Gmail]/Spa m"); a long one ends in … (full name in title) */
+.log-folder { display: block; max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--muted); }
 .log-table .c-msg { width: 100%; min-width: 14em; }
 .log-subject { display: block; overflow-wrap: anywhere; color: var(--ink); }
 .log-from { display: block; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
@@ -1645,7 +1648,8 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .log-table .c-result { grid-area: result; justify-self: end; }
   .log-table .c-msg { grid-area: msg; width: auto; min-width: 0; }
   .log-table .c-mb { grid-area: mb; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font-size: 13px; }
-  .log-table .c-mb .log-mb, .log-table .c-mb .log-folder { display: inline; }
+  .log-table .c-mb .log-mb { display: inline; }
+  .log-table .c-mb .log-folder { display: inline-block; max-width: 100%; vertical-align: bottom; }
   .log-table .c-kind { grid-area: kind; justify-self: end; align-self: center; }
   .log-table .c-rule { grid-area: rule; font-size: 12.5px; color: var(--muted); }
   .log-table .c-rule:has(.faint) { display: none; }
@@ -1687,11 +1691,17 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .logout-btn { padding: 6px 10px; gap: 6px; font-size: 14px; }
   .logout-btn .icon { width: 16px; height: 16px; }
 
+  /* tabs that do not fit fade out at the edges, so the clipped ones read as "scroll for
+     more"; the fades only cover the padding once scrolled to either end (the ::after
+     spacer keeps room at the end), so no tab stays faded */
   .nav {
     flex-direction: row; gap: 2px;
     margin: 0 -12px; padding: 0 12px;
     overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 36px), transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 36px), transparent);
   }
+  .nav::after { content: ""; flex: none; width: 24px; }
   .nav::-webkit-scrollbar { display: none; }
   .nav-item { flex: none; margin: 0; padding: 8px 14px 10px; border-radius: 9px 9px 0 0; font-size: 14.5px; }
   .nav-item .icon { display: none; }
