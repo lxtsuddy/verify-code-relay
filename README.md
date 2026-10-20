@@ -22,14 +22,12 @@ docker compose logs -f
 
 設定檔在 `deploy/k3s/`，以 Kustomize 管理：單一 replica（SQLite 與重複轉發的限制）、K3s 內建 `local-path` PVC 存放資料庫、以 UID 65532 及唯讀根檔案系統執行。程式只需要對外連線，不需要 Service 或 Ingress。
 
-1. **建置並推送映像**（以 GHCR 為例；amd64 節點）：
+1. **發布映像**：GitHub Actions（`.github/workflows/ci.yml`）在每次 push 時執行測試；推送 `v*` 標籤時建置 amd64 映像並發布到 `ghcr.io/lxtsuddy/verify-code-relay:<版本>`：
    ```bash
-   docker login ghcr.io
-   docker build -t ghcr.io/<帳號>/verify-code-relay:0.1.0 .
-   docker push ghcr.io/<帳號>/verify-code-relay:0.1.0
+   git tag v0.1.0 && git push origin v0.1.0
    ```
-   GHCR 新建的套件預設為私有，需在 GitHub 的 Package settings 改成 Public，叢集才能不帶憑證拉取。
-2. **指定映像**：把 `deploy/k3s/kustomization.yaml` 中 `images` 的 `newName`／`newTag` 改成上一步的位置與版本。
+   private repo 發布的套件預設也是私有。首次發布後，需在 GitHub 的 Package settings 改成 Public，叢集才能不帶憑證拉取。注意：套件改成公開後就無法再改回私有。
+2. **指定版本**：`deploy/k3s/kustomization.yaml` 的 `images.newTag` 要對應已發布的標籤（不含 `v`，例如 `0.1.0`）。
 3. **準備設定與機密**（兩個檔案都已列入 `.gitignore`）：
    ```bash
    cp config.example.yaml deploy/k3s/config.yaml   # data_dir 保持 /data，http_listen 保持 ":8080"
@@ -52,7 +50,7 @@ docker compose logs -f
 
 **日常操作：**
 - 修改 `deploy/k3s/config.yaml` 或 `secret.env` 後重新 `kubectl apply -k deploy/k3s`。ConfigMap／Secret 名稱帶內容雜湊，Pod 會自動重啟套用新設定。
-- 升級：推送新版本映像、更新 `newTag`，再 `kubectl apply -k deploy/k3s`。
+- 升級：推送新的 `v*` 標籤發布映像、更新 `newTag`，再 `kubectl apply -k deploy/k3s`。
 - 健康狀態：`/healthz` 在補抓中、斷線或需要重新授權時回 503。readiness probe 據此把 Pod 標為未就緒；liveness probe 只檢查 8080 埠是否在聽，避免因授權失效被不斷重啟。
 - 備份：資料庫在 PVC 上（`local-path` 預設位於節點的 `/var/lib/rancher/k3s/storage/`），內含 OAuth token，請妥善保管。
 - 刪除：`kubectl delete -k deploy/k3s` 會一併刪除 PVC 與資料庫。

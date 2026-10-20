@@ -24,7 +24,7 @@ secretGenerator:
 # 改成你推送的映像位置與版本。
 images:
   - name: verify-code-relay
-    newName: ghcr.io/CHANGE-ME/verify-code-relay
+    newName: ghcr.io/lxtsuddy/verify-code-relay
     newTag: "0.1.0"
 
 labels:
