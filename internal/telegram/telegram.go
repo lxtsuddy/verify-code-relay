@@ -16,8 +16,10 @@ import (
 
 type Client struct {
 	BaseURL string
-	HTTP    *http.Client
+	HTTP    *http.Client // nil uses a shared client with a 30-second timeout
 }
+
+var defaultHTTP = &http.Client{Timeout: 30 * time.Second}
 
 func New() *Client {
 	return &Client{BaseURL: "https://api.telegram.org", HTTP: &http.Client{Timeout: 30 * time.Second}}
@@ -38,10 +40,18 @@ const (
 	RateLimited
 	BadRequest
 	Forbidden
+	// Unconfirmed: HTTP 200 but the response could not be read or understood. The message was
+	// most likely delivered, so it must not be retried (a retry would send a duplicate).
+	Unconfirmed
 )
 
+var kindNames = [...]string{"transient", "rate_limited", "bad_request", "forbidden", "unconfirmed"}
+
 func (k ErrorKind) String() string {
-	return [...]string{"transient", "rate_limited", "bad_request", "forbidden"}[k]
+	if k < 0 || int(k) >= len(kindNames) {
+		return "unknown"
+	}
+	return kindNames[k]
 }
 
 type SendError struct {
@@ -63,7 +73,7 @@ type payload struct {
 }
 
 type apiResponse struct {
-	OK          bool   `json:"ok"`
+	OK          *bool  `json:"ok"`
 	ErrorCode   int    `json:"error_code"`
 	Description string `json:"description"`
 	Parameters  struct {
@@ -90,16 +100,29 @@ func (c *Client) Send(ctx context.Context, req SendRequest) error {
 		return &SendError{Kind: Transient, Description: redact(err.Error())}
 	}
 	hreq.Header.Set("Content-Type", "application/json")
-	resp, err := c.HTTP.Do(hreq)
+	hc := c.HTTP
+	if hc == nil {
+		hc = defaultHTTP
+	}
+	resp, err := hc.Do(hreq)
 	if err != nil {
 		return &SendError{Kind: Transient, Description: redact(err.Error())}
 	}
 	defer resp.Body.Close()
-	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	var ar apiResponse
-	_ = json.Unmarshal(raw, &ar)
-	if resp.StatusCode == http.StatusOK && ar.OK {
-		return nil
+	parseErr := json.Unmarshal(raw, &ar)
+	if resp.StatusCode == http.StatusOK {
+		switch {
+		case readErr != nil:
+			return &SendError{Kind: Unconfirmed, Description: redact("HTTP 200, reading response: " + readErr.Error())}
+		case parseErr != nil:
+			return &SendError{Kind: Unconfirmed, Description: redact("HTTP 200, parsing response: " + parseErr.Error())}
+		case ar.OK == nil:
+			return &SendError{Kind: Unconfirmed, Description: `HTTP 200, response has no "ok" field`}
+		case *ar.OK:
+			return nil
+		}
 	}
 	desc := ar.Description
 	if desc == "" {
