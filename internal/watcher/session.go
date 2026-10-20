@@ -77,7 +77,7 @@ func (w *Watcher) session(ctx context.Context, connected func()) error {
 		return fmt.Errorf("認證：%w", err)
 	}
 
-	mb, folder := w.cfg.Mailbox, w.cfg.Folder
+	folder := w.cfg.Folder
 	var sd *imap.SelectData
 	if err := w.await(c, w.cfg.CmdTimeout, func() (err error) {
 		sd, err = c.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait()
@@ -85,23 +85,9 @@ func (w *Watcher) session(ctx context.Context, connected func()) error {
 	}); err != nil {
 		return fmt.Errorf("選取資料夾 %s：%w", folder, err)
 	}
-	uidNext, err := w.uidNext(c, sd)
+	st, err := w.firstCatchUp(ctx, c, sd)
 	if err != nil {
-		return err
-	}
-	st, ok, err := w.cfg.State.GetMailboxState(ctx, mb.Name, folder)
-	if err != nil {
-		return err
-	}
-	if !ok || st.UIDValidity != sd.UIDValidity {
-		st = store.MailboxState{UIDValidity: sd.UIDValidity, LastUID: uidNext - 1}
-		if err := w.cfg.State.SetMailboxState(ctx, mb.Name, folder, st); err != nil {
-			return err
-		}
-		w.log.Info("初始化信箱狀態，既有信件不轉發", "uidvalidity", st.UIDValidity, "last_uid", st.LastUID)
-	}
-	if err := w.drain(ctx, c, &st); err != nil {
-		return err
+		return &catchUpError{Err: err}
 	}
 	connected()
 
@@ -134,6 +120,36 @@ func (w *Watcher) session(ctx context.Context, connected func()) error {
 			return err
 		}
 	}
+}
+
+// catchUpError marks a failure after the folder was selected but before the
+// first catch-up finished: the server is reachable, yet new mail is not getting
+// through (typically a message that keeps failing to process).
+type catchUpError struct{ Err error }
+
+func (e *catchUpError) Error() string { return e.Err.Error() }
+func (e *catchUpError) Unwrap() error { return e.Err }
+
+// firstCatchUp loads (or initialises) the folder's watermark and drains
+// everything that arrived since.
+func (w *Watcher) firstCatchUp(ctx context.Context, c *imapclient.Client, sd *imap.SelectData) (store.MailboxState, error) {
+	mb, folder := w.cfg.Mailbox, w.cfg.Folder
+	uidNext, err := w.uidNext(c, sd)
+	if err != nil {
+		return store.MailboxState{}, err
+	}
+	st, ok, err := w.cfg.State.GetMailboxState(ctx, mb.Name, folder)
+	if err != nil {
+		return st, err
+	}
+	if !ok || st.UIDValidity != sd.UIDValidity {
+		st = store.MailboxState{UIDValidity: sd.UIDValidity, LastUID: uidNext - 1}
+		if err := w.cfg.State.SetMailboxState(ctx, mb.Name, folder, st); err != nil {
+			return st, err
+		}
+		w.log.Info("初始化信箱狀態，既有信件不轉發", "uidvalidity", st.UIDValidity, "last_uid", st.LastUID)
+	}
+	return st, w.drain(ctx, c, &st)
 }
 
 // drain repeats catchUp until a pass finds nothing new. It guards against

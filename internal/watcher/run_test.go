@@ -131,11 +131,44 @@ func TestRunDisconnectedAlertAndRecovery(t *testing.T) {
 	if e.w.Status() != StatusReconnecting {
 		t.Errorf("status = %s", e.w.Status())
 	}
+	if txt := e.alerts.alertText("disconnected:mb/INBOX"); !strings.Contains(txt, "無法連線") || !strings.Contains(txt, "dial refused") {
+		t.Errorf("alert text = %q, want 無法連線 with the dial error", txt)
+	}
 	e.dialer.fail.Store(false)
 	eventually(t, "recovered", func() bool {
 		_, r := e.alerts.snapshot()
 		return len(r) == 1 && r[0] == "disconnected:mb/INBOX"
 	})
+	if txt := e.alerts.recoveredText("disconnected:mb/INBOX"); !strings.Contains(txt, "已恢復連線") {
+		t.Errorf("recovered text = %q", txt)
+	}
+}
+
+// When the server is reachable but the first catch-up keeps failing, the alert
+// must say the catch-up fails, not that the server cannot be reached.
+func TestRunCatchUpFailureAlertText(t *testing.T) {
+	e := newEnv(t, nil, func(c *Config) { c.AlertAfter = 100 * time.Millisecond })
+	initWatermark(t, e)
+	e.srv.appendMsg(t, "always fails")
+	e.proc.failAll.Store(true)
+	stop := startRun(t, e)
+	defer stop()
+	eventually(t, "disconnected alert", func() bool {
+		a, _ := e.alerts.snapshot()
+		return len(a) == 1 && a[0] == "disconnected:mb/INBOX"
+	})
+	txt := e.alerts.alertText("disconnected:mb/INBOX")
+	if !strings.Contains(txt, "無法完成補抓") || strings.Contains(txt, "無法連線") || !strings.Contains(txt, "boom") {
+		t.Errorf("alert text = %q, want 無法完成補抓 with the processing error", txt)
+	}
+	e.proc.failAll.Store(false)
+	eventually(t, "recovered", func() bool {
+		_, r := e.alerts.snapshot()
+		return len(r) == 1 && r[0] == "disconnected:mb/INBOX"
+	})
+	if txt := e.alerts.recoveredText("disconnected:mb/INBOX"); strings.Contains(txt, "連線") {
+		t.Errorf("recovered text = %q, must not talk about the connection", txt)
+	}
 }
 
 func TestRunDisconnectedAlertFiresAtDeadlineNotAfterBackoff(t *testing.T) {

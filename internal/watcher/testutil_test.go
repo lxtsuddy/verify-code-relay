@@ -225,18 +225,41 @@ type fakeAlerts struct {
 	mu        sync.Mutex
 	alerts    []string
 	recovered []string
+	texts     map[string]string // key -> text of the latest Alert or Recovered
 }
 
-func (a *fakeAlerts) Alert(key, _ string) {
+func (a *fakeAlerts) Alert(key, text string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.alerts = append(a.alerts, key)
+	a.setText("alert:"+key, text)
 }
 
-func (a *fakeAlerts) Recovered(key, _ string) {
+func (a *fakeAlerts) Recovered(key, text string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.recovered = append(a.recovered, key)
+	a.setText("recovered:"+key, text)
+}
+
+func (a *fakeAlerts) setText(k, text string) {
+	if a.texts == nil {
+		a.texts = map[string]string{}
+	}
+	a.texts[k] = text
+}
+
+// alertText and recoveredText return the latest text sent for key.
+func (a *fakeAlerts) alertText(key string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.texts["alert:"+key]
+}
+
+func (a *fakeAlerts) recoveredText(key string) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.texts["recovered:"+key]
 }
 
 func (a *fakeAlerts) snapshot() ([]string, []string) {
