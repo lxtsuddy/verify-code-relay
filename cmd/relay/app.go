@@ -22,6 +22,26 @@ func newFlags(name string, configPath *string, stderr io.Writer) *flag.FlagSet {
 	return fs
 }
 
+// parseInterspersed parses flags that may appear before or after positional
+// arguments (flag.Parse stops at the first positional) and returns the
+// positionals. Everything after a "--" is positional.
+func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
+	var pos []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		rest := fs.Args()
+		if len(rest) == 0 {
+			return pos, nil
+		}
+		if n := len(args) - len(rest); n > 0 && args[n-1] == "--" {
+			return append(pos, rest...), nil
+		}
+		pos, args = append(pos, rest[0]), rest[1:]
+	}
+}
+
 type app struct {
 	cfg        *config.Config
 	recognizer *recognize.Chain

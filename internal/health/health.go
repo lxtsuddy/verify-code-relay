@@ -19,9 +19,12 @@ func Handler(sources []Source) http.Handler {
 		healthy := true
 		for _, s := range sources {
 			st := s.StatusString()
-			statuses[s.Key()] = st
 			if st != "connected" {
 				healthy = false
+			}
+			// 同一個 key 重複時保留不健康的狀態，讓內容與 503 一致
+			if prev, ok := statuses[s.Key()]; !ok || prev == "connected" {
+				statuses[s.Key()] = st
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
