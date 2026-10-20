@@ -23,7 +23,7 @@
       </div>
     </header>
     <div class="card-body">
-      <details class="rule-guide">
+      <details class="rule-guide"{{if lt (len .Data.Rules) 2}} open{{end}}>
         <summary>{{template "icon" "info"}}<span>欄位說明</span></summary>
         <dl class="rule-guide-list">
           <div><dt>寄件者</dt><dd>寄件地址，可用萬用字元：<code>*</code> 代表任意文字、<code>?</code> 代表一個字元，不分大小寫。例如 <code>*@github.com</code>。</dd></div>
@@ -103,8 +103,8 @@
       {{template "rule-input" (dict "ID" (printf "%s-from" $id) "Name" "rule_from" "Label" "寄件者" "Value" $r.From "Err" (fieldErr $e (printf "%s.from" $p)) "Placeholder" "例：*@github.com" "Hint" "萬用字元 * 與 ?，不分大小寫。")}}
       {{template "rule-input" (dict "ID" (printf "%s-subject" $id) "Name" "rule_subject" "Label" "主旨" "Opt" "正規表示式" "Value" $r.Subject "Err" (fieldErr $e (printf "%s.subject" $p)) "Placeholder" "例：(?i)verify" "Hint" "部分符合即可。")}}
       <div class="rule-extract">
-        {{template "rule-input" (dict "ID" (printf "%s-code_regex" $id) "Name" "rule_code_regex" "Label" "驗證碼" "Opt" "code_regex" "Value" $r.CodeRegex "Err" (fieldErr $e (printf "%s.code_regex" $p)) "Placeholder" "例：code:\\s*(\\d{6})" "Hint" "比對主旨＋內文，取第一個有值的擷取群組。")}}
-        {{template "rule-input" (dict "ID" (printf "%s-link_regex" $id) "Name" "rule_link_regex" "Label" "連結" "Opt" "link_regex" "Value" $r.LinkRegex "Err" (fieldErr $e (printf "%s.link_regex" $p)) "Placeholder" "例：^https://github\\.com/login/" "Hint" "挑選網址符合的連結，轉發完整網址。")}}
+        {{template "rule-input" (dict "ID" (printf "%s-code_regex" $id) "Name" "rule_code_regex" "Label" "驗證碼" "Opt" "code_regex" "Value" $r.CodeRegex "Err" (fieldErr $e (printf "%s.code_regex" $p)) "Placeholder" "例：code:\\s*(\\d{6})" "Hint" "比對「主旨＋換行＋內文」；有擷取群組時取第一個有值的群組，沒有群組時取整段比對結果。")}}
+        {{template "rule-input" (dict "ID" (printf "%s-link_regex" $id) "Name" "rule_link_regex" "Label" "連結" "Opt" "link_regex" "Value" $r.LinkRegex "Err" (fieldErr $e (printf "%s.link_regex" $p)) "Placeholder" "例：^https://github\\.com/login/" "Hint" "用來挑選連結：網址符合的連結，轉發它的完整網址。")}}
       </div>
     </div>
   </div>

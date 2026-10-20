@@ -1194,7 +1194,7 @@
   document.addEventListener("keydown", function (e) {
     if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
     var li = e.target instanceof Element ? e.target.closest("form[data-rules-form] [data-rule]") : null;
-    if (!li) return;
+    if (!li || e.target.tagName === "SELECT") return; // Alt+↓ opens a select's list
     e.preventDefault();
     moveRule(li, e.key === "ArrowUp" ? "up" : "down", document.activeElement);
   });
@@ -1555,7 +1555,7 @@
       var bad = form.querySelector('[data-tpl-panel] [aria-invalid="true"]');
       var first = bad ? bad.closest("[data-tpl-panel]") : form.querySelector("[data-tpl-panel]");
       var hash = (location.hash || "").slice(1);
-      if (!bad && form.querySelector('[data-tpl-panel="' + hash + '"]')) first = form.querySelector('[data-tpl-panel="' + hash + '"]');
+      if (!bad && /^(code|link|both)$/.test(hash)) first = form.querySelector('[data-tpl-panel="' + hash + '"]') || first;
       if (first) selectTab(form, first.dataset.tplPanel, false);
     });
     document.querySelectorAll("[data-tpl-preview]").forEach(runPreview);

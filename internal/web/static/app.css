@@ -1184,6 +1184,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 
 .rules-form, .tpl-form { max-width: 980px; }
 .rules-form .card-head { flex-wrap: wrap; }
+.rules-form .card-head > div:first-child { flex: 1 1 360px; }
 
 .rule-guide { margin-bottom: 16px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
 .rule-guide > summary {
