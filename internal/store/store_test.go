@@ -113,6 +113,64 @@ func TestWALFilesArePrivate(t *testing.T) {
 	}
 }
 
+func TestOpenPathWithURISpecialChars(t *testing.T) {
+	for _, name := range []string{"q?x", "h#x", "p%41x", "p%x", "s p&a=b"} {
+		t.Run(name, func(t *testing.T) {
+			parent := t.TempDir()
+			dir := filepath.Join(parent, name)
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			p := filepath.Join(dir, "relay.db")
+			s, err := Open(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.SetMailboxState(ctx, "g", "INBOX", MailboxState{1, 7}); err != nil {
+				t.Fatal(err)
+			}
+			// SQLite must have opened exactly p, not a mangled name elsewhere.
+			if _, err := os.Stat(p + "-wal"); err != nil {
+				t.Errorf("SQLite did not open %q: %v", p, err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			s2, err := Open(p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s2.Close()
+			st, ok, err := s2.GetMailboxState(ctx, "g", "INBOX")
+			if err != nil || !ok || st.LastUID != 7 {
+				t.Fatalf("reopen: got %+v %v %v", st, ok, err)
+			}
+			ents, err := os.ReadDir(parent)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(ents) != 1 {
+				t.Errorf("stray files next to data dir: %v", ents)
+			}
+		})
+	}
+}
+
+func TestOpenRelativePath(t *testing.T) {
+	t.Chdir(t.TempDir())
+	s, err := Open("relay.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.SetMailboxState(ctx, "g", "INBOX", MailboxState{1, 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat("relay.db-wal"); err != nil {
+		t.Fatalf("database not opened at the relative path: %v", err)
+	}
+}
+
 func TestMailboxState(t *testing.T) {
 	s := openTest(t)
 	if _, ok, err := s.GetMailboxState(ctx, "g", "INBOX"); ok || err != nil {

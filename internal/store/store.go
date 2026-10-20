@@ -5,7 +5,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -69,7 +71,11 @@ func Open(path string) (*Store, error) {
 	if err := os.Chmod(path, 0o600); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	dsn, err := fileURI(path)
+	if err != nil {
+		return nil, err
+	}
+	db, err := sql.Open("sqlite", dsn+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
@@ -80,6 +86,19 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	return s, nil
+}
+
+// fileURI turns a filesystem path into an SQLite "file:" URI. The path is made
+// absolute (so a leading "//" or a relative name is never read as a URI authority)
+// and percent-encoded, so '?', '#' and '%' in data_dir are taken literally instead
+// of starting the query, the fragment or an escape.
+func fileURI(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("資料庫路徑：%w", err)
+	}
+	u := url.URL{Path: filepath.ToSlash(abs)}
+	return "file:" + u.EscapedPath(), nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
