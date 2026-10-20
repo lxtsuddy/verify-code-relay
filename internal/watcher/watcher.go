@@ -30,13 +30,21 @@ const (
 
 type DialFunc func(ctx context.Context, opts *imapclient.Options) (*imapclient.Client, error)
 
-// TLSDialer dials implicit TLS with TCP keepalive.
+// TLSDialer dials implicit TLS with TCP keepalive. Cancelling ctx aborts the
+// TCP connect and the TLS handshake, so stopping the service does not wait for
+// the 30-second timeout.
 func TLSDialer(addr string) DialFunc {
-	return func(_ context.Context, opts *imapclient.Options) (*imapclient.Client, error) {
-		o := *opts
-		o.Dialer = &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 60 * time.Second}
-		o.TLSConfig = &tls.Config{MinVersion: tls.VersionTLS12}
-		return imapclient.DialTLS(addr, &o)
+	return func(ctx context.Context, opts *imapclient.Options) (*imapclient.Client, error) {
+		d := tls.Dialer{
+			NetDialer: &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 60 * time.Second},
+			// ServerName defaults to the host part of addr.
+			Config: &tls.Config{MinVersion: tls.VersionTLS12, NextProtos: []string{"imap"}},
+		}
+		conn, err := d.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			return nil, err
+		}
+		return imapclient.New(conn, opts), nil
 	}
 }
 
