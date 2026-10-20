@@ -162,7 +162,7 @@ CREATE TABLE sessions (
 
 - Cookie：`__Host-relay_session`，`HttpOnly`、`Secure`、`SameSite=Strict`、`Path=/`。瀏覽器在 `http://localhost`（port-forward）也接受 Secure cookie。
 - 閒置 30 分鐘或建立滿 12 小時失效；過期 session 定期清除；提供登出。
-- 所有非 GET 請求：檢查表單中的 CSRF token（與 session 綁定）**且** `Origin`（或缺少時的 `Referer`）必須與請求的 Host 相同。
+- 所有非 GET 請求：檢查表單中的 CSRF token（與 session 綁定）**且** `Origin`（或缺少時的 `Referer`）必須與請求的 Host 相同，scheme 必須是 https（只有 localhost／loopback 允許 http，供 port-forward 使用）。
 - 回應標頭：`Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'`、`X-Frame-Options: DENY`、`X-Content-Type-Options: nosniff`、`Referrer-Policy: same-origin`（站外不送 referrer；`no-referrer` 會讓瀏覽器在同站表單 POST 送出 `Origin: null`，使 Origin 檢查無法運作）、`Cache-Control: no-store`（靜態檔除外）。另外 `Sec-Fetch-Site` 存在且不是 `same-origin` 的非 GET 請求一律拒絕（縱深防禦）。
 - 除登入頁、靜態檔外的所有路由都需要已登入且已綁定 TOTP 的 session。
 - 機密欄位（Bot token、應用程式密碼）**只能寫入**：頁面只顯示「已設定」，送出空值代表不變；任何頁面、錯誤訊息、日誌都不得包含機密。
