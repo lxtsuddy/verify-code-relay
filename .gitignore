@@ -1,8 +1,10 @@
 /relay
 /data/
+# 含機密，不進 git：管理員密碼、匯入用的 YAML、匯出的設定備份
 .env
 config.yaml
+backup*.yaml
+/deploy/k3s/secret.env
 *.db
 *.db-*
-/deploy/k3s/secret.env
 /.claude/worktrees/

@@ -1,7 +1,7 @@
 # 部署：kubectl apply -k deploy/k3s
-# 部署前先準備（兩個檔案都不進 git）：
-#   cp config.example.yaml deploy/k3s/config.yaml   # data_dir 維持 /data，http_listen 維持 ":8080"
-#   cp .env.example deploy/k3s/secret.env           # 填入 Bot token、應用程式密碼
+# 部署前先準備 secret.env（不進 git）：
+#   cp .env.example deploy/k3s/secret.env   # 填入 RELAY_ADMIN_PASSWORD
+# 並把 ingress.yaml 的 host 改成你的網域。其餘設定全部在 Web 管理介面完成。
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: verify-code-relay
@@ -10,12 +10,12 @@ resources:
   - namespace.yaml
   - pvc.yaml
   - deployment.yaml
+  - service.yaml
+  - ingress.yaml
 
-# 內容雜湊會加到名稱後綴：修改 config.yaml 或 secret.env 後重新 apply，Pod 會自動重啟套用。
-configMapGenerator:
-  - name: relay-config
-    files:
-      - config.yaml
+# secret.env 只需要 RELAY_ADMIN_PASSWORD（至少 12 字元，部署後請立即登入綁定 TOTP）。
+# 只在資料庫還沒有管理員時使用；之後改密碼請在 Web 的系統設定進行。
+# 名稱會加上內容雜湊：修改 secret.env 後重新 apply，Pod 會自動重啟。
 secretGenerator:
   - name: relay-secrets
     envs:
@@ -25,7 +25,7 @@ secretGenerator:
 images:
   - name: verify-code-relay
     newName: ghcr.io/lxtsuddy/verify-code-relay
-    newTag: "0.1.0"
+    newTag: "0.2.0"
 
 labels:
   - pairs:

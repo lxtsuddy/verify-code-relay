@@ -1,4 +1,4 @@
-# SQLite 資料庫（信箱狀態、待發送佇列、OAuth token）。K3s 內建 local-path 儲存類別。
+# SQLite 資料庫（全部設定與機密、信箱狀態、待發送佇列、OAuth token、管理員）。K3s 內建 local-path 儲存類別。
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

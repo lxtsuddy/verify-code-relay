@@ -1,15 +1,15 @@
-# verify-code-relay 設定範例。複製為 config.yaml 後修改。
-# 機密資料請用 ${環境變數} 帶入（寫在 .env），不要直接寫在這裡。
+# verify-code-relay YAML 設定範例：只供 `relay config import` 一次匯入（及匯入前的
+# `relay config validate`）使用。服務執行時不讀這個檔案，設定存在資料庫，平常請在
+# Web 管理介面修改；`relay config export` 可把目前設定匯出成同樣格式備份。
+# 機密資料可用 ${環境變數} 帶入，匯入時從執行 import 的環境展開後存進資料庫。
 
-data_dir: /data              # SQLite 資料庫位置（Docker 內為 /data）
 log_level: info              # debug | info | warn | error
-http_listen: ":8080"         # /healthz；留空代表不啟動
 
 bots:
   main: { token: "${TG_BOT_MAIN}" }
   work: { token: "${TG_BOT_WORK}" }
 
-targets:                     # 目標 = Bot + 聊天室；chat_id 可用 @userinfobot 等工具查詢
+targets:                     # 目標 = Bot + 聊天室；chat_id 可在 Web 的 Telegram 頁「讀取最近對話」取得
   me:        { bot: main, chat_id: 123456789 }
   family:    { bot: main, chat_id: -1001234567890 }
   work_chan: { bot: work, chat_id: -1009876543210 }
@@ -38,7 +38,7 @@ mailboxes:
     username: me@outlook.com
     auth:
       type: microsoft_oauth
-      client_id: "00000000-0000-0000-0000-000000000000"   # 見 README「信箱設定 → Microsoft」
+      client_id: "00000000-0000-0000-0000-000000000000"   # 見 README「信箱設定 → Microsoft」；匯入後在 Web 的信箱頁授權
       tenant: consumers      # 個人帳號 consumers；公司帳號 organizations 或租戶 ID
     targets: [me, work_chan]
     max_age: 5m

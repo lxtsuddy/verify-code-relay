@@ -1,0 +1,18 @@
+# 經 K3s 內建的 Traefik 對外。TLS 由前面的 Caddy 處理，這裡不設定 TLS。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: verify-code-relay
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: relay.example.com # 改成你的網域（與 Caddy 設定的網域相同）
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: verify-code-relay
+                port:
+                  number: 80

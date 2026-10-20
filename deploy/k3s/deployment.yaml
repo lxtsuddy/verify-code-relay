@@ -22,25 +22,33 @@ spec:
           imagePullPolicy: IfNotPresent
           args: ["run"]
           env:
-            - name: RELAY_CONFIG
-              value: /config/config.yaml
+            # 選配：K3s 預設 Pod 網段，Traefik 由此網段轉送請求。再加上 Caddy 的 IP
+            # （以逗號分隔），並讓 Traefik 信任 Caddy 的 X-Forwarded-For（見 README），
+            # 登入通知與紀錄中才會是真實的用戶端 IP。只影響記錄，不影響安全判斷。
+            - name: RELAY_TRUSTED_PROXIES
+              value: "10.42.0.0/16"
+          # secret.env 的 RELAY_ADMIN_PASSWORD：只在資料庫還沒有管理員時使用。
           envFrom:
             - secretRef:
                 name: relay-secrets
           ports:
-            - name: http
+            - name: http # Web 管理介面，經 Service／Ingress 對外
               containerPort: 8080
-          # /healthz 在補抓中、斷線或 Outlook 需要重新授權時回 503：只標記為未就緒，不重啟。
+            - name: health # 健康檢查，只給探針使用，不經 Service 暴露
+              containerPort: 8081
+          # /readyz 只確認服務與資料庫正常，不看信箱狀態：Outlook 需要重新授權或信箱斷線時
+          # Web 仍可連線，才能在網頁上處理。信箱問題由 Telegram 告警與總覽頁呈現。
           readinessProbe:
             httpGet:
-              path: /healthz
-              port: http
+              path: /readyz
+              port: health
             periodSeconds: 15
             failureThreshold: 2
-          # 只確認程序還活著；重啟無法修復授權失效，所以不用 /healthz 判斷存活。
+          # 只確認程序還活著；重啟無法修復信箱的連線或授權問題。
           livenessProbe:
-            tcpSocket:
-              port: http
+            httpGet:
+              path: /livez
+              port: health
             initialDelaySeconds: 10
             periodSeconds: 30
             failureThreshold: 3
@@ -56,17 +64,11 @@ spec:
             capabilities:
               drop: ["ALL"]
           volumeMounts:
-            - name: config
-              mountPath: /config
-              readOnly: true
             - name: data
               mountPath: /data
             - name: tmp
               mountPath: /tmp
       volumes:
-        - name: config
-          configMap:
-            name: relay-config
         - name: data
           persistentVolumeClaim:
             claimName: relay-data

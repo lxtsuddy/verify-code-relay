@@ -42,7 +42,8 @@
 - [x] **資料庫細節**：`data_dir` 含 `?`、`#`、`%` 時 SQLite URI 會出錯；讀取版本與遷移不在同一交易內。（`internal/store/store.go`）
 - [x] **CLI 細節**：`login`、`send-test` 的參數若放在位置參數之後不會被解析；HTTP `Shutdown` 錯誤被忽略；`pruneLoop` 未等待結束；`main.go` 的 `goto parsed` 可改用標籤 break。（`cmd/relay/`）
 - [x] **健康檢查**：重複的 key 可能顯示 connected 卻回傳 503（已修正）。
-- [ ] **健康檢查**：沒有任何信箱時回傳 200——延到 Web 管理介面設計時與探針一併決定（全新安裝本來就沒有信箱）。（`internal/health/health.go`）
+- [x] **健康檢查**：沒有任何信箱時回傳 200——延到 Web 管理介面設計時與探針一併決定（全新安裝本來就沒有信箱）。（`internal/health/health.go`）
+  - 2026-10-20：以 Web 管理介面的探針設計定案：readiness／liveness 改用 `:8081` 的 `/readyz`、`/livez`，不看信箱狀態；`/healthz` 只供查看信箱明細，沒有信箱時回 200 是正確行為（全新安裝尚未設定信箱，不應視為不健康）。
 - [x] **告警**：去重用的 map 不會清理；`alert_ttl` ≤ 0 未在告警模組防護（設定驗證已擋下負值）。（`internal/alert/alert.go`）
 
 ## 二、測試補強
