@@ -213,6 +213,33 @@ func TestConcurrentOpenMigratesOnce(t *testing.T) {
 	}
 }
 
+func TestConcurrentOpenOfBrandNewFile(t *testing.T) {
+	// Switching a brand-new file to WAL can return SQLITE_BUSY without honouring
+	// busy_timeout when another connection does the same at that instant.
+	for i := 0; i < 20; i++ {
+		p := filepath.Join(t.TempDir(), "relay.db")
+		const n = 4
+		errs := make(chan error, n)
+		start := make(chan struct{})
+		for j := 0; j < n; j++ {
+			go func() {
+				<-start
+				s, err := Open(p)
+				if err == nil {
+					err = s.Close()
+				}
+				errs <- err
+			}()
+		}
+		close(start)
+		for j := 0; j < n; j++ {
+			if err := <-errs; err != nil {
+				t.Fatalf("round %d: %v", i, err)
+			}
+		}
+	}
+}
+
 func TestMailboxState(t *testing.T) {
 	s := openTest(t)
 	if _, ok, err := s.GetMailboxState(ctx, "g", "INBOX"); ok || err != nil {

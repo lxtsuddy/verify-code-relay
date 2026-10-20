@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -75,15 +76,16 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	// busy_timeout goes first so it is already in effect for the pragmas after it.
-	// It does not cover two processes switching the same brand-new file to WAL at
-	// the same instant: SQLite may then return SQLITE_BUSY without waiting.
-	db, err := sql.Open("sqlite", dsn+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	db, err := sql.Open("sqlite", dsn+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1) // single writer; avoids SQLITE_BUSY between our own goroutines
 	s := &Store{db: db}
+	if err := s.enableWAL(context.Background()); err != nil {
+		db.Close()
+		return nil, err
+	}
 	if err := s.migrate(context.Background()); err != nil {
 		db.Close()
 		return nil, err
@@ -102,6 +104,28 @@ func fileURI(path string) (string, error) {
 	}
 	u := url.URL{Path: filepath.ToSlash(abs)}
 	return "file:" + u.EscapedPath(), nil
+}
+
+// enableWAL switches the database to WAL mode, which is stored in the file and
+// kept by later connections. When two processes switch the same brand-new file at
+// the same instant, SQLite may return SQLITE_BUSY without honouring busy_timeout,
+// so busy errors are retried here for up to the same five seconds.
+func (s *Store) enableWAL(ctx context.Context) error {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var mode string
+		err := s.db.QueryRowContext(ctx, `PRAGMA journal_mode = WAL`).Scan(&mode)
+		if err == nil && mode != "wal" {
+			err = fmt.Errorf("journal_mode = %s", mode)
+		}
+		if err == nil || !strings.Contains(err.Error(), "SQLITE_BUSY") || time.Now().After(deadline) {
+			if err != nil {
+				return fmt.Errorf("啟用 WAL 模式：%w", err)
+			}
+			return nil
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 func (s *Store) Close() error { return s.db.Close() }
