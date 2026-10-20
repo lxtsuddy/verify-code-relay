@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"html"
 	"log/slog"
 	"net"
 	"strconv"
@@ -100,6 +99,11 @@ func New(o Options) *Runtime {
 func (r *Runtime) Apply(b *Built) {
 	r.applyMu.Lock()
 	defer r.applyMu.Unlock()
+	r.applyLocked(b)
+}
+
+// applyLocked does the work of Apply; r.applyMu must be held.
+func (r *Runtime) applyLocked(b *Built) {
 	r.mu.Lock()
 	r.applying = true
 	r.mu.Unlock()
@@ -125,8 +129,12 @@ func (r *Runtime) Apply(b *Built) {
 	r.opts.Log.Info("設定已套用", "watchers", len(s.watchers))
 }
 
-// Reload loads the latest stored config, builds it and applies it.
+// Reload loads the latest stored config, builds it and applies it. The config is loaded
+// while holding the apply lock, so a Reload queued behind another Apply still applies the
+// newest stored version rather than the one current when Reload was called.
 func (r *Runtime) Reload() error {
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
 	raw, _, err := LoadConfig(context.Background(), r.opts.Store)
 	if err != nil {
 		return err
@@ -135,7 +143,7 @@ func (r *Runtime) Reload() error {
 	if err != nil {
 		return fmt.Errorf("設定有誤：%w", err)
 	}
-	r.Apply(b)
+	r.applyLocked(b)
 	return nil
 }
 
@@ -244,28 +252,16 @@ func (r *Runtime) Alert(key, text string) {
 	s.alerter.Alert(key, text)
 }
 
-// Notify queues text for the admin target straight away, without deduplication. Without
-// an admin target (or a running service) it is only logged. text must not contain secrets.
+// Notify queues text for the admin target straight away, without deduplication, truncated
+// to Telegram's length limit. Without an admin target (or a running service) it is only
+// logged. text must not contain secrets.
 func (r *Runtime) Notify(text string) {
 	s := r.current()
 	if s == nil {
 		r.opts.Log.Info("通知（服務未啟動）", "text", text)
 		return
 	}
-	if s.admin == nil {
-		r.opts.Log.Info("通知（未設定 admin 目標）", "text", text)
-		return
-	}
-	now := time.Now()
-	_, err := r.opts.Store.Enqueue(context.Background(), store.OutboxItem{
-		Target: s.admin.Name, Bot: s.admin.Bot, ChatID: s.admin.ChatID, Text: "🔔 " + html.EscapeString(text),
-		CreatedAt: now, ExpiresAt: now.Add(s.built.Config.Defaults.AlertTTL.Duration), NextAttemptAt: now,
-	})
-	if err != nil {
-		r.opts.Log.Error("寫入通知失敗", "err", err, "text", text)
-		return
-	}
-	s.disp.Wake()
+	s.alerter.Notify(text)
 }
 
 type healthAdapter struct{ w *watcher.Watcher }
@@ -290,7 +286,6 @@ type service struct {
 	watchers []runningWatcher
 	alerter  *alert.Alerter
 	disp     *dispatcher.Dispatcher
-	admin    *alert.Target
 	pruner   pruner
 	log      *slog.Logger
 }
@@ -313,7 +308,7 @@ func (r *Runtime) newService(b *Built) *service {
 
 	proc := &pipeline.Processor{Store: st, Recognizer: b.Recognizer, Renderer: b.Renderer, Notify: disp.Wake, Log: log}
 
-	s := &service{built: b, alerter: alerter, disp: disp, admin: admin, pruner: st, log: log}
+	s := &service{built: b, alerter: alerter, disp: disp, pruner: st, log: log}
 	for _, name := range cfg.SortedMailboxNames() {
 		m := cfg.Mailboxes[name]
 		var targets []pipeline.Target

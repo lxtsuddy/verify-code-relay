@@ -113,6 +113,14 @@ func (a *Alerter) Recovered(key, text string) {
 	a.enqueue(fit("✅ ", text))
 }
 
+// Notify logs text and queues "🔔 text" for the admin straight away, without
+// deduplication. Like Alert, over-long text is truncated to Telegram's limit. The text is
+// written to the log as it is: it must not contain secrets.
+func (a *Alerter) Notify(text string) {
+	a.log.Info("通知", "text", text)
+	a.enqueue(fit("🔔 ", text))
+}
+
 // enqueue reports whether the alert was stored (or there is no admin target to store it for).
 func (a *Alerter) enqueue(text string) bool {
 	if a.admin == nil {

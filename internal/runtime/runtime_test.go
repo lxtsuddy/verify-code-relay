@@ -16,6 +16,7 @@ import (
 	"verify-code-relay/internal/dispatcher"
 	"verify-code-relay/internal/store"
 	"verify-code-relay/internal/telegram"
+	"verify-code-relay/internal/tglen"
 	"verify-code-relay/internal/watcher"
 
 	"github.com/emersion/go-imap/v2/imapclient"
@@ -282,5 +283,46 @@ func TestPruneLoop(t *testing.T) {
 				t.Errorf("log = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestReloadAppliesNewestVersion: a Reload that waits behind another Apply must load the
+// config only once it holds the apply lock, so a version saved meanwhile is not lost.
+func TestReloadAppliesNewestVersion(t *testing.T) {
+	rt, st, _ := newRT(t)
+	ctx := context.Background()
+	if _, _, err := SaveConfig(ctx, st, sample(), Meta{Source: "web", Summary: "v1"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	rt.applyMu.Lock() // an Apply in progress
+	done := make(chan error, 1)
+	go func() { done <- rt.Reload() }()
+	time.Sleep(100 * time.Millisecond)
+	c := sample()
+	c.Mailboxes["gmail"].Folders = []string{"INBOX", "Spam", "Archive"}
+	if _, _, err := SaveConfig(ctx, st, c, Meta{Source: "web", Summary: "v2"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	rt.applyMu.Unlock()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if n := len(rt.Snapshot().Watchers); n != 3 {
+		t.Fatalf("watchers = %d, want 3 (the newest version)", n)
+	}
+}
+
+func TestNotifyTextIsCapped(t *testing.T) {
+	rt, _, fs := newRT(t)
+	b, _ := Build(sample())
+	rt.Apply(b)
+	rt.Notify(strings.Repeat("x", 5000))
+	deadline := time.Now().Add(5 * time.Second)
+	for len(fs.texts()) < 1 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	got := fs.texts()
+	if len(got) != 1 || tglen.Len(got[0]) > tglen.Max || !strings.HasPrefix(got[0], "🔔 ") {
+		t.Fatalf("sent %d messages; first len = %d", len(got), len(strings.Join(got, "")))
 	}
 }

@@ -299,3 +299,30 @@ func TestConcurrentAlerts(t *testing.T) {
 		t.Fatalf("items = %d, woke = %d", len(q.items), woke.Load())
 	}
 }
+
+// TestNotifyIsNotDedupedAndIsCapped: Notify queues every call with the 🔔 prefix and
+// truncates over-long text to Telegram's limit like Alert does.
+func TestNotifyIsNotDedupedAndIsCapped(t *testing.T) {
+	q := &fakeQ{}
+	woke := 0
+	a := New(q, &Target{Name: "me", Bot: "main", ChatID: 42}, time.Hour, func() { woke++ }, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	a.Notify("登入成功 <b>")
+	a.Notify("登入成功 <b>")
+	if len(q.items) != 2 || woke != 2 {
+		t.Fatalf("items = %d, woke = %d, want 2 each", len(q.items), woke)
+	}
+	if q.items[0].Text != "🔔 登入成功 &lt;b&gt;" || q.items[0].Target != "me" || q.items[0].ChatID != 42 {
+		t.Errorf("item = %+v", q.items[0])
+	}
+	a.Notify(strings.Repeat("長", tglen.Max+100))
+	it := q.items[2]
+	if n := tglen.Len(it.Text); n > tglen.Max || !strings.HasPrefix(it.Text, "🔔 ") || !strings.HasSuffix(it.Text, "…") {
+		t.Fatalf("len = %d, text prefix/suffix wrong: %q…", n, it.Text[:20])
+	}
+
+	none := New(q, nil, time.Hour, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	none.Notify("x") // no admin target: logged only
+	if len(q.items) != 3 {
+		t.Fatal("Notify without admin target must not queue")
+	}
+}
