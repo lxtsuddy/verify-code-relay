@@ -45,7 +45,7 @@ mailboxes:
     templates:
       code: |
         💼 <b>{{.Service}}</b>：<code>{{.Code}}</code>
-        📧 {{.Mailbox}} · {{.Subject}}
+        📧 {{.Mailbox}}{{with .Subject}} · {{.}}{{end}}
 
 # 全域範本（選填）。可用變數：.Code .URL .Service .FromName .FromAddr .To .Subject .Mailbox .Date .Rule
 # templates:

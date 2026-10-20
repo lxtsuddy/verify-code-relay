@@ -5,3 +5,4 @@ config.yaml
 *.db
 *.db-*
 /deploy/k3s/secret.env
+/.claude/worktrees/

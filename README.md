@@ -112,6 +112,8 @@ Microsoft 已停用 IMAP 的帳號密碼登入，必須使用 OAuth2：
 1. 下載該信的 `.eml`，執行 `relay test --eml 信件.eml`，看「辨識過程」。
 2. 缺關鍵字：加到 `recognize.extra_code_keywords` / `extra_link_keywords`。
 3. 特定寄件者格式特殊：在 `rules` 加自訂規則（`from`、`subject`、`code_regex`、`link_regex`），或用 `ignore: true` 排除。
+   - `code_regex`：對「主旨＋換行＋內文」比對；有擷取群組時取第一個有值的群組，沒有群組時取整段比對結果。
+   - `link_regex`：用來**挑選**連結，不是擷取網址的一部分。只要某個連結的網址符合，就轉發該連結的完整網址。
 
 ## 範本
 
