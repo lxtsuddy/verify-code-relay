@@ -3,12 +3,15 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -85,6 +88,57 @@ func TestTestCommandPrintsTraceAndMessage(t *testing.T) {
 	}
 }
 
+func TestTestCommandWithoutMailbox(t *testing.T) {
+	p := writeConfig(t, "")
+	code, stdout, stderr := run("--config", p, "test", "--eml", "../../testdata/eml/github-device-en.eml")
+	if code != 0 || !strings.Contains(stdout, "<code>482913</code>") || !strings.Contains(stdout, "（測試）") ||
+		strings.Contains(stdout, "個人 Gmail") {
+		t.Fatalf("code=%d out=%q err=%q", code, stdout, stderr)
+	}
+}
+
+func TestTestCommandUnknownNames(t *testing.T) {
+	p := writeConfig(t, "")
+	eml := "../../testdata/eml/github-device-en.eml"
+	code, _, stderr := run("--config", p, "test", "--eml", eml, "--mailbox", "nope")
+	if code != 1 || !strings.Contains(stderr, `找不到信箱 "nope"`) {
+		t.Fatalf("--mailbox: code=%d err=%q", code, stderr)
+	}
+	code, _, stderr = run("--config", p, "test", "--eml", eml, "--send", "nobody")
+	if code != 1 || !strings.Contains(stderr, `找不到目標 "nobody"`) {
+		t.Fatalf("--send: code=%d err=%q", code, stderr)
+	}
+	code, _, stderr = run("--config", p, "test")
+	if code != 2 || !strings.Contains(stderr, "用法") {
+		t.Fatalf("no --eml: code=%d err=%q", code, stderr)
+	}
+}
+
+func TestTestCommandSend(t *testing.T) {
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/sendMessage") {
+			t.Errorf("path %s", r.URL.Path)
+		}
+		b, _ := io.ReadAll(r.Body)
+		json.Unmarshal(b, &got)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	t.Setenv("RELAY_TELEGRAM_API", srv.URL)
+	p := writeConfig(t, "")
+	code, stdout, stderr := run("--config", p, "test", "--eml", "../../testdata/eml/github-device-en.eml",
+		"--mailbox", "gmail", "--send", "me")
+	if code != 0 || !strings.Contains(stdout, "已送出到目標 me") {
+		t.Fatalf("code=%d out=%q err=%q", code, stdout, stderr)
+	}
+	text, _ := got["text"].(string)
+	if got["chat_id"] != float64(42) || got["parse_mode"] != "HTML" || !strings.Contains(text, "<code>482913</code>") ||
+		!strings.Contains(text, "個人 Gmail") || got["reply_markup"] == nil {
+		t.Fatalf("sent %v", got)
+	}
+}
+
 func TestSendTestUsesTelegram(t *testing.T) {
 	var got map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -128,6 +182,38 @@ func TestHealthcheck(t *testing.T) {
 	code, _, _ = run("healthcheck", "--url", srv.URL+"/nope")
 	if code != 1 {
 		t.Fatalf("code=%d", code)
+	}
+}
+
+// 未指定 --url 時依 http_listen 推導網址；只有埠號（":8080"）時連到 127.0.0.1。
+func TestHealthcheckURLFromConfig(t *testing.T) {
+	var status atomic.Int32
+	status.Store(http.StatusOK)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/healthz" {
+			w.WriteHeader(404)
+			return
+		}
+		w.WriteHeader(int(status.Load()))
+	}))
+	defer srv.Close()
+	addr := srv.Listener.Addr().(*net.TCPAddr)
+
+	for _, listen := range []string{addr.String(), fmt.Sprintf(":%d", addr.Port)} {
+		p := writeConfig(t, "http_listen: \""+listen+"\"\n")
+		if code, _, stderr := run("--config", p, "healthcheck"); code != 0 {
+			t.Errorf("http_listen %q: code=%d err=%q", listen, code, stderr)
+		}
+	}
+	status.Store(http.StatusServiceUnavailable)
+	p := writeConfig(t, "http_listen: \""+addr.String()+"\"\n")
+	if code, _, stderr := run("--config", p, "healthcheck"); code != 1 || !strings.Contains(stderr, "503") {
+		t.Errorf("503: code=%d err=%q", code, stderr)
+	}
+
+	p = writeConfig(t, "")
+	if code, _, stderr := run("--config", p, "healthcheck"); code != 1 || !strings.Contains(stderr, "http_listen 未設定") {
+		t.Errorf("no http_listen: code=%d err=%q", code, stderr)
 	}
 }
 
