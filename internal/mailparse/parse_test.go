@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"golang.org/x/text/encoding/simplifiedchinese"
 	"golang.org/x/text/encoding/traditionalchinese"
@@ -192,5 +193,106 @@ Content-Type: text/html; charset=utf-8
 	}
 	if !strings.Contains(m.Text, "Code 1234") {
 		t.Errorf("text should fall back to html: %q", m.Text)
+	}
+}
+
+func hasWarning(m *Message, sub string) bool {
+	for _, w := range m.Warnings {
+		if strings.Contains(w, sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func TestParseUnreadablePartFallsBackToOtherPart(t *testing.T) {
+	raw := crlf(`From: a@b.c
+Subject: s
+Content-Type: multipart/alternative; boundary="b"
+
+--b
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+!!!!not base64!!!!
+--b
+Content-Type: text/html; charset=utf-8
+
+<p>Code 1234</p>
+--b--
+`)
+	m, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Text != "Code 1234" {
+		t.Errorf("text should fall back to html: %q", m.Text)
+	}
+	if !hasWarning(m, "text/plain") {
+		t.Errorf("warnings should report the unreadable text/plain part: %q", m.Warnings)
+	}
+}
+
+func TestParseUnreadablePartKeepsDecodedPrefix(t *testing.T) {
+	body := base64.StdEncoding.EncodeToString([]byte("Your code is 482913.")) + "!!!!"
+	raw := crlf("From: a@b.c\nSubject: s\nContent-Type: text/plain\nContent-Transfer-Encoding: base64\n\n" + body + "\n")
+	m, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(m.Text, "Your code is 482913") {
+		t.Errorf("decoded prefix lost: %q", m.Text)
+	}
+	if len(m.Warnings) == 0 {
+		t.Error("read error should be reported in Warnings")
+	}
+}
+
+func TestParseNothingReadable(t *testing.T) {
+	raw := func(subject string) []byte {
+		return crlf("From: a@b.c\nSubject: " + subject +
+			"\nContent-Type: text/plain\nContent-Transfer-Encoding: base64\n\n!!!!\n")
+	}
+	// The subject alone can still carry a code, so the message is kept.
+	m, err := Parse(raw("Your code 123456"))
+	if err != nil {
+		t.Fatalf("subject is usable, want no error: %v", err)
+	}
+	if m.Subject != "Your code 123456" || len(m.Warnings) == 0 {
+		t.Errorf("subject = %q, warnings = %q", m.Subject, m.Warnings)
+	}
+	// Nothing usable at all: report the read error instead of an empty message.
+	if m, err := Parse(raw("")); err == nil {
+		t.Errorf("want error when nothing is readable, got %+v", m)
+	}
+}
+
+func TestParseTruncatesHugePart(t *testing.T) {
+	// The 10-byte prefix makes the 5 MiB cut land inside a 3-byte rune.
+	var sb strings.Builder
+	sb.WriteString("code 1234\n")
+	for sb.Len() <= maxPartBytes {
+		sb.WriteString("中")
+	}
+	sb.WriteString("\nTAIL999")
+	raw := append(crlf("From: a@b.c\nSubject: s\nContent-Type: text/plain; charset=utf-8\n\n"), sb.String()...)
+	m, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Text) > maxPartBytes {
+		t.Errorf("text is %d bytes, want <= %d", len(m.Text), maxPartBytes)
+	}
+	if !strings.HasPrefix(m.Text, "code 1234\n中") {
+		t.Errorf("text prefix = %q", m.Text[:min(len(m.Text), 20)])
+	}
+	if strings.Contains(m.Text, "TAIL999") {
+		t.Error("content past the limit should be dropped")
+	}
+	if !utf8.ValidString(m.Text) {
+		t.Errorf("truncation split a rune: tail %q", m.Text[max(0, len(m.Text)-4):])
+	}
+	if !hasWarning(m, "截斷") {
+		t.Errorf("truncation should be reported: %q", m.Warnings)
 	}
 }
