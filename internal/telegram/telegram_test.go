@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -109,5 +110,147 @@ func TestPlainText(t *testing.T) {
 	got := PlainText("🔐 <b>GitHub</b>\n<code>1 &lt; 2 &amp;&amp; 3</code>")
 	if got != "🔐 GitHub\n1 < 2 && 3" {
 		t.Errorf("got %q", got)
+	}
+}
+
+func TestErrorKindStringOutOfRange(t *testing.T) {
+	for _, k := range []ErrorKind{-1, 99} {
+		if got := k.String(); got != "unknown" {
+			t.Errorf("ErrorKind(%d).String() = %q", int(k), got)
+		}
+	}
+	for _, k := range []ErrorKind{Transient, RateLimited, BadRequest, Forbidden, Unconfirmed} {
+		if got := k.String(); got == "unknown" || got == "" {
+			t.Errorf("ErrorKind(%d) has no name: %q", int(k), got)
+		}
+	}
+}
+
+func TestSendNilHTTPUsesDefaultClient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL}
+	if err := c.Send(context.Background(), SendRequest{Token: "t", ChatID: 1, Text: "x"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A 200 whose body cannot be read or understood most likely means the message was delivered,
+// so it must not be reported as a retryable error.
+func TestSendOKStatusUnreadableIsUnconfirmed(t *testing.T) {
+	cases := map[string]http.HandlerFunc{
+		"not json": func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`<html>ok</html>`)) },
+		"empty":    func(w http.ResponseWriter, r *http.Request) {},
+		"no ok":    func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(`{"result":{}}`)) },
+		"truncated": func(w http.ResponseWriter, r *http.Request) {
+			// Promise more than we send so the client's body read fails.
+			w.Header().Set("Content-Length", "100")
+			w.Write([]byte(`{"ok":`))
+		},
+	}
+	for name, h := range cases {
+		srv := httptest.NewServer(h)
+		c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
+		err := c.Send(context.Background(), SendRequest{Token: "123:SECRET", ChatID: 1, Text: "x"})
+		srv.Close()
+		var se *SendError
+		if !errors.As(err, &se) || se.Kind != Unconfirmed {
+			t.Errorf("%s: got %#v", name, err)
+			continue
+		}
+		if strings.Contains(se.Description, "SECRET") {
+			t.Errorf("%s: token leaked: %v", name, se.Description)
+		}
+	}
+}
+
+func TestSendOKStatusButNotOK(t *testing.T) {
+	cases := []struct {
+		body string
+		kind ErrorKind
+	}{
+		{`{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}`, BadRequest},
+		{`{"ok":false,"description":"something"}`, Transient},
+	}
+	for _, tc := range cases {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(tc.body))
+		}))
+		c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
+		err := c.Send(context.Background(), SendRequest{Token: "t", ChatID: 1, Text: "x"})
+		srv.Close()
+		var se *SendError
+		if !errors.As(err, &se) || se.Kind != tc.kind {
+			t.Errorf("%s: got %#v", tc.body, err)
+		}
+	}
+}
+
+func TestSendMoreErrorKinds(t *testing.T) {
+	cases := []struct {
+		status int
+		body   string
+		kind   ErrorKind
+		retry  time.Duration
+	}{
+		{429, `{"ok":false,"error_code":429,"description":"Too Many Requests"}`, RateLimited, 5 * time.Second},
+		{429, ``, RateLimited, 5 * time.Second},
+		{500, `{"ok":false,"error_code":500,"description":"Internal Server Error"}`, Transient, 0},
+		{503, `service unavailable`, Transient, 0},
+	}
+	for _, tc := range cases {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(tc.status)
+			w.Write([]byte(tc.body))
+		}))
+		c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
+		err := c.Send(context.Background(), SendRequest{Token: "t", ChatID: 1, Text: "x"})
+		srv.Close()
+		var se *SendError
+		if !errors.As(err, &se) || se.Kind != tc.kind || se.RetryAfter != tc.retry {
+			t.Errorf("status %d %q: got %#v", tc.status, tc.body, err)
+		}
+	}
+}
+
+func TestSendRedactsTokenInDescription(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"ok":false,"error_code":404,"description":"Not Found: /bot123:SECRET/sendMessage"}`))
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
+	err := c.Send(context.Background(), SendRequest{Token: "123:SECRET", ChatID: 1, Text: "x"})
+	var se *SendError
+	if !errors.As(err, &se) {
+		t.Fatalf("got %#v", err)
+	}
+	if strings.Contains(se.Description, "SECRET") || !strings.Contains(se.Description, "<token>") {
+		t.Errorf("description = %q", se.Description)
+	}
+}
+
+func TestSendContextCancelled(t *testing.T) {
+	var hit atomic.Bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit.Store(true)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
+	err := c.Send(ctx, SendRequest{Token: "123:SECRET", ChatID: 1, Text: "x"})
+	var se *SendError
+	if !errors.As(err, &se) || se.Kind != Transient {
+		t.Fatalf("got %#v", err)
+	}
+	if strings.Contains(se.Description, "SECRET") {
+		t.Errorf("token leaked: %v", se.Description)
+	}
+	if hit.Load() {
+		t.Error("request reached the server after cancellation")
 	}
 }
