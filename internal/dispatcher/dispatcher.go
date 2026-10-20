@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"verify-code-relay/internal/store"
@@ -41,7 +42,12 @@ type chatKey struct {
 type Dispatcher struct {
 	o        Options
 	wake     chan struct{}
+	tick     time.Duration
 	lastSent map[chatKey]time.Time
+	// sentUndeleted holds outbox ids that Telegram accepted but whose row could not be deleted.
+	// They are not sent again; only the delete is retried. Ids are AUTOINCREMENT, so never reused.
+	// Lost on restart, in which case such an item is sent once more.
+	sentUndeleted map[int64]struct{}
 }
 
 const (
@@ -59,7 +65,8 @@ func New(o Options) *Dispatcher {
 	if o.Log == nil {
 		o.Log = slog.Default()
 	}
-	return &Dispatcher{o: o, wake: make(chan struct{}, 1), lastSent: map[chatKey]time.Time{}}
+	return &Dispatcher{o: o, wake: make(chan struct{}, 1), tick: time.Second,
+		lastSent: map[chatKey]time.Time{}, sentUndeleted: map[int64]struct{}{}}
 }
 
 func (d *Dispatcher) Wake() {
@@ -70,7 +77,7 @@ func (d *Dispatcher) Wake() {
 }
 
 func (d *Dispatcher) Run(ctx context.Context) {
-	t := time.NewTicker(time.Second)
+	t := time.NewTicker(d.tick)
 	defer t.Stop()
 	for {
 		if err := d.RunOnce(ctx); err != nil && ctx.Err() == nil {
@@ -94,8 +101,19 @@ func (d *Dispatcher) RunOnce(ctx context.Context) error {
 		return err
 	}
 	for _, it := range expired {
+		if _, ok := d.sentUndeleted[it.ID]; ok {
+			// Already delivered; the expiry sweep just removed the row we could not delete.
+			delete(d.sentUndeleted, it.ID)
+			d.markSent(sctx, it)
+			continue
+		}
 		d.o.Log.Warn("訊息逾時未送出，已丟棄", "target", it.Target, "log_id", it.LogID)
 		d.setResult(sctx, it, "expired")
+	}
+	for k, last := range d.lastSent {
+		if now.Sub(last) >= perChatGap {
+			delete(d.lastSent, k)
+		}
 	}
 	due, err := d.o.Store.DueOutbox(sctx, now, batchLimit)
 	if err != nil {
@@ -104,6 +122,10 @@ func (d *Dispatcher) RunOnce(ctx context.Context) error {
 	for _, it := range due {
 		if ctx.Err() != nil {
 			return nil
+		}
+		if _, ok := d.sentUndeleted[it.ID]; ok {
+			d.deleteSent(sctx, it)
+			continue
 		}
 		key := chatKey{it.Bot, it.ChatID}
 		if last, ok := d.lastSent[key]; ok && d.o.Now().Sub(last) < perChatGap {
@@ -120,7 +142,7 @@ func (d *Dispatcher) send(ctx context.Context, it store.OutboxItem) {
 	token, ok := d.o.Tokens[it.Bot]
 	if !ok {
 		d.o.Log.Error("找不到 Bot，丟棄訊息", "bot", it.Bot, "target", it.Target)
-		d.fail(ctx, it, fmt.Sprintf("找不到 Bot %q", it.Bot), false)
+		d.fail(ctx, it, fmt.Sprintf("找不到 Bot %q", it.Bot), true)
 		return
 	}
 	req := telegram.SendRequest{Token: token, ChatID: it.ChatID, Text: it.Text, HTML: true, ReplyMarkup: it.ReplyMarkup}
@@ -133,25 +155,27 @@ func (d *Dispatcher) send(ctx context.Context, it store.OutboxItem) {
 	// Retry times count from when the failure was observed, not from the start of the run.
 	failedAt := d.o.Now()
 	if err == nil {
-		if !d.storeOK(it, "刪除已送出的待發訊息失敗", d.o.Store.DeleteOutbox(ctx, it.ID)) {
-			return
-		}
-		d.setResult(ctx, it, "sent")
-		d.o.Log.Info("已轉發", "target", it.Target, "log_id", it.LogID)
+		d.deleteSent(ctx, it)
 		return
 	}
 	var se *telegram.SendError
 	if !errors.As(err, &se) {
-		se = &telegram.SendError{Kind: telegram.Transient, Description: err.Error()}
+		// Not from the telegram client: the text may embed the request URL, which contains the token.
+		desc := err.Error()
+		if token != "" {
+			desc = strings.ReplaceAll(desc, token, "<token>")
+		}
+		se = &telegram.SendError{Kind: telegram.Transient, Description: desc}
 	}
-	attempts := it.Attempts + 1
+	// Rate limits and the plain-text retry are not failures of the message, so they keep the
+	// attempt count (which only drives the transient backoff) unchanged.
 	switch se.Kind {
 	case telegram.RateLimited:
-		d.storeOK(it, "重新排程失敗", d.o.Store.RescheduleOutbox(ctx, it.ID, attempts, failedAt.Add(se.RetryAfter), it.PlainFallback))
+		d.storeOK(it, "重新排程失敗", d.o.Store.RescheduleOutbox(ctx, it.ID, it.Attempts, failedAt.Add(se.RetryAfter), it.PlainFallback))
 	case telegram.BadRequest:
 		if !it.PlainFallback {
 			d.o.Log.Warn("Telegram 拒絕 HTML 格式，改用純文字重送", "target", it.Target, "err", se.Description)
-			d.storeOK(it, "重新排程失敗", d.o.Store.RescheduleOutbox(ctx, it.ID, attempts, failedAt, true))
+			d.storeOK(it, "重新排程失敗", d.o.Store.RescheduleOutbox(ctx, it.ID, it.Attempts, failedAt, true))
 			return
 		}
 		d.fail(ctx, it, se.Description, true)
@@ -163,8 +187,24 @@ func (d *Dispatcher) send(ctx context.Context, it store.OutboxItem) {
 			delay = backoffMax
 		}
 		d.o.Log.Warn("發送失敗，稍後重試", "target", it.Target, "err", se.Description, "retry_in", delay)
-		d.storeOK(it, "重新排程失敗", d.o.Store.RescheduleOutbox(ctx, it.ID, attempts, failedAt.Add(delay), it.PlainFallback))
+		d.storeOK(it, "重新排程失敗", d.o.Store.RescheduleOutbox(ctx, it.ID, it.Attempts+1, failedAt.Add(delay), it.PlainFallback))
 	}
+}
+
+// deleteSent removes a delivered item. If the delete fails, the id is remembered so later cycles
+// retry the delete instead of sending the message again.
+func (d *Dispatcher) deleteSent(ctx context.Context, it store.OutboxItem) {
+	if !d.storeOK(it, "刪除已送出的待發訊息失敗", d.o.Store.DeleteOutbox(ctx, it.ID)) {
+		d.sentUndeleted[it.ID] = struct{}{}
+		return
+	}
+	delete(d.sentUndeleted, it.ID)
+	d.markSent(ctx, it)
+}
+
+func (d *Dispatcher) markSent(ctx context.Context, it store.OutboxItem) {
+	d.setResult(ctx, it, "sent")
+	d.o.Log.Info("已轉發", "target", it.Target, "log_id", it.LogID)
 }
 
 // storeOK logs a failed outbox write and reports whether the caller may run its follow-up writes.
