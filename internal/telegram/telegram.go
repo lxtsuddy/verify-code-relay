@@ -1,4 +1,4 @@
-// Package telegram is a minimal Bot API client: sendMessage only.
+// Package telegram is a minimal Bot API client: sendMessage, getMe and getUpdates.
 package telegram
 
 import (
