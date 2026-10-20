@@ -73,17 +73,15 @@ func (f *linkFinder) find(msg *mailparse.Message, tr *Trace) string {
 		if _, ok := f.containsKeyword(lt); ok {
 			score += 50
 		}
+		tail := strings.ToLower(urlTail(u))
 		for _, h := range urlHintWords {
-			if strings.Contains(lu, h) {
+			if strings.Contains(tail, h) {
 				score += 30
 				break
 			}
 		}
-		for _, vals := range u.Query() {
-			if len(vals) > 0 && tokenValueRe.MatchString(vals[0]) {
-				score += 15
-				break
-			}
+		if hasTokenValue(u.Query()) {
+			score += 15
 		}
 		if senderLabel != "" && MainLabel(u.Hostname()) == senderLabel {
 			score += 10
@@ -99,6 +97,27 @@ func (f *linkFinder) find(msg *mailparse.Message, tr *Trace) string {
 	}
 	tr.Addf("連結：選擇 %s（分數 %d）", best, bestScore)
 	return best
+}
+
+// urlTail returns the URL without scheme, user info and host — the path, query
+// and fragment, where hint words count. The fragment is kept because single-page
+// apps route there (".../#/verify?token=...").
+func urlTail(u *url.URL) string {
+	t := *u
+	t.Scheme, t.User, t.Host = "", nil, ""
+	return t.String()
+}
+
+// hasTokenValue reports whether any value of any query parameter looks like a token.
+func hasTokenValue(q url.Values) bool {
+	for _, vals := range q {
+		for _, v := range vals {
+			if tokenValueRe.MatchString(v) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func linkExcludeReason(u *url.URL, lu, lt string) string {

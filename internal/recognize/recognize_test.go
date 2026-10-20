@@ -26,6 +26,19 @@ func TestChainOrderAndService(t *testing.T) {
 	}
 }
 
+func TestChainDoesNotModifyStageResult(t *testing.T) {
+	var a int
+	shared := &Result{Code: "1"}
+	c := NewChain(fakeStage{res: shared, called: &a})
+	res, _, _ := c.Recognize(&mailparse.Message{From: mailparse.Address{Addr: "noreply@accounts.google.com"}})
+	if res == nil || res.Service != "google" {
+		t.Fatalf("res = %+v", res)
+	}
+	if res == shared || shared.Service != "" {
+		t.Fatalf("stage result was modified: %+v", shared)
+	}
+}
+
 func TestChainIgnoreStops(t *testing.T) {
 	var a, b int
 	c := NewChain(fakeStage{res: &Result{Rule: "custom:x"}, ignore: true, called: &a}, fakeStage{res: &Result{Code: "1"}, called: &b})
