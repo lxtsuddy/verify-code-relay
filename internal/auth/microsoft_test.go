@@ -37,8 +37,26 @@ func (s *memTokens) SaveOAuthToken(_ context.Context, mb string, t store.OAuthTo
 
 type tokenServer struct {
 	*httptest.Server
+	mu    sync.Mutex
 	forms []url.Values
 	reply func(form url.Values) (int, string)
+}
+
+// calls returns the number of requests the server has received.
+func (ts *tokenServer) calls() int {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	return len(ts.forms)
+}
+
+// form returns the i-th request's form; a negative i counts from the end.
+func (ts *tokenServer) form(i int) url.Values {
+	ts.mu.Lock()
+	defer ts.mu.Unlock()
+	if i < 0 {
+		i += len(ts.forms)
+	}
+	return ts.forms[i]
 }
 
 func newTokenServer(t *testing.T, reply func(url.Values) (int, string)) *tokenServer {
@@ -46,7 +64,9 @@ func newTokenServer(t *testing.T, reply func(url.Values) (int, string)) *tokenSe
 	ts.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		r.PostForm.Set("_path", r.URL.Path)
+		ts.mu.Lock()
 		ts.forms = append(ts.forms, r.PostForm)
+		ts.mu.Unlock()
 		code, body := ts.reply(r.PostForm)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(code)
@@ -67,8 +87,8 @@ func TestAccessTokenFreshNoRefresh(t *testing.T) {
 	ts := newTokenServer(t, func(url.Values) (int, string) { return 500, "" })
 	toks := &memTokens{m: map[string]store.OAuthToken{"outlook": {RefreshToken: "r", AccessToken: "a", ExpiresAt: now0.Add(time.Hour)}}}
 	tok, err := newMS(ts, toks).AccessToken(context.Background())
-	if err != nil || tok != "a" || len(ts.forms) != 0 {
-		t.Fatalf("tok=%q err=%v calls=%d", tok, err, len(ts.forms))
+	if err != nil || tok != "a" || ts.calls() != 0 {
+		t.Fatalf("tok=%q err=%v calls=%d", tok, err, ts.calls())
 	}
 }
 
@@ -81,7 +101,7 @@ func TestAccessTokenRefreshRotates(t *testing.T) {
 	if err != nil || tok != "a2" {
 		t.Fatalf("tok=%q err=%v", tok, err)
 	}
-	f := ts.forms[0]
+	f := ts.form(0)
 	if f.Get("_path") != "/consumers/oauth2/v2.0/token" || f.Get("grant_type") != "refresh_token" || f.Get("refresh_token") != "r" ||
 		f.Get("client_id") != "cid" || f.Get("scope") != Scope {
 		t.Errorf("form = %v", f)
@@ -149,13 +169,13 @@ func TestDeviceLogin(t *testing.T) {
 	if err != nil || dc.UserCode != "ABCD-EFGH" || dc.Message != "go to url" {
 		t.Fatalf("dc=%+v err=%v", dc, err)
 	}
-	if ts.forms[0].Get("scope") != Scope || ts.forms[0].Get("client_id") != "cid" {
-		t.Errorf("devicecode form = %v", ts.forms[0])
+	if ts.form(0).Get("scope") != Scope || ts.form(0).Get("client_id") != "cid" {
+		t.Errorf("devicecode form = %v", ts.form(0))
 	}
 	if err := m.PollDeviceLogin(context.Background(), dc); err != nil {
 		t.Fatal(err)
 	}
-	last := ts.forms[len(ts.forms)-1]
+	last := ts.form(-1)
 	if last.Get("grant_type") != "urn:ietf:params:oauth:grant-type:device_code" || last.Get("device_code") != "DC" {
 		t.Errorf("poll form = %v", last)
 	}
@@ -191,8 +211,8 @@ func TestAuthenticateRejectedCachedTokenIsRefreshedNextTime(t *testing.T) {
 	if !errors.As(err, &ie) {
 		t.Fatalf("want *imap.Error from the server, got %T %v", err, err)
 	}
-	if len(ts.forms) != 0 {
-		t.Fatalf("token endpoint called %d times; the cached token should have been tried first", len(ts.forms))
+	if ts.calls() != 0 {
+		t.Fatalf("token endpoint called %d times; the cached token should have been tried first", ts.calls())
 	}
 	if toks.m["outlook"].RefreshToken != "r" {
 		t.Fatalf("refresh token lost: %+v", toks.m["outlook"])
@@ -201,7 +221,7 @@ func TestAuthenticateRejectedCachedTokenIsRefreshedNextTime(t *testing.T) {
 	if err != nil || tok != "a2" {
 		t.Fatalf("tok=%q err=%v, want a refreshed token", tok, err)
 	}
-	if len(ts.forms) != 1 || ts.forms[0].Get("grant_type") != "refresh_token" || ts.forms[0].Get("refresh_token") != "r" {
-		t.Fatalf("forms = %v", ts.forms)
+	if ts.calls() != 1 || ts.form(0).Get("grant_type") != "refresh_token" || ts.form(0).Get("refresh_token") != "r" {
+		t.Fatalf("calls = %d, want one refresh_token request", ts.calls())
 	}
 }
