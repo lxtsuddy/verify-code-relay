@@ -14,7 +14,12 @@ import (
 
 var yamlLineRe = regexp.MustCompile(`line \d+: `)
 
-type Duration struct{ time.Duration }
+// Duration is a time.Duration read from YAML. Set records whether the value was
+// given explicitly, so an explicit 0s is not mistaken for an omitted value.
+type Duration struct {
+	time.Duration
+	Set bool
+}
 
 func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 	v, err := time.ParseDuration(n.Value)
@@ -22,6 +27,7 @@ func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 		return fmt.Errorf("第 %d 行：無效的時間長度 %q", n.Line, n.Value)
 	}
 	d.Duration = v
+	d.Set = true
 	return nil
 }
 
@@ -140,8 +146,10 @@ func Parse(data []byte, lookup func(string) (string, bool)) (*Config, error) {
 	return &c, nil
 }
 
+// orDur fills in def when the value was omitted. An explicit value (even 0s) is
+// kept so that Validate can reject it.
 func orDur(v *Duration, def time.Duration) {
-	if v.Duration == 0 {
+	if !v.Set {
 		v.Duration = def
 	}
 }

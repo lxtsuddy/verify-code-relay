@@ -79,6 +79,11 @@ func expandNode(n *yaml.Node, path string, lookup func(string) (string, bool)) e
 			n.Value = v
 			if n.Style == 0 {
 				n.Tag = "" // let yaml re-resolve plain scalars (e.g. chat_id: ${CHAT})
+				// An expanded value is never null: "null", "~" or "" stay strings
+				// instead of decoding to an empty field.
+				if n.ShortTag() == "!!null" {
+					n.Tag = "!!str"
+				}
 			}
 		}
 	}

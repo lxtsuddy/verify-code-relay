@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -110,5 +111,160 @@ mailboxes:
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("want %q in error, got %v", want, err)
 		}
+	}
+}
+
+// An explicit 0s must not be silently replaced by the default.
+func TestValidateZeroDurationFromYAML(t *testing.T) {
+	c, err := Parse([]byte(`
+defaults: { alert_after: 0s }
+bots: { main: { token: "t" } }
+targets: { me: { bot: main, chat_id: 1 } }
+mailboxes:
+  gmail:
+    host: imap.gmail.com
+    username: me@gmail.com
+    auth: { type: password, password: pw }
+    targets: [me]
+    ttl: 0s
+`), lookupFrom(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = c.Validate()
+	for _, want := range []string{"defaults.alert_after: 必須大於 0", "mailboxes.gmail.ttl: 必須大於 0"} {
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("want %q in error, got %v", want, err)
+		}
+	}
+}
+
+func TestValidateMultipleErrors(t *testing.T) {
+	c := validConfig()
+	c.LogLevel = "loud"
+	c.Bots["main"] = Bot{}
+	c.Mailboxes["gmail"].Host = ""
+	c.Rules[0].CodeRegex = "("
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("want errors")
+	}
+	want := []string{
+		"bots.main.token: 不可為空",
+		"log_level: 必須是",
+		"mailboxes.gmail.host: 不可為空",
+		"rules[0].code_regex: 正規表示式錯誤",
+	}
+	lines := strings.Split(err.Error(), "\n")
+	if len(lines) != len(want) {
+		t.Fatalf("got %d problems, want %d:\n%v", len(lines), len(want), err)
+	}
+	for i, w := range want {
+		if !strings.HasPrefix(lines[i], w) {
+			t.Errorf("line %d = %q, want prefix %q", i, lines[i], w)
+		}
+	}
+}
+
+// Problems are ordered with numeric indexes compared by value: rules[2] before rules[10].
+func TestValidateErrorOrderNatural(t *testing.T) {
+	c := validConfig()
+	for i := 1; i <= 10; i++ {
+		c.Rules = append(c.Rules, Rule{Name: fmt.Sprintf("r%d", i), From: "x", Ignore: true})
+	}
+	c.Rules[2].Ignore = false
+	c.Rules[10].Ignore = false
+	err := c.Validate()
+	if err == nil {
+		t.Fatal("want errors")
+	}
+	lines := strings.Split(err.Error(), "\n")
+	if len(lines) != 2 || !strings.HasPrefix(lines[0], "rules[2]:") || !strings.HasPrefix(lines[1], "rules[10]:") {
+		t.Fatalf("want rules[2] before rules[10], got:\n%v", err)
+	}
+}
+
+func TestNaturalLess(t *testing.T) {
+	cases := []struct {
+		a, b string
+		want bool
+	}{
+		{"rules[2]", "rules[10]", true},
+		{"rules[10]", "rules[2]", false},
+		{"rules[9].name", "rules[10]: x", true},
+		{"a", "b", true},
+		{"b", "a", false},
+		{"a", "a", false},
+		{"rules[2].name", "rules[2]: x", true},
+		{"a1b", "a1c", true},
+		{"a", "a1", true},
+		{"a1", "a", false},
+		{"x[2]", "x[02]", true},
+		{"x[02]", "x[2]", false},
+	}
+	for _, tc := range cases {
+		if got := naturalLess(tc.a, tc.b); got != tc.want {
+			t.Errorf("naturalLess(%q, %q) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+func TestValidateNilMailbox(t *testing.T) {
+	c := validConfig()
+	c.Mailboxes["broken"] = nil
+	err := c.Validate()
+	if err == nil || !strings.Contains(err.Error(), "mailboxes.broken: 不可為空") {
+		t.Fatalf("want nil mailbox error, got %v", err)
+	}
+}
+
+func TestValidateOKVariants(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(c *Config)
+	}{
+		{"microsoft_oauth", func(c *Config) {
+			c.Mailboxes["gmail"].Auth = Auth{Type: "microsoft_oauth", ClientID: "abc", Tenant: "common"}
+		}},
+		{"link_regex only", func(c *Config) { c.Rules[0].CodeRegex = ""; c.Rules[0].LinkRegex = `https://x\.example/\S+` }},
+		{"ignore only", func(c *Config) { c.Rules[0].CodeRegex = ""; c.Rules[0].Ignore = true }},
+		{"subject only", func(c *Config) { c.Rules[0].From = ""; c.Rules[0].Subject = "驗證碼" }},
+		{"empty admin", func(c *Config) { c.Admin = "" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := validConfig()
+			tc.mutate(c)
+			if err := c.Validate(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestValidateNamesAndLinkRegex(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(c *Config)
+		want   string
+	}{
+		{"bad target name", func(c *Config) { c.Targets["Work Chat"] = Target{Bot: "main", ChatID: 2} }, "targets.Work Chat: 名稱只能包含"},
+		{"bad mailbox name", func(c *Config) {
+			m := *c.Mailboxes["gmail"]
+			c.Mailboxes["Gmail"] = &m
+		}, "mailboxes.Gmail: 名稱只能包含"},
+		{"bad rule name", func(c *Config) { c.Rules[0].Name = "GitHub" }, "rules[0].name: 名稱只能包含"},
+		{"empty rule name", func(c *Config) { c.Rules[0].Name = "" }, "rules[0].name: 名稱只能包含"},
+		{"bad link regex", func(c *Config) { c.Rules[0].LinkRegex = "(" }, "rules[0].link_regex: 正規表示式錯誤"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := validConfig()
+			tc.mutate(c)
+			err := c.Validate()
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want %q in error, got %v", tc.want, err)
+			}
+		})
 	}
 }

@@ -141,3 +141,87 @@ mailboxes:
 		t.Fatalf("password = %q, want %q", got, `p"w#: x`)
 	}
 }
+
+// An unquoted ${X} whose value looks like YAML null must stay a string,
+// while numeric values (chat_id) are still re-resolved.
+func TestParseExpandedNullStaysString(t *testing.T) {
+	const y = `
+bots:
+  main:
+    token: ${TG}
+  alt:
+    token: ${TILDE}
+targets:
+  me:
+    bot: main
+    chat_id: ${CHAT}
+mailboxes:
+  m:
+    host: h
+    username: u
+    auth:
+      type: password
+      password: ${PW}
+`
+	c, err := Parse([]byte(y), lookupFrom(map[string]string{"TG": "null", "TILDE": "~", "CHAT": "-1001", "PW": "Null"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Bots["main"].Token; got != "null" {
+		t.Errorf("token = %q, want %q", got, "null")
+	}
+	if got := c.Bots["alt"].Token; got != "~" {
+		t.Errorf("token = %q, want %q", got, "~")
+	}
+	if got := c.Mailboxes["m"].Auth.Password; got != "Null" {
+		t.Errorf("password = %q, want %q", got, "Null")
+	}
+	if got := c.Targets["me"].ChatID; got != -1001 {
+		t.Errorf("chat_id = %d, want -1001", got)
+	}
+}
+
+// "$$" in the YAML document yields a literal "$", quoted or not.
+func TestParseDollarDollar(t *testing.T) {
+	const y = `
+bots:
+  a: { token: "p$$w" }
+  b:
+    token: x$${NOT_EXPANDED}
+`
+	c, err := Parse([]byte(y), lookupFrom(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.Bots["a"].Token; got != "p$w" {
+		t.Errorf("a token = %q, want %q", got, "p$w")
+	}
+	if got := c.Bots["b"].Token; got != "x${NOT_EXPANDED}" {
+		t.Errorf("b token = %q, want %q", got, "x${NOT_EXPANDED}")
+	}
+}
+
+// Set distinguishes an explicit 0s from an omitted value; only omitted values get defaults.
+func TestParseDurationSet(t *testing.T) {
+	c, err := Parse([]byte(`
+defaults: { ttl: 0s }
+mailboxes:
+  m: { max_age: 0s }
+`), lookupFrom(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := c.Defaults.TTL; !d.Set || d.Duration != 0 {
+		t.Errorf("defaults.ttl = %+v, want explicit 0", d)
+	}
+	if d := c.Defaults.MaxAge; d.Set || d.Duration != 10*time.Minute {
+		t.Errorf("defaults.max_age = %+v, want unset default 10m", d)
+	}
+	m := c.Mailboxes["m"]
+	if !m.MaxAge.Set || m.MaxAge.Duration != 0 {
+		t.Errorf("mailbox max_age = %+v, want explicit 0", m.MaxAge)
+	}
+	if m.PollInterval.Duration != 30*time.Second {
+		t.Errorf("mailbox poll_interval = %v, want default 30s", m.PollInterval.Duration)
+	}
+}

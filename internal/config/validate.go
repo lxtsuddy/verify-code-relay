@@ -56,7 +56,7 @@ func (c *Config) Validate() error {
 		}
 	}
 	positive := func(path string, d Duration) {
-		// applyDefaults replaces zero, so a non-positive value here was negative in the YAML.
+		// applyDefaults only fills omitted values, so an explicit 0s or a negative value fails here.
 		if d.Duration <= 0 {
 			p.add(path, "必須大於 0")
 		}
@@ -78,6 +78,11 @@ func (c *Config) Validate() error {
 		m := c.Mailboxes[name]
 		base := "mailboxes." + name
 		checkName(base, name)
+		if m == nil {
+			// Parse never leaves nil entries; only hand-built configs can.
+			p.add(base, "不可為空")
+			continue
+		}
 		if m.Host == "" {
 			p.add(base+".host", "不可為空")
 		}
@@ -151,6 +156,44 @@ func (c *Config) Validate() error {
 	if len(p) == 0 {
 		return nil
 	}
-	sort.Strings(p)
+	sort.SliceStable(p, func(i, j int) bool { return naturalLess(p[i], p[j]) })
 	return errors.New(strings.Join(p, "\n"))
+}
+
+func isDigit(c byte) bool { return '0' <= c && c <= '9' }
+
+// naturalLess compares strings byte by byte, except that runs of ASCII digits
+// are compared by numeric value, so "rules[2]" sorts before "rules[10]".
+// Equal numbers with more leading zeros sort after.
+func naturalLess(a, b string) bool {
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		if !isDigit(a[i]) || !isDigit(b[j]) {
+			if a[i] != b[j] {
+				return a[i] < b[j]
+			}
+			i++
+			j++
+			continue
+		}
+		si, sj := i, j
+		for i < len(a) && isDigit(a[i]) {
+			i++
+		}
+		for j < len(b) && isDigit(b[j]) {
+			j++
+		}
+		na := strings.TrimLeft(a[si:i], "0")
+		nb := strings.TrimLeft(b[sj:j], "0")
+		if len(na) != len(nb) {
+			return len(na) < len(nb)
+		}
+		if na != nb {
+			return na < nb
+		}
+		if i-si != j-sj {
+			return i-si < j-sj
+		}
+	}
+	return len(a)-i < len(b)-j
 }
