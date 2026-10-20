@@ -44,6 +44,9 @@ func cmdTest(configPath string, args []string, stdout, stderr io.Writer) int {
 	}
 
 	fmt.Fprintf(stdout, "寄件者：%s <%s>\n主旨：%s\n", msg.From.Name, msg.From.Addr, msg.Subject)
+	for _, w := range msg.Warnings {
+		fmt.Fprintf(stdout, "警告：%s\n", w)
+	}
 	fmt.Fprintf(stdout, "── 內文（純文字，前 500 字）──\n%s\n", truncateRunes(msg.Text, 500))
 	fmt.Fprintf(stdout, "── 連結 %d 個 ──\n", len(msg.Links))
 	for _, l := range msg.Links {

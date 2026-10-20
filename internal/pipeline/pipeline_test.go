@@ -381,3 +381,31 @@ func TestProcessRenderFailure(t *testing.T) {
 		t.Errorf("slog output leaked the code: %q", logged)
 	}
 }
+
+func TestProcessLogsParseWarnings(t *testing.T) {
+	p, _, _, now := newProc(t)
+	var buf bytes.Buffer
+	p.Log = slog.New(slog.NewTextHandler(&buf, nil))
+	raw := []byte(strings.ReplaceAll(`From: a@b.c
+To: me@gmail.com
+Subject: hello
+Content-Type: multipart/alternative; boundary="b"
+
+--b
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+!!!!not base64!!!!
+--b
+Content-Type: text/html; charset=utf-8
+
+<p>nothing here</p>
+--b--
+`, "\n", "\r\n"))
+	if err := p.Process(ctx, mb, "INBOX", 7, Envelope{UID: 16, InternalDate: now, Size: int64(len(raw))}, raw); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "信件部分內容無法讀取") || !strings.Contains(buf.String(), "uid=16") {
+		t.Errorf("parse warning not logged: %s", buf.String())
+	}
+}

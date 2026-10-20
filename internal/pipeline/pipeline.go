@@ -129,6 +129,9 @@ func (p *Processor) Process(ctx context.Context, mb Mailbox, folder string, uidV
 		_, err = p.Store.RecordMessage(ctx, entry, nil, st)
 		return err
 	}
+	for _, w := range msg.Warnings {
+		p.Log.Warn("信件部分內容無法讀取", append(logAttrs(entry), "detail", w)...)
+	}
 	if msg.Date.IsZero() {
 		msg.Date = env.InternalDate
 	}
