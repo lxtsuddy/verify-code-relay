@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,6 +169,47 @@ func TestOpenRelativePath(t *testing.T) {
 	}
 	if _, err := os.Stat("relay.db-wal"); err != nil {
 		t.Fatalf("database not opened at the relative path: %v", err)
+	}
+}
+
+func TestConcurrentOpenMigratesOnce(t *testing.T) {
+	// Two processes (e.g. `relay login` while `relay run` starts) may open an
+	// unmigrated database at once. Reading user_version and migrating must be one
+	// transaction, or the loser re-runs CREATE TABLE and fails.
+	for i := 0; i < 20; i++ {
+		p := filepath.Join(t.TempDir(), "relay.db")
+		// Start from an empty database already in WAL mode so this exercises the
+		// migration, not the one-time switch of a brand-new file to WAL.
+		db, err := sql.Open("sqlite", p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var mode string
+		if err := db.QueryRow(`PRAGMA journal_mode = WAL`).Scan(&mode); err != nil || mode != "wal" {
+			t.Fatalf("journal_mode = %q, %v", mode, err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		const n = 4
+		errs := make(chan error, n)
+		start := make(chan struct{})
+		for j := 0; j < n; j++ {
+			go func() {
+				<-start
+				s, err := Open(p)
+				if err == nil {
+					err = s.Close()
+				}
+				errs <- err
+			}()
+		}
+		close(start)
+		for j := 0; j < n; j++ {
+			if err := <-errs; err != nil {
+				t.Fatalf("round %d: %v", i, err)
+			}
+		}
 	}
 }
 
