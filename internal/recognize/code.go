@@ -28,7 +28,9 @@ var (
 	monthRe    = regexp.MustCompile(`(?i)\b(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|june?|july?|aug(ust)?|sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?)\b|\bmay\s+\d|\d\s+may\b`)
 	dateNumRe  = regexp.MustCompile(`\d{4}[/-]\d{1,2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}`)
 	currencies = []string{"$", "¥", "￥", "€", "£", "twd", "usd", "rmb", "cny"}
-	orderWords = []string{"訂單", "订单", "order", "invoice", "#"}
+	// orderWords are matched like keywords: "order" does not match "border" or
+	// "reorder", while CJK words and "#" match anywhere.
+	orderWords = toRuneKeywords([]string{"訂單", "订单", "order", "invoice", "#"})
 )
 
 const (
@@ -257,8 +259,43 @@ func isAllDigits(s string) bool {
 	return s != ""
 }
 
-func isPhoneRune(r rune) bool {
-	return (r >= '0' && r <= '9') || r == ' ' || r == '-' || r == '(' || r == ')'
+func isDigit(r rune) bool { return r >= '0' && r <= '9' }
+
+// phoneSeps are the separators allowed between two digit groups of a phone
+// number. Anything longer, such as " - " or a double space, ends the run.
+var phoneSeps = map[string]bool{" ": true, "-": true, "(": true, ")": true, ") ": true, " (": true, ")-": true, "-(": true}
+
+// phoneRun returns the extent [l, r) of the phone-like run around c: digit groups
+// joined by phoneSeps, plus a leading '(' (as in "(02) 2345 6789"). Each side is
+// followed for at most phoneScanLimit runes.
+func phoneRun(rs []rune, c span) (l, r int) {
+	l, r = c.start, c.end
+	for r-c.end < phoneScanLimit {
+		j := r
+		for j < len(rs) && j-r < 2 && strings.ContainsRune(" -()", rs[j]) {
+			j++
+		}
+		if j == r || j >= len(rs) || !isDigit(rs[j]) || !phoneSeps[string(rs[r:j])] {
+			break
+		}
+		for r = j; r < len(rs) && isDigit(rs[r]); r++ {
+		}
+	}
+	for c.start-l < phoneScanLimit {
+		j := l
+		for j > 0 && l-j < 2 && strings.ContainsRune(" -()", rs[j-1]) {
+			j--
+		}
+		if j == l || j == 0 || !isDigit(rs[j-1]) || !phoneSeps[string(rs[j:l])] {
+			break
+		}
+		for l = j; l > 0 && isDigit(rs[l-1]); l-- {
+		}
+	}
+	if l > 0 && rs[l-1] == '(' {
+		l--
+	}
+	return l, r
 }
 
 func excludeReason(c codeCand, t *codeText) string {
@@ -290,30 +327,25 @@ func excludeReason(c codeCand, t *codeText) string {
 			}
 		}
 	}
-	l, r := c.start, c.end
-	for l > 0 && c.start-l < phoneScanLimit && isPhoneRune(rs[l-1]) {
-		l--
-	}
-	for r < len(rs) && r-c.end < phoneScanLimit && isPhoneRune(rs[r]) {
-		r++
-	}
+	l, r := phoneRun(rs, c.span)
 	if l > 0 && rs[l-1] == '+' {
 		return "電話號碼"
 	}
 	run := string(rs[l:r])
 	digits := 0
 	for _, ch := range run {
-		if ch >= '0' && ch <= '9' {
+		if isDigit(ch) {
 			digits++
 		}
 	}
 	if digits > 8 && strings.ContainsAny(run, "-(") {
 		return "電話號碼"
 	}
-	window := string(lower[max(0, c.start-10):c.start])
 	for _, w := range orderWords {
-		if strings.Contains(window, w) {
-			return "訂單編號"
+		for i := max(0, c.start-10); i+len(w) <= c.start; i++ {
+			if keywordAt(lower, w, i) {
+				return "訂單編號"
+			}
 		}
 	}
 	return ""

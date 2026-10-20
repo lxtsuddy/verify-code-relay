@@ -29,20 +29,25 @@ func findKeywords(lower []rune, keywords [][]rune) []span {
 			continue
 		}
 		for i := 0; i+len(kw) <= len(lower); i++ {
-			if !runesEqual(lower[i:i+len(kw)], kw) {
-				continue
+			if keywordAt(lower, kw, i) {
+				out = append(out, span{i, i + len(kw)})
 			}
-			if isASCIILetter(kw[0]) && i > 0 && isASCIILetter(lower[i-1]) {
-				continue
-			}
-			end := i + len(kw)
-			if isASCIILetter(kw[len(kw)-1]) && end < len(lower) && isASCIILetter(lower[end]) {
-				continue
-			}
-			out = append(out, span{i, end})
 		}
 	}
 	return out
+}
+
+// keywordAt reports whether kw occurs in lower at i, respecting the ASCII-letter
+// boundary rule of findKeywords.
+func keywordAt(lower, kw []rune, i int) bool {
+	if !runesEqual(lower[i:i+len(kw)], kw) {
+		return false
+	}
+	if isASCIILetter(kw[0]) && i > 0 && isASCIILetter(lower[i-1]) {
+		return false
+	}
+	end := i + len(kw)
+	return !(isASCIILetter(kw[len(kw)-1]) && end < len(lower) && isASCIILetter(lower[end]))
 }
 
 func runesEqual(a, b []rune) bool {

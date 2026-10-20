@@ -42,6 +42,10 @@ func (c *Chain) Recognize(msg *mailparse.Message) (*Result, bool, *Trace) {
 	tr := &Trace{}
 	for _, s := range c.stages {
 		res, ignore := s.Run(msg, tr)
+		if res != nil {
+			cp := *res // the stage may reuse its Result; never modify it
+			res = &cp
+		}
 		if ignore {
 			return res, true, tr
 		}
