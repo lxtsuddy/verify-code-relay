@@ -183,12 +183,24 @@ func TestNewTrialRunsWithEmptyFields(t *testing.T) {
 	}
 }
 
+// The fitting tests below call fitText directly with subjects longer than Render lets
+// through (see TestRenderBoundsHeaderFields): a template may still show the subject many
+// times, or a subject of '&' may escape to more than the limit.
+func mustFit(t *testing.T, r *Renderer, d Data) Rendered {
+	t.Helper()
+	text, err := fitText(r.global[kindCode], d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Rendered{Text: text}
+}
+
 func TestTruncation(t *testing.T) {
 	r := mustNew(t, cfgWith(config.Templates{}, nil))
 	d := sample
 	d.URL = ""
 	d.Subject = strings.Repeat("長", 5000)
-	out := mustRender(t, r, "", d)
+	out := mustFit(t, r, d)
 	checkFits(t, out.Text)
 	if !strings.Contains(out.Text, "<code>123456</code>") || !strings.HasSuffix(out.Text, "長…") {
 		t.Errorf("code must survive and subject end with …: %q", out.Text[len(out.Text)-20:])
@@ -205,7 +217,7 @@ func TestTruncationCountsUTF16(t *testing.T) {
 	d := sample
 	d.URL = ""
 	d.Subject = strings.Repeat("😀", 3000)
-	out := mustRender(t, r, "", d)
+	out := mustFit(t, r, d)
 	checkFits(t, out.Text)
 	if !strings.Contains(out.Text, "<code>123456</code>") || !strings.HasSuffix(out.Text, "😀…") {
 		t.Errorf("code must survive and subject end with …: %q", out.Text[len(out.Text)-20:])
@@ -331,5 +343,43 @@ func TestLongCodeHasNoCopyButton(t *testing.T) {
 	out := mustRender(t, r, "", d)
 	if out.ReplyMarkup != "" {
 		t.Errorf("markup = %s", out.ReplyMarkup)
+	}
+}
+
+// Header fields come from the mail and can be as large as the message (5 MiB). Render cuts
+// them before the template runs: the subject, sender and recipient to 1024 runes, the
+// service and mailbox names to 256, so rendering stays fast whatever the template does.
+func TestRenderBoundsHeaderFields(t *testing.T) {
+	r := mustNew(t, cfgWith(config.Templates{Code: "{{.Code}}|{{.Subject}}|{{.FromName}}|{{.FromAddr}}|{{.To}}|{{.Service}}|{{.Mailbox}}"}, nil))
+	huge := strings.Repeat("長", 5<<20/3) // 5 MiB of UTF-8
+	d := sample
+	d.URL = ""
+	d.Subject, d.FromName, d.FromAddr, d.To, d.Service, d.Mailbox = huge, huge, huge, huge, huge, huge
+	start := time.Now()
+	out := mustRender(t, r, "", d)
+	if el := time.Since(start); el > 2*time.Second {
+		t.Errorf("Render took %v", el)
+	}
+	checkFits(t, out.Text)
+	parts := strings.Split(out.Text, "|")
+	if len(parts) != 7 || parts[0] != "123456" {
+		t.Fatalf("text = %.200q", out.Text)
+	}
+	for i, want := range []int{1024, 1024, 1024, 1024, 256, 256} {
+		p := []rune(parts[i+1])
+		if i == 0 && len(p) <= want && len(p) > 0 { // the other fields leave the subject less room
+			continue
+		}
+		if len(p) != want || p[len(p)-1] != '…' {
+			t.Errorf("field %d: %d runes ending %q, want %d ending …", i+1, len(p), string(p[len(p)-1]), want)
+		}
+	}
+	// short fields and fields of exactly the limit are left alone
+	d = sample
+	d.URL = ""
+	d.Subject = strings.Repeat("😀", 1024)
+	out = mustRender(t, r, "", d)
+	if parts := strings.Split(out.Text, "|"); parts[1] != d.Subject {
+		t.Errorf("a subject of exactly 1024 runes was changed")
 	}
 }

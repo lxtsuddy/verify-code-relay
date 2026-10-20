@@ -16,6 +16,11 @@ import (
 )
 
 const (
+	// header fields come from the mail (up to the 5 MiB message size): Render cuts them to
+	// these many runes before any template runs, so its cost does not grow with the mail
+	maxHeaderRunes = 1024 // Subject, FromName, FromAddr, To
+	maxNameRunes   = 256  // Service, Mailbox
+
 	maxCopyRunes = 256
 	maxInlineURL = 4000 // UTF-16 units of the escaped URL
 	kindCode     = "code"
@@ -115,6 +120,9 @@ func New(cfg *config.Config) (*Renderer, error) {
 }
 
 func (r *Renderer) Render(mailbox string, d Data) (Rendered, error) {
+	d.Subject, d.FromName, d.FromAddr, d.To = clamp(d.Subject, maxHeaderRunes), clamp(d.FromName, maxHeaderRunes),
+		clamp(d.FromAddr, maxHeaderRunes), clamp(d.To, maxHeaderRunes)
+	d.Service, d.Mailbox = clamp(d.Service, maxNameRunes), clamp(d.Mailbox, maxNameRunes)
 	kind := kindCode
 	switch {
 	case d.Code != "" && d.URL != "":
@@ -139,6 +147,22 @@ func (r *Renderer) Render(mailbox string, d Data) (Rendered, error) {
 		return Rendered{}, err
 	}
 	return Rendered{Text: text, ReplyMarkup: markup}, nil
+}
+
+// clamp returns s when it has at most n runes, else its first n-1 runes and "…". Only the
+// first n+1 runes are looked at.
+func clamp(s string, n int) string {
+	count, cut := 0, 0
+	for i := range s {
+		if count == n-1 {
+			cut = i
+		}
+		if count == n {
+			return s[:cut] + "…"
+		}
+		count++
+	}
+	return s
 }
 
 func fits(text string) bool { return tglen.Len(text) <= tglen.Max }

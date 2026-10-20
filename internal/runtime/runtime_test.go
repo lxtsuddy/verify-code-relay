@@ -170,16 +170,12 @@ func TestSaveAndLoadConfig(t *testing.T) {
 	}
 }
 
-// TestStopIsIdempotentAndApplyRestarts: Stop may run twice and before any Apply;
-// Alert/Notify without a running service only log; Apply after Stop starts again.
-func TestStopIsIdempotentAndApplyRestarts(t *testing.T) {
-	rt, _, _ := newRT(t)
-	rt.Stop()
-	rt.Alert("k", "no service")
-	rt.Notify("no service")
-	if rt.Current() != nil || len(rt.Sources()) != 0 {
-		t.Fatal("want nothing before Apply")
-	}
+// TestStopIsIdempotentAndFinal: Stop may run twice and before any Apply; Alert/Notify
+// without a running service only log; Apply, ApplyWith and Reload after Stop start
+// nothing (a save racing the shutdown must not restart the watchers), but ApplyWith still
+// runs its hook.
+func TestStopIsIdempotentAndFinal(t *testing.T) {
+	rt, st, _ := newRT(t)
 	b, _ := Build(sample())
 	rt.Apply(b)
 	if rt.Current() != b || rt.Snapshot().AppliedAt.IsZero() {
@@ -187,12 +183,36 @@ func TestStopIsIdempotentAndApplyRestarts(t *testing.T) {
 	}
 	rt.Stop()
 	rt.Stop()
-	if rt.Current() != nil || len(rt.Snapshot().Watchers) != 0 {
+	rt.Alert("k", "no service")
+	rt.Notify("no service")
+	if rt.Current() != nil || len(rt.Snapshot().Watchers) != 0 || len(rt.Sources()) != 0 {
 		t.Fatal("Stop must clear the service")
 	}
 	rt.Apply(b)
-	if len(rt.Snapshot().Watchers) != 2 {
-		t.Fatal("Apply after Stop did not start watchers")
+	hooked := false
+	rt.ApplyWith(b, func() { hooked = true })
+	if _, _, err := SaveConfig(context.Background(), st, sample(), Meta{Source: "test", Summary: "x"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := rt.Reload(); err != nil {
+		t.Fatalf("Reload after Stop = %v", err)
+	}
+	if rt.Current() != nil || len(rt.Snapshot().Watchers) != 0 || rt.Snapshot().Applying {
+		t.Fatal("Apply after Stop started a service")
+	}
+	if !hooked {
+		t.Fatal("ApplyWith after Stop skipped its hook")
+	}
+}
+
+// TestStopBeforeApply: a Stop before the first Apply is final too.
+func TestStopBeforeApply(t *testing.T) {
+	rt, _, _ := newRT(t)
+	rt.Stop()
+	b, _ := Build(sample())
+	rt.Apply(b)
+	if rt.Current() != nil {
+		t.Fatal("Apply after Stop started a service")
 	}
 }
 

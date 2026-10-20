@@ -431,3 +431,43 @@ func TestRecordMessageRollsBackWhenLastStepFails(t *testing.T) {
 		t.Errorf("outbox rows = %d, want 0", n)
 	}
 }
+
+// TestMigrateFromV1KeepsData: a database of the first release (schema 1, with mailbox
+// state and OAuth tokens) is upgraded to the current schema without losing any row.
+func TestMigrateFromV1KeepsData(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "relay.db")
+	db, err := sql.Open("sqlite", p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		migrations[0],
+		`PRAGMA user_version = 1`,
+		`INSERT INTO mailbox_state (mailbox, folder, uid_validity, last_uid, updated_at) VALUES ('gmail', 'INBOX', 7, 42, 1)`,
+		`INSERT INTO oauth_tokens (mailbox, refresh_token, access_token, expires_at, updated_at) VALUES ('outlook', 'R', 'A', 1700000000, 1)`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	db.Close()
+
+	s, err := Open(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var v int
+	if err := s.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&v); err != nil || v != 2 {
+		t.Fatalf("user_version = %d (%v), want 2", v, err)
+	}
+	if st, ok, err := s.GetMailboxState(ctx, "gmail", "INBOX"); err != nil || !ok || st != (MailboxState{UIDValidity: 7, LastUID: 42}) {
+		t.Errorf("mailbox state = %+v %v %v", st, ok, err)
+	}
+	if tok, ok, err := s.GetOAuthToken(ctx, "outlook"); err != nil || !ok || tok.RefreshToken != "R" || tok.AccessToken != "A" || tok.ExpiresAt.Unix() != 1700000000 {
+		t.Errorf("token = %+v %v %v", tok, ok, err)
+	}
+	if _, ok, err := s.LatestConfigVersion(ctx); err != nil || ok {
+		t.Errorf("config_versions after migration: ok=%v err=%v", ok, err)
+	}
+}

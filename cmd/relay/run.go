@@ -95,9 +95,11 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	<-ctx.Done()
 	stop() // restore default signal handling: a second signal kills a hung shutdown
 	log.Info("收到停止訊號，正在關閉")
+	// first stop taking requests (and so saves) and let the running ones finish, so no
+	// change is stored after the service stopped; Apply after rt.Stop is a no-op anyway
+	shutdownHTTP(webSrv, 5*time.Second, log)
 	admin.Close() // ends Microsoft authorisation flows, which could otherwise reload the runtime
 	rt.Stop()
-	shutdownHTTP(webSrv, 5*time.Second, log)
 	if healthSrv != nil {
 		shutdownHTTP(healthSrv, 5*time.Second, log)
 	}
@@ -106,7 +108,8 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 }
 
 func serveHTTP(ln net.Listener, h http.Handler, failMsg string, log *slog.Logger) *http.Server {
-	srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
+	// no WriteTimeout: it would also cut off slow handlers such as a connection test
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second}
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error(failMsg, "err", err)

@@ -80,6 +80,7 @@ type Runtime struct {
 	cur       *service
 	applying  bool
 	appliedAt time.Time
+	stopped   bool // Stop was called: Apply and Reload start nothing any more (under applyMu)
 }
 
 // New returns a Runtime with nothing running; call Apply to start a service.
@@ -110,8 +111,16 @@ func (r *Runtime) ApplyWith(b *Built, beforeStart func()) {
 	r.applyLocked(b, beforeStart)
 }
 
-// applyLocked does the work of ApplyWith; r.applyMu must be held.
+// applyLocked does the work of ApplyWith; r.applyMu must be held. After Stop it only runs
+// beforeStart: a config change racing the shutdown must not start new watchers.
 func (r *Runtime) applyLocked(b *Built, beforeStart func()) {
+	if r.stopped {
+		if beforeStart != nil {
+			beforeStart()
+		}
+		r.opts.Log.Info("服務正在關閉，不套用新設定（下次啟動時會載入）")
+		return
+	}
 	r.mu.Lock()
 	r.applying = true
 	r.mu.Unlock()
@@ -146,6 +155,10 @@ func (r *Runtime) applyLocked(b *Built, beforeStart func()) {
 func (r *Runtime) Reload() error {
 	r.applyMu.Lock()
 	defer r.applyMu.Unlock()
+	if r.stopped {
+		r.opts.Log.Info("服務正在關閉，不重新載入設定")
+		return nil
+	}
 	raw, _, err := LoadConfig(context.Background(), r.opts.Store)
 	if err != nil {
 		return err
@@ -158,11 +171,12 @@ func (r *Runtime) Reload() error {
 	return nil
 }
 
-// Stop stops the current service and waits for it. It may be called more than once,
-// and Apply may start a new service afterwards.
+// Stop stops the current service and waits for it. It is final: Apply, ApplyWith and
+// Reload start nothing afterwards (they only log). It may be called more than once.
 func (r *Runtime) Stop() {
 	r.applyMu.Lock()
 	defer r.applyMu.Unlock()
+	r.stopped = true
 	r.stopCurrent()
 	r.mu.Lock()
 	r.cur = nil

@@ -421,3 +421,17 @@ func TestRunExitsOnConfigReadError(t *testing.T) {
 		t.Fatal("run did not exit on a config read error")
 	}
 }
+
+// TestServeHTTPTimeouts: a slow client can hold a connection neither while sending the
+// headers or the body, nor idle between requests, on the web and the health server alike.
+func TestServeHTTPTimeouts(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := serveHTTP(ln, http.NotFoundHandler(), "x", slog.New(slog.DiscardHandler))
+	defer srv.Close()
+	if srv.ReadHeaderTimeout != 5*time.Second || srv.ReadTimeout != 30*time.Second || srv.IdleTimeout != 120*time.Second {
+		t.Fatalf("timeouts = header %v read %v idle %v", srv.ReadHeaderTimeout, srv.ReadTimeout, srv.IdleTimeout)
+	}
+}
