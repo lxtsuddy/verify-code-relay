@@ -5,7 +5,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
+	"path/filepath"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -69,7 +71,14 @@ func Open(path string) (*Store, error) {
 	if err := os.Chmod(path, 0o600); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
+	dsn, err := fileURI(path)
+	if err != nil {
+		return nil, err
+	}
+	// busy_timeout goes first so it is already in effect for the pragmas after it.
+	// It does not cover two processes switching the same brand-new file to WAL at
+	// the same instant: SQLite may then return SQLITE_BUSY without waiting.
+	db, err := sql.Open("sqlite", dsn+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
 	if err != nil {
 		return nil, err
 	}
@@ -82,34 +91,61 @@ func Open(path string) (*Store, error) {
 	return s, nil
 }
 
+// fileURI turns a filesystem path into an SQLite "file:" URI. The path is made
+// absolute (so a leading "//" or a relative name is never read as a URI authority)
+// and percent-encoded, so '?', '#' and '%' in data_dir are taken literally instead
+// of starting the query, the fragment or an escape.
+func fileURI(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("資料庫路徑：%w", err)
+	}
+	u := url.URL{Path: filepath.ToSlash(abs)}
+	return "file:" + u.EscapedPath(), nil
+}
+
 func (s *Store) Close() error { return s.db.Close() }
 
-func (s *Store) migrate(ctx context.Context) error {
+// migrate reads user_version and applies the missing migrations in one IMMEDIATE
+// transaction. Taking the write lock before the read means another process
+// opening the same database (e.g. `relay login` beside `relay run`) waits on
+// busy_timeout and then sees the new version, instead of both reading the old
+// version and the second one re-running CREATE TABLE. database/sql's BeginTx only
+// issues a deferred BEGIN, so the transaction is driven by hand on a dedicated
+// connection; nothing here may touch s.db, whose only connection this holds.
+func (s *Store) migrate(ctx context.Context) (err error) {
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `BEGIN IMMEDIATE`); err != nil {
+		return fmt.Errorf("資料庫遷移：%w", err)
+	}
+	defer func() {
+		if err != nil {
+			conn.ExecContext(context.Background(), `ROLLBACK`)
+		}
+	}()
 	var version int
-	if err := s.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+	if err := conn.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
 	if version > len(migrations) {
 		return fmt.Errorf("資料庫版本 %d 高於程式支援的 %d，請更新程式", version, len(migrations))
 	}
 	for i := version; i < len(migrations); i++ {
-		tx, err := s.db.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, migrations[i]); err != nil {
-			tx.Rollback()
+		if _, err := conn.ExecContext(ctx, migrations[i]); err != nil {
 			return fmt.Errorf("資料庫遷移 %d：%w", i+1, err)
 		}
-		if _, err := tx.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, i+1)); err != nil {
-			tx.Rollback()
-			return err
-		}
-		if err := tx.Commit(); err != nil {
+	}
+	if version < len(migrations) {
+		if _, err := conn.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, len(migrations))); err != nil {
 			return err
 		}
 	}
-	return nil
+	_, err = conn.ExecContext(ctx, `COMMIT`)
+	return err
 }
 
 func unix(t time.Time) int64 { return t.Unix() }
