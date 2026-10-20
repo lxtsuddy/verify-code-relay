@@ -18,6 +18,45 @@ docker compose up -d
 docker compose logs -f
 ```
 
+## 部署到 K3s
+
+設定檔在 `deploy/k3s/`，以 Kustomize 管理：單一 replica（SQLite 與重複轉發的限制）、K3s 內建 `local-path` PVC 存放資料庫、以 UID 65532 及唯讀根檔案系統執行。程式只需要對外連線，不需要 Service 或 Ingress。
+
+1. **建置並推送映像**（以 GHCR 為例；amd64 節點）：
+   ```bash
+   docker login ghcr.io
+   docker build -t ghcr.io/<帳號>/verify-code-relay:0.1.0 .
+   docker push ghcr.io/<帳號>/verify-code-relay:0.1.0
+   ```
+   GHCR 新建的套件預設為私有，需在 GitHub 的 Package settings 改成 Public，叢集才能不帶憑證拉取。
+2. **指定映像**：把 `deploy/k3s/kustomization.yaml` 中 `images` 的 `newName`／`newTag` 改成上一步的位置與版本。
+3. **準備設定與機密**（兩個檔案都已列入 `.gitignore`）：
+   ```bash
+   cp config.example.yaml deploy/k3s/config.yaml   # data_dir 保持 /data，http_listen 保持 ":8080"
+   cp .env.example deploy/k3s/secret.env           # 填入 Bot token、應用程式密碼
+   ```
+   `http_listen` 必須啟用，存活檢查依賴 8080 埠。
+4. **部署並檢查**：
+   ```bash
+   kubectl apply -k deploy/k3s
+   kubectl -n verify-code-relay rollout status deploy/verify-code-relay
+   kubectl -n verify-code-relay exec deploy/verify-code-relay -- /relay config validate
+   kubectl -n verify-code-relay exec deploy/verify-code-relay -- /relay send-test me
+   kubectl -n verify-code-relay logs -f deploy/verify-code-relay
+   ```
+5. **Microsoft 信箱授權**（Pod 執行中即可，未授權時 Pod 只會顯示未就緒）：
+   ```bash
+   kubectl -n verify-code-relay exec -it deploy/verify-code-relay -- /relay login outlook
+   kubectl -n verify-code-relay rollout restart deploy/verify-code-relay
+   ```
+
+**日常操作：**
+- 修改 `deploy/k3s/config.yaml` 或 `secret.env` 後重新 `kubectl apply -k deploy/k3s`。ConfigMap／Secret 名稱帶內容雜湊，Pod 會自動重啟套用新設定。
+- 升級：推送新版本映像、更新 `newTag`，再 `kubectl apply -k deploy/k3s`。
+- 健康狀態：`/healthz` 在補抓中、斷線或需要重新授權時回 503。readiness probe 據此把 Pod 標為未就緒；liveness probe 只檢查 8080 埠是否在聽，避免因授權失效被不斷重啟。
+- 備份：資料庫在 PVC 上（`local-path` 預設位於節點的 `/var/lib/rancher/k3s/storage/`），內含 OAuth token，請妥善保管。
+- 刪除：`kubectl delete -k deploy/k3s` 會一併刪除 PVC 與資料庫。
+
 ## Telegram 設定
 
 1. 找 @BotFather 建立 Bot，取得 token，填進 `.env`。

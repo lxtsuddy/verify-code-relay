@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: verify-code-relay
+spec:
+  # 只能有一個實例：SQLite 不能由兩個 Pod 同時寫入，兩個實例也會重複轉發。
+  replicas: 1
+  strategy:
+    type: Recreate
+  template:
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: relay
+          image: verify-code-relay
+          imagePullPolicy: IfNotPresent
+          args: ["run"]
+          env:
+            - name: RELAY_CONFIG
+              value: /config/config.yaml
+          envFrom:
+            - secretRef:
+                name: relay-secrets
+          ports:
+            - name: http
+              containerPort: 8080
+          # /healthz 在補抓中、斷線或 Outlook 需要重新授權時回 503：只標記為未就緒，不重啟。
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 15
+            failureThreshold: 2
+          # 只確認程序還活著；重啟無法修復授權失效，所以不用 /healthz 判斷存活。
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              memory: 256Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: relay-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: relay-data
+        - name: tmp
+          emptyDir: {}

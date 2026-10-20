@@ -1,0 +1,33 @@
+# 部署：kubectl apply -k deploy/k3s
+# 部署前先準備（兩個檔案都不進 git）：
+#   cp config.example.yaml deploy/k3s/config.yaml   # data_dir 維持 /data，http_listen 維持 ":8080"
+#   cp .env.example deploy/k3s/secret.env           # 填入 Bot token、應用程式密碼
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: verify-code-relay
+
+resources:
+  - namespace.yaml
+  - pvc.yaml
+  - deployment.yaml
+
+# 內容雜湊會加到名稱後綴：修改 config.yaml 或 secret.env 後重新 apply，Pod 會自動重啟套用。
+configMapGenerator:
+  - name: relay-config
+    files:
+      - config.yaml
+secretGenerator:
+  - name: relay-secrets
+    envs:
+      - secret.env
+
+# 改成你推送的映像位置與版本。
+images:
+  - name: verify-code-relay
+    newName: ghcr.io/CHANGE-ME/verify-code-relay
+    newTag: "0.1.0"
+
+labels:
+  - pairs:
+      app.kubernetes.io/name: verify-code-relay
+    includeSelectors: true
