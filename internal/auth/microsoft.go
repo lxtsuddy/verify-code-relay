@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -21,6 +22,10 @@ const Scope = "https://outlook.office.com/IMAP.AccessAsUser.All offline_access"
 
 const refreshMargin = 5 * time.Minute
 
+// minPollInterval is the shortest wait between device-code polls, so that a
+// missing or zero interval in the response does not turn into a busy loop.
+const minPollInterval = 5 * time.Second
+
 type TokenStore interface {
 	GetOAuthToken(ctx context.Context, mailbox string) (store.OAuthToken, bool, error)
 	SaveOAuthToken(ctx context.Context, mailbox string, t store.OAuthToken) error
@@ -35,6 +40,11 @@ type Microsoft struct {
 	HTTP      *http.Client
 	Authority string
 	Now       func() time.Time
+	// Log receives failures that are retried or worked around; nil means slog.Default().
+	Log *slog.Logger
+
+	// sleep waits between device-code polls; tests replace it to skip the wait.
+	sleep func(ctx context.Context, d time.Duration) error
 }
 
 type DeviceCode struct {
@@ -59,6 +69,27 @@ func (m *Microsoft) now() time.Time {
 		return m.Now()
 	}
 	return time.Now()
+}
+
+func (m *Microsoft) log() *slog.Logger {
+	if m.Log != nil {
+		return m.Log
+	}
+	return slog.Default()
+}
+
+func (m *Microsoft) wait(ctx context.Context, d time.Duration) error {
+	if m.sleep != nil {
+		return m.sleep(ctx, d)
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
 }
 
 func (m *Microsoft) client() *http.Client {
@@ -178,7 +209,7 @@ func (m *Microsoft) StartDeviceLogin(ctx context.Context) (*DeviceCode, error) {
 	var dc DeviceCode
 	status, err := m.post(ctx, "devicecode", url.Values{"client_id": {m.ClientID}, "scope": {Scope}}, &dc)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("取得 device code：%w", err)
 	}
 	if status != http.StatusOK || dc.DeviceCode == "" {
 		return nil, fmt.Errorf("取得 device code 失敗：HTTP %d（請確認 client_id、tenant 與「允許公開用戶端流程」設定）", status)
@@ -186,9 +217,25 @@ func (m *Microsoft) StartDeviceLogin(ctx context.Context) (*DeviceCode, error) {
 	return &dc, nil
 }
 
+// describe formats a token endpoint error response for an error message.
+func describe(status int, tr tokenResponse) string {
+	s := fmt.Sprintf("HTTP %d", status)
+	if tr.Error != "" {
+		s += " " + tr.Error
+	}
+	if tr.ErrorDescription != "" {
+		s += "（" + tr.ErrorDescription + "）"
+	}
+	return s
+}
+
+// PollDeviceLogin waits for the user to finish the device-code sign-in and
+// saves the tokens. Server errors and network failures are retried until the
+// code expires; the timeout error then includes the last failure.
 func (m *Microsoft) PollDeviceLogin(ctx context.Context, dc *DeviceCode) error {
-	interval := time.Duration(dc.Interval) * time.Second
+	interval := max(time.Duration(dc.Interval)*time.Second, minPollInterval)
 	deadline := m.now().Add(time.Duration(dc.ExpiresIn) * time.Second)
+	var lastErr error
 	for {
 		var tr tokenResponse
 		status, err := m.post(ctx, "token", url.Values{
@@ -196,28 +243,37 @@ func (m *Microsoft) PollDeviceLogin(ctx context.Context, dc *DeviceCode) error {
 			"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
 			"device_code": {dc.DeviceCode},
 		}, &tr)
-		if err != nil {
-			return err
-		}
 		switch {
+		case ctx.Err() != nil:
+			return ctx.Err()
+		case err != nil:
+			lastErr = err
 		case status == http.StatusOK && tr.AccessToken != "":
 			if tr.RefreshToken == "" {
 				return fmt.Errorf("沒有取得 refresh token（scope 需要包含 offline_access）")
 			}
 			return m.save(ctx, tr, "")
 		case tr.Error == "authorization_pending":
+			lastErr = nil
 		case tr.Error == "slow_down":
+			lastErr = nil
 			interval += 5 * time.Second
+		case status >= http.StatusInternalServerError || status == http.StatusTooManyRequests:
+			lastErr = errors.New(describe(status, tr))
 		default:
-			return fmt.Errorf("授權失敗：%s %s", tr.Error, tr.ErrorDescription)
+			return fmt.Errorf("授權失敗：%s", describe(status, tr))
+		}
+		if lastErr != nil {
+			m.log().Warn("查詢授權狀態失敗，稍後重試", "err", lastErr)
 		}
 		if m.now().After(deadline) {
+			if lastErr != nil {
+				return fmt.Errorf("授權逾時，請重新執行 relay login（最後一次錯誤：%w）", lastErr)
+			}
 			return fmt.Errorf("授權逾時，請重新執行 relay login")
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(interval):
+		if err := m.wait(ctx, interval); err != nil {
+			return err
 		}
 	}
 }
