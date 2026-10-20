@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,7 +19,7 @@ import (
 // token in the background; the page polls status every 3 seconds.
 //
 // The token is only stored while the flow is still registered and the stored mailbox
-// still has the account, client_id and tenant the flow was started for (flowStore), so a
+// still has the account, client_id, tenant, host and port the flow was started for (flowStore), so a
 // mailbox that was deleted or changed meanwhile never receives it. Every stored config
 // change (mailbox edit or delete, version restore, …) also cancels the pending flows it
 // made stale (cancelStaleFlows, called by mutateAs), and a new flow is only registered after
@@ -52,11 +53,16 @@ type deviceFlow struct {
 	finishedAt, reportedAt time.Time
 }
 
-// msAccount is what a Microsoft token belongs to.
-type msAccount struct{ Username, ClientID, Tenant string }
+// msAccount is what a Microsoft token belongs to: the account and app it was issued for
+// and the server it may be sent to.
+type msAccount struct {
+	Username, ClientID, Tenant string
+	Host                       string // lower case
+	Port                       int    // 0 written out as 993
+}
 
 func accountOf(m *config.Mailbox) msAccount {
-	return msAccount{m.Username, m.Auth.ClientID, effectiveTenant(m.Auth.Tenant)}
+	return msAccount{m.Username, m.Auth.ClientID, effectiveTenant(m.Auth.Tenant), strings.ToLower(m.Host), effectivePort(m.Port)}
 }
 
 var errFlowStale = errors.New("信箱設定已變更或已刪除，這次授權作廢，請重新授權")

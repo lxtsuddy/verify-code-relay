@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -58,10 +59,14 @@ func loadFromDB(ctx context.Context) (*store.Store, *runtime.Built, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	b, err := buildStored(ctx, st)
+	b, err := runtime.LoadBuilt(ctx, st)
 	if err != nil {
 		st.Close()
-		return nil, nil, fmt.Errorf("資料庫中的設定無效（請在 Web 上修正）：\n%w", err)
+		var invalid *runtime.InvalidConfigError
+		if errors.As(err, &invalid) {
+			return nil, nil, fmt.Errorf("資料庫中的設定無效（請在 Web 上修正）：\n%w", err)
+		}
+		return nil, nil, fmt.Errorf("無法讀取資料庫中的設定：%w", err)
 	}
 	return st, b, nil
 }

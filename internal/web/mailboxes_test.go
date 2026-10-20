@@ -474,3 +474,83 @@ func TestMailboxEditDropsStaleOAuthToken(t *testing.T) {
 		t.Fatal("token kept after switching to a password")
 	}
 }
+
+// A blank password keeps the stored one only for the same host, port and account: the
+// stored password must never be sent to another server.
+func TestMailboxServerChangeNeedsPassword(t *testing.T) {
+	e := newEnv(t, withSample)
+	e.login()
+	base := url.Values{"display_name": {"個人 Gmail"}, "host": {"imap.gmail.com"}, "port": {""}, "username": {"me@gmail.com"},
+		"auth_type": {"password"}, "password": {""}, "folders": {"INBOX"}, "targets": {"me"}}
+	for field, v := range map[string]string{"host": "imap.evil.example", "port": "994", "username": "other@gmail.com"} {
+		form := url.Values{}
+		for k, x := range base {
+			form[k] = append([]string(nil), x...)
+		}
+		form.Set(field, v)
+		resp, body := e.postForm("/mailboxes/gmail", form)
+		if resp.StatusCode != 422 || !strings.Contains(body, "主機或帳號已變更，請重新輸入密碼") {
+			t.Errorf("%s changed with a blank password = %d", field, resp.StatusCode)
+		}
+		raw, _, _ := runtime.LoadConfig(context.Background(), e.st)
+		if m := raw.Mailboxes["gmail"]; m.Host != "imap.gmail.com" || m.Port != 0 || m.Username != "me@gmail.com" {
+			t.Fatalf("%s: stored %+v", field, m)
+		}
+		form.Set("password", "NEW-PW")
+		if resp, body := e.postForm("/mailboxes/gmail", form); resp.StatusCode != 303 {
+			t.Fatalf("%s changed with a new password = %d %s", field, resp.StatusCode, body)
+		}
+		raw, _, _ = runtime.LoadConfig(context.Background(), e.st)
+		if raw.Mailboxes["gmail"].Auth.Password != "NEW-PW" {
+			t.Fatalf("%s: new password not stored", field)
+		}
+		// back to the original server, with its password
+		base.Set("password", "p")
+		if resp, body := e.postForm("/mailboxes/gmail", base); resp.StatusCode != 303 {
+			t.Fatalf("restore %s = %d %s", field, resp.StatusCode, body)
+		}
+		base.Set("password", "")
+	}
+	// the default port written out (993) and another letter case of the host are the same server
+	form := url.Values{}
+	for k, x := range base {
+		form[k] = append([]string(nil), x...)
+	}
+	form.Set("port", "993")
+	form.Set("host", "IMAP.Gmail.com")
+	if resp, body := e.postForm("/mailboxes/gmail", form); resp.StatusCode != 303 {
+		t.Fatalf("same server = %d %s", resp.StatusCode, body)
+	}
+	raw, _, _ := runtime.LoadConfig(context.Background(), e.st)
+	if raw.Mailboxes["gmail"].Auth.Password != "p" {
+		t.Fatal("blank password on the same server must keep the stored one")
+	}
+}
+
+func TestMailboxServerChangeDropsOAuthToken(t *testing.T) {
+	e := newEnv(t, withOutlookMailbox)
+	e.login()
+	ctx := context.Background()
+	tok := store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)}
+	hasToken := func() bool { _, ok, _ := e.st.GetOAuthToken(ctx, "outlook"); return ok }
+	for field, v := range map[string]string{"host": "imap.evil.example", "port": "994"} {
+		form := url.Values{"display_name": {"Outlook"}, "host": {"outlook.office365.com"}, "username": {"me@outlook.com"},
+			"auth_type": {"microsoft_oauth"}, "client_id": {"00000000-0000-0000-0000-000000000001"}, "tenant": {"consumers"},
+			"folders": {"INBOX"}, "targets": {"me"}}
+		e.st.SaveOAuthToken(ctx, "outlook", tok)
+		form.Set(field, v)
+		resp, body := e.postForm("/mailboxes/outlook", form)
+		if resp.StatusCode != 303 {
+			t.Fatalf("%s change = %d %s", field, resp.StatusCode, body)
+		}
+		if hasToken() {
+			t.Errorf("token kept after the %s changed", field)
+		}
+		if !strings.Contains(e.flash(resp), "請重新授權") {
+			t.Errorf("%s change flash = %q", field, e.flash(resp))
+		}
+		raw, _, _ := runtime.LoadConfig(ctx, e.st)
+		raw.Mailboxes["outlook"].Host, raw.Mailboxes["outlook"].Port = "outlook.office365.com", 0
+		saveRaw(e, raw)
+	}
+}

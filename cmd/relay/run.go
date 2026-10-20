@@ -16,7 +16,6 @@ import (
 	"verify-code-relay/internal/config"
 	"verify-code-relay/internal/health"
 	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/store"
 	"verify-code-relay/internal/web"
 	"verify-code-relay/internal/websec"
 )
@@ -68,12 +67,19 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	}
 
 	rt := runtime.New(runtime.Options{Store: st, Log: log, Level: level, Sender: telegramClient(), Dial: runtime.TLSDial})
-	b, err := buildStored(context.Background(), st)
-	if err != nil {
+	b, err := runtime.LoadBuilt(context.Background(), st)
+	var invalid *runtime.InvalidConfigError
+	switch {
+	case errors.As(err, &invalid):
+		// a config that no longer builds must not keep the web UI (where it is fixed) down
 		log.Error("資料庫中的設定無效，改以空設定啟動，請到 Web 修正", "err", err)
 		if b, err = runtime.Build(config.Empty()); err != nil {
 			return fail(stderr, fmt.Errorf("空設定：%w", err)) // cannot happen: the empty config is valid
 		}
+	case err != nil:
+		// a database problem: exit (Kubernetes restarts the Pod) rather than serve an empty
+		// config that the next save from the web would make permanent
+		return fail(stderr, fmt.Errorf("無法讀取資料庫中的設定：%w", err))
 	}
 	rt.Apply(b)
 
@@ -97,15 +103,6 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	}
 	log.Info("已停止")
 	return 0
-}
-
-// buildStored loads and builds the latest stored config.
-func buildStored(ctx context.Context, st *store.Store) (*runtime.Built, error) {
-	raw, _, err := runtime.LoadConfig(ctx, st)
-	if err != nil {
-		return nil, err
-	}
-	return runtime.Build(raw)
 }
 
 func serveHTTP(ln net.Listener, h http.Handler, failMsg string, log *slog.Logger) *http.Server {

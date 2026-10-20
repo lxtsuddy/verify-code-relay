@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"io"
 	"log/slog"
 	"net"
@@ -17,6 +18,8 @@ import (
 
 	"verify-code-relay/internal/runtime"
 	"verify-code-relay/internal/store"
+
+	_ "modernc.org/sqlite"
 )
 
 // freePort returns a 127.0.0.1 address that was free a moment ago.
@@ -346,5 +349,75 @@ func TestRunRejectsBadTrustedProxies(t *testing.T) {
 	}
 	if !strings.Contains(errb.String(), "RELAY_TRUSTED_PROXIES") || !strings.Contains(errb.String(), "not-an-ip") {
 		t.Errorf("stderr = %s", errb.String())
+	}
+}
+
+// TestRunFallsBackOnUndecodableStoredConfig: a stored version that is not even valid
+// YAML is an invalid config too: run starts with an empty config.
+func TestRunFallsBackOnUndecodableStoredConfig(t *testing.T) {
+	keepUmask(t)
+	t.Setenv("RELAY_DATA_DIR", t.TempDir())
+	st, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = st.SaveConfigVersion(context.Background(), store.ConfigVersion{CreatedAt: time.Now(), Source: "test", Summary: "bad",
+		YAML: "targets: [\n"})
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, log, stop := startRun(t, "a-long-enough-password")
+	if c := stop(); c != 0 {
+		t.Fatalf("exit code %d", c)
+	}
+	if !strings.Contains(log.String(), "資料庫中的設定無效") {
+		t.Errorf("log = %s", log.String())
+	}
+}
+
+// TestRunExitsOnConfigReadError: when the stored config cannot be read at all (a database
+// problem, not a bad config) run exits non-zero so that Kubernetes restarts the Pod,
+// instead of serving an empty config that a save from the web would then make permanent.
+func TestRunExitsOnConfigReadError(t *testing.T) {
+	keepUmask(t)
+	dir := t.TempDir()
+	t.Setenv("RELAY_DATA_DIR", dir)
+	t.Setenv("RELAY_LISTEN", freePort(t))
+	t.Setenv("RELAY_HEALTH_LISTEN", freePort(t))
+	t.Setenv("RELAY_ADMIN_PASSWORD", "a-long-enough-password")
+	st, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	db, err := sql.Open("sqlite", filepath.Join(dir, "relay.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TABLE config_versions`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+	type result struct {
+		code           int
+		stdout, stderr string
+	}
+	done := make(chan result, 1)
+	go func() {
+		var out, errb syncBuffer
+		c := realMain([]string{"run"}, &out, &errb)
+		done <- result{c, out.String(), errb.String()}
+	}()
+	select {
+	case r := <-done:
+		if r.code != 1 || !strings.Contains(r.stderr, "無法讀取資料庫中的設定") {
+			t.Fatalf("code=%d stderr=%q", r.code, r.stderr)
+		}
+		if strings.Contains(r.stdout, "改以空設定啟動") {
+			t.Fatalf("fell back to the empty config: %s", r.stdout)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("run did not exit on a config read error")
 	}
 }

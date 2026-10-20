@@ -359,3 +359,55 @@ func TestPostmarkHasNoNumbers(t *testing.T) {
 		t.Errorf("the postmark must not show numbers that could be read as an IP or time: %s", regexpStripTags(svg))
 	}
 }
+
+// Restoring a version decides about OAuth tokens like any other save: a token issued for
+// another account or server is dropped, one for the same account is kept.
+func TestRestoreDropsStaleOAuthToken(t *testing.T) {
+	e := newEnv(t, withOutlookMailbox) // version 1
+	ctx := context.Background()
+	tok := store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)}
+	hasToken := func() bool { _, ok, _ := e.st.GetOAuthToken(ctx, "outlook"); return ok }
+	raw, _, _ := loadRaw(e)
+	raw.Mailboxes["outlook"].DisplayName = "只改名稱"
+	saveRaw(e, raw) // version 2: display name only
+	raw.Mailboxes["outlook"].Host = "imap.evil.example"
+	saveRaw(e, raw) // version 3: another host
+	raw.Mailboxes["outlook"].Host = "outlook.office365.com"
+	raw.Mailboxes["outlook"].Username = "other@outlook.com"
+	saveRaw(e, raw) // version 4: another account
+	delete(raw.Mailboxes, "outlook")
+	saveRaw(e, raw) // version 5: no outlook
+	e.login()
+	restore := func(id int) {
+		t.Helper()
+		resp, _ := e.postForm(fmt.Sprintf("/settings/versions/%d/restore", id), nil)
+		if resp.StatusCode != 303 || !strings.HasPrefix(e.flash(resp), fmt.Sprintf("已還原版本 #%d", id)) {
+			t.Fatalf("restore %d = %d %q", id, resp.StatusCode, e.flash(resp))
+		}
+	}
+	restore(1)
+	e.st.SaveOAuthToken(ctx, "outlook", tok)
+	restore(2)
+	if !hasToken() {
+		t.Fatal("token dropped by restoring a version that only renames the mailbox")
+	}
+	resp, _ := e.postForm("/settings/versions/3/restore", nil)
+	if hasToken() {
+		t.Fatal("token kept after restoring a version with another host")
+	}
+	if f := e.flash(resp); !strings.Contains(f, "清除了信箱 outlook") {
+		t.Errorf("restore flash = %q", f)
+	}
+	restore(2)
+	e.st.SaveOAuthToken(ctx, "outlook", tok)
+	restore(4)
+	if hasToken() {
+		t.Fatal("token kept after restoring a version with another account")
+	}
+	restore(2)
+	e.st.SaveOAuthToken(ctx, "outlook", tok)
+	restore(5)
+	if hasToken() {
+		t.Fatal("token kept after restoring a version without the mailbox")
+	}
+}

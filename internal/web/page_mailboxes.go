@@ -19,7 +19,8 @@ import (
 )
 
 // Mailbox pages: the list, one form page for creating and editing (the name is fixed once
-// created), delete (which also drops the mailbox's OAuth token) and the connection test.
+// created), delete and the connection test. Stale OAuth tokens (another account or server,
+// or a deleted mailbox) are dropped by saveConfig.
 //
 // Form error keys (FieldErrors) are the form field names: "name", "display_name", "host",
 // "port", "username", "auth_type", "password", "client_id", "tenant", "folders" (every
@@ -36,6 +37,8 @@ const (
 	msgMailboxGone  = "找不到信箱 %s，可能已被刪除"
 	msgNeedsOAuth   = "請先完成 Microsoft 授權"
 	msgReservedName = "「new」是保留字，請換一個名稱"
+	// a blank password field on another server: the stored password stays with its server
+	msgRetypePassword = "主機或帳號已變更，請重新輸入密碼"
 )
 
 // mailboxPreset is a service type card: it only fills in the form (in app.js); the
@@ -138,8 +141,10 @@ func parsePort(v string) (int, string) {
 }
 
 // mailbox builds the config entry from the form. old (nil when creating) supplies the
-// stored password when the password field is left blank. Switching to Microsoft drops the
-// password; switching to a password drops client_id and tenant.
+// stored password when the password field is left blank, but only while host, port and
+// username stay the same (sameServer): a stored password is never sent to another server.
+// Switching to Microsoft drops the password; switching to a password drops client_id and
+// tenant.
 func (f mailboxForm) mailbox(old *config.Mailbox, password string) (*config.Mailbox, FieldErrors) {
 	fe := FieldErrors{}
 	m := &config.Mailbox{
@@ -156,8 +161,12 @@ func (f mailboxForm) mailbox(old *config.Mailbox, password string) (*config.Mail
 		m.Auth = config.Auth{Type: authMicrosoft, ClientID: f.ClientID, Tenant: f.Tenant}
 	case authPassword:
 		m.Auth = config.Auth{Type: authPassword, Password: password}
-		if password == "" && old != nil && old.Auth.Type == authPassword {
-			m.Auth.Password = old.Auth.Password
+		if password == "" && old != nil && old.Auth.Type == authPassword && old.Auth.Password != "" {
+			if fe["port"] == "" && sameServer(old, m.Host, effectivePort(m.Port), m.Username) {
+				m.Auth.Password = old.Auth.Password
+			} else if fe["port"] == "" {
+				fe["password"] = msgRetypePassword
+			}
 		}
 	default:
 		fe["auth_type"] = "請選擇認證方式"
@@ -497,8 +506,7 @@ func (s *Server) saveMailbox(w http.ResponseWriter, r *http.Request, name string
 	if isNew {
 		summary = "新增信箱 " + key
 	}
-	dropToken := false // the stored OAuth token was issued for other settings
-	fe, err = s.mutate(r, summary, func(raw *config.Config) error {
+	res, fe, err := s.saveConfig(r, "web", summary, func(raw *config.Config) error {
 		if raw.Mailboxes == nil {
 			raw.Mailboxes = map[string]*config.Mailbox{}
 		}
@@ -521,7 +529,6 @@ func (s *Server) saveMailbox(w http.ResponseWriter, r *http.Request, name string
 		if !isNew && reflect.DeepEqual(cur, next) {
 			return errNoChange
 		}
-		dropToken = !isNew && tokenInvalidated(cur, next)
 		raw.Mailboxes[key] = next
 		return nil
 	})
@@ -537,26 +544,22 @@ func (s *Server) saveMailbox(w http.ResponseWriter, r *http.Request, name string
 		return
 	}
 	done := "已儲存信箱 " + key + " 並套用"
-	if dropToken {
-		// after the save, as on delete: a failed save must not lose the token
-		if err := s.o.Store.DeleteOAuthToken(r.Context(), key); err != nil {
-			s.o.Log.Warn("刪除信箱的 OAuth token 失敗", "mailbox", key, "err", err)
-			done += "，但舊的 Microsoft 授權沒有清除成功，詳情請看服務日誌"
-		} else if f.AuthType == authMicrosoft {
-			done += "。帳號或應用程式已變更，舊的 Microsoft 授權已清除，請重新授權。"
-			s.redirect(w, r, "/mailboxes/"+key, &Flash{Kind: "success", Text: done})
-			return
-		} else {
-			done += "，並清除了它的 Microsoft 授權"
-		}
-	}
-	if isNew {
+	switch {
+	case isNew:
 		done = "已新增信箱 " + key + " 並套用"
 		if f.AuthType == authMicrosoft {
 			done += "。下一步：在信箱頁按「授權」登入 Microsoft 帳號。"
 			s.redirect(w, r, "/mailboxes/"+key, &Flash{Kind: "success", Text: done})
 			return
 		}
+	case res.failed(key):
+		done += "，但舊的 Microsoft 授權沒有清除成功，詳情請看服務日誌"
+	case res.dropped(key) && f.AuthType == authMicrosoft:
+		done += "。主機、帳號或應用程式已變更，舊的 Microsoft 授權已清除，請重新授權。"
+		s.redirect(w, r, "/mailboxes/"+key, &Flash{Kind: "success", Text: done})
+		return
+	case res.dropped(key):
+		done += "，並清除了它的 Microsoft 授權"
 	}
 	s.redirect(w, r, "/mailboxes", &Flash{Kind: "success", Text: done})
 }
@@ -586,19 +589,26 @@ func effectiveTenant(t string) string {
 	return t
 }
 
+// effectivePort is the port a mailbox connects to (config defaults 0 to 993).
+func effectivePort(p int) int {
+	if p == 0 {
+		return 993
+	}
+	return p
+}
+
 // tokenInvalidated reports whether a stored OAuth token of mailbox cur no longer fits next:
-// it stopped using Microsoft, or the account, client_id or tenant changed.
+// it stopped using Microsoft, or the account, client_id, tenant, host or port changed.
 func tokenInvalidated(cur, next *config.Mailbox) bool {
 	if cur == nil || cur.Auth.Type != authMicrosoft {
 		return false
 	}
-	return next.Auth.Type != authMicrosoft || next.Username != cur.Username ||
-		next.Auth.ClientID != cur.Auth.ClientID || effectiveTenant(next.Auth.Tenant) != effectiveTenant(cur.Auth.Tenant)
+	return next.Auth.Type != authMicrosoft || accountOf(next) != accountOf(cur)
 }
 
 func (s *Server) postMailboxDelete(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	fe, err := s.mutate(r, "刪除信箱 "+name, func(raw *config.Config) error {
+	res, fe, err := s.saveConfig(r, "web", "刪除信箱 "+name, func(raw *config.Config) error {
 		if raw.Mailboxes[name] == nil {
 			return FieldErrors{"": fmt.Sprintf(msgMailboxGone, name)}
 		}
@@ -613,9 +623,7 @@ func (s *Server) postMailboxDelete(w http.ResponseWriter, r *http.Request) {
 		s.redirect(w, r, "/mailboxes", &Flash{Kind: "error", Text: truncate(fe.Error(), 400)})
 		return
 	}
-	// after the change is stored: a failed save must not lose the token
-	if err := s.o.Store.DeleteOAuthToken(r.Context(), name); err != nil {
-		s.o.Log.Warn("刪除信箱的 OAuth token 失敗", "mailbox", name, "err", err)
+	if res.failed(name) { // saveConfig dropped the token of the removed mailbox
 		s.redirect(w, r, "/mailboxes", &Flash{Kind: "info", Text: "已刪除信箱 " + name + "，但它的 Microsoft 授權沒有清除成功，詳情請看服務日誌"})
 		return
 	}
@@ -638,11 +646,7 @@ type probeRequest struct {
 // sameServer reports whether m talks to host:port as username, so that its stored
 // credentials may be used for a test with these values (and never sent anywhere else).
 func sameServer(m *config.Mailbox, host string, port int, username string) bool {
-	p := m.Port
-	if p == 0 {
-		p = 993
-	}
-	return strings.EqualFold(m.Host, host) && p == port && m.Username == username
+	return strings.EqualFold(m.Host, host) && effectivePort(m.Port) == port && m.Username == username
 }
 
 // postAPIProbe logs in with the form's current values and lists the server's folders:

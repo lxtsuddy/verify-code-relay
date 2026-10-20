@@ -353,7 +353,7 @@ func (s *Server) postRestore(w http.ResponseWriter, r *http.Request) {
 		s.redirect(w, r, "/settings/versions", &Flash{Kind: "error", Text: fmt.Sprintf("版本 #%d 的內容無法解析，無法還原。", id)})
 		return
 	}
-	fe, err := s.mutateAs(r, "restore", fmt.Sprintf("還原版本 #%d", id), func(raw *config.Config) error {
+	res, fe, err := s.saveConfig(r, "restore", fmt.Sprintf("還原版本 #%d", id), func(raw *config.Config) error {
 		*raw = *c
 		return nil
 	})
@@ -365,7 +365,16 @@ func (s *Server) postRestore(w http.ResponseWriter, r *http.Request) {
 		s.redirect(w, r, "/settings/versions", &Flash{Kind: "error", Text: truncate(fmt.Sprintf("版本 #%d 無法通過目前的檢查，沒有還原：\n%s", id, fe.Error()), 400)})
 		return
 	}
-	s.redirect(w, r, "/settings/versions", &Flash{Kind: "success", Text: fmt.Sprintf("已還原版本 #%d 並套用", id)})
+	text := fmt.Sprintf("已還原版本 #%d 並套用", id)
+	if len(res.Dropped) > 0 {
+		text += "，並清除了信箱 " + strings.Join(res.Dropped, "、") + " 已不適用的 Microsoft 授權"
+	}
+	if len(res.Failed) > 0 {
+		text += "，但信箱 " + strings.Join(res.Failed, "、") + " 的舊 Microsoft 授權沒有清除成功，詳情請看服務日誌"
+		s.redirect(w, r, "/settings/versions", &Flash{Kind: "info", Text: text})
+		return
+	}
+	s.redirect(w, r, "/settings/versions", &Flash{Kind: "success", Text: text})
 }
 
 // ago describes how long before now t was, e.g. "3 分鐘前".

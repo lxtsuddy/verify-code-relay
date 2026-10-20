@@ -97,18 +97,29 @@ func New(o Options) *Runtime {
 // Calls are serialised. The old service is fully stopped first so that two dispatchers
 // never send from the same outbox.
 func (r *Runtime) Apply(b *Built) {
-	r.applyMu.Lock()
-	defer r.applyMu.Unlock()
-	r.applyLocked(b)
+	r.ApplyWith(b, nil)
 }
 
-// applyLocked does the work of Apply; r.applyMu must be held.
-func (r *Runtime) applyLocked(b *Built) {
+// ApplyWith is Apply that calls beforeStart (when not nil) after the old service has
+// fully stopped and before the new one starts: nothing of either service runs meanwhile,
+// so e.g. a stored OAuth token deleted there can neither be written back by an old
+// watcher refreshing it nor be read by a new one.
+func (r *Runtime) ApplyWith(b *Built, beforeStart func()) {
+	r.applyMu.Lock()
+	defer r.applyMu.Unlock()
+	r.applyLocked(b, beforeStart)
+}
+
+// applyLocked does the work of ApplyWith; r.applyMu must be held.
+func (r *Runtime) applyLocked(b *Built, beforeStart func()) {
 	r.mu.Lock()
 	r.applying = true
 	r.mu.Unlock()
 
 	r.stopCurrent()
+	if beforeStart != nil {
+		beforeStart()
+	}
 
 	if r.opts.Level != nil {
 		var l slog.Level
@@ -143,7 +154,7 @@ func (r *Runtime) Reload() error {
 	if err != nil {
 		return fmt.Errorf("設定有誤：%w", err)
 	}
-	r.applyLocked(b)
+	r.applyLocked(b, nil)
 	return nil
 }
 

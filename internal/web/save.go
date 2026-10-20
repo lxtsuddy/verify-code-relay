@@ -1,10 +1,12 @@
 package web
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -17,42 +19,93 @@ import (
 // mutate loads the latest raw config, applies fn, validates, stores it as a new version
 // (source "web", client IP, summary) and applies it. Calls are serialised. A validation
 // failure returns the problems as FieldErrors and stores nothing; fn may itself return
-// FieldErrors (as error) to reject the change.
+// FieldErrors (as error) to reject the change. OAuth tokens the change made stale are
+// deleted (see saveConfig); callers that tell the user about them use saveConfig.
 func (s *Server) mutate(r *http.Request, summary string, fn func(raw *config.Config) error) (FieldErrors, error) {
-	return s.mutateAs(r, "web", summary, fn)
+	_, fe, err := s.saveConfig(r, "web", summary, fn)
+	return fe, err
 }
 
-// mutateAs is mutate with another version source (e.g. "restore").
-func (s *Server) mutateAs(r *http.Request, source, summary string, fn func(raw *config.Config) error) (FieldErrors, error) {
+// saved tells what a stored change did besides storing and applying the config.
+type saved struct {
+	Dropped []string // mailboxes whose stored OAuth token was deleted (sorted)
+	Failed  []string // mailboxes whose stale token may still be stored (logged; sorted)
+}
+
+// saveConfig is mutate with another version source (e.g. "restore") that also reports
+// the OAuth tokens it dropped. Which tokens no longer fit is decided here, for every
+// change alike, by comparing each mailbox before and after (tokenInvalidated; a removed
+// mailbox always loses its token). They are deleted only once the new version is stored,
+// so a failed save never loses a token, and while neither the old nor the new service
+// runs (Runtime.ApplyWith), so no watcher can write one back or send one to a new server.
+func (s *Server) saveConfig(r *http.Request, source, summary string, fn func(raw *config.Config) error) (saved, FieldErrors, error) {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
 	ctx := r.Context()
 	raw, _, err := runtime.LoadConfig(ctx, s.o.Store)
 	if err != nil {
-		return nil, err
+		return saved{}, nil, err
+	}
+	before := map[string]config.Mailbox{} // by value: fn may change the mailboxes in place
+	for name, m := range raw.Mailboxes {
+		if m != nil {
+			before[name] = *m
+		}
 	}
 	if err := fn(raw); err != nil {
 		var fe FieldErrors
 		if errors.As(err, &fe) {
-			return fe, nil
+			return saved{}, fe, nil
 		}
-		return nil, err
+		return saved{}, nil, err
 	}
 	// validate first so that only Build's problems ("path: message" lines) become field
 	// errors; SaveConfig builds again, which is cheap, and its errors are then internal
 	if _, err := runtime.Build(raw); err != nil {
-		return fieldErrors(err), nil
+		return saved{}, fieldErrors(err), nil
 	}
 	ip := websec.ClientIP(r, s.o.TrustedProxies)
 	b, id, err := runtime.SaveConfig(ctx, s.o.Store, raw, runtime.Meta{Source: source, IP: ip, Summary: summary}, s.now())
 	if err != nil {
-		return nil, err
+		return saved{}, nil, err
 	}
-	s.cancelStaleFlows(raw) // before the caller deletes any token
-	s.o.Runtime.Apply(b)
+	var stale []string
+	for _, name := range sortedNames(before) {
+		old := before[name]
+		if next := raw.Mailboxes[name]; next == nil || tokenInvalidated(&old, next) {
+			stale = append(stale, name)
+		}
+	}
+	s.cancelStaleFlows(raw) // before any token is deleted
+	var res saved
+	dctx := context.WithoutCancel(ctx) // the version is stored: finish even if the client went away
+	s.o.Runtime.ApplyWith(b, func() {
+		for _, name := range stale {
+			_, ok, err := s.o.Store.GetOAuthToken(dctx, name)
+			if err == nil && !ok {
+				continue // nothing stored
+			}
+			if err == nil {
+				err = s.o.Store.DeleteOAuthToken(dctx, name)
+			}
+			if err != nil {
+				s.o.Log.Warn("刪除信箱的 OAuth token 失敗", "mailbox", name, "err", err)
+				res.Failed = append(res.Failed, name)
+				continue
+			}
+			s.o.Log.Info("信箱設定已變更，已清除不再適用的 Microsoft 授權", "mailbox", name)
+			res.Dropped = append(res.Dropped, name)
+		}
+	})
 	s.o.Log.Info("設定已儲存並套用", "version", id, "source", source, "summary", summary, "ip", ip)
-	return nil, nil
+	return res, nil, nil
 }
+
+// failed reports whether the token of mailbox name was to be dropped but may still be stored.
+func (r saved) failed(name string) bool { return slices.Contains(r.Failed, name) }
+
+// dropped reports whether the stored token of mailbox name was deleted.
+func (r saved) dropped(name string) bool { return slices.Contains(r.Dropped, name) }
 
 // pathRe matches a config path such as "mailboxes.gmail.folders[0]" or "admin".
 var pathRe = regexp.MustCompile(`^[a-z0-9_-]+(\[\d+\])?(\.[A-Za-z0-9_-]+(\[\d+\])?)*$`)

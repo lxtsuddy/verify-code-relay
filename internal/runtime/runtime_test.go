@@ -326,3 +326,47 @@ func TestNotifyTextIsCapped(t *testing.T) {
 		t.Fatalf("sent %d messages; first len = %d", len(got), len(strings.Join(got, "")))
 	}
 }
+
+// ApplyWith runs its hook once, after every watcher of the old service has stopped and
+// before the new service starts.
+func TestApplyWithRunsHookBetweenServices(t *testing.T) {
+	rt, _, _ := newRT(t)
+	b, _ := Build(sample())
+	rt.Apply(b)
+	b2, _ := Build(sample())
+	calls := 0
+	rt.ApplyWith(b2, func() {
+		calls++
+		for _, w := range rt.Snapshot().Watchers {
+			if w.Status != watcher.StatusStopped {
+				t.Errorf("watcher %s/%s still %s in the hook", w.Mailbox, w.Folder, w.Status)
+			}
+		}
+		if rt.Current() != b {
+			t.Error("new service started before the hook")
+		}
+	})
+	if calls != 1 || rt.Current() != b2 {
+		t.Fatalf("calls = %d, current is new = %v", calls, rt.Current() == b2)
+	}
+}
+
+// LoadBuilt tells a stored config that is not usable (InvalidConfigError) from a failure
+// to read the database.
+func TestLoadBuiltErrorKinds(t *testing.T) {
+	ctx := context.Background()
+	_, st, _ := newRT(t)
+	var invalid *InvalidConfigError
+	for _, y := range []string{"targets: [\n", "targets: { me: { bot: ghost, chat_id: 5 } }\n"} {
+		if _, err := st.SaveConfigVersion(ctx, store.ConfigVersion{CreatedAt: time.Now(), Source: "test", Summary: "x", YAML: y}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadBuilt(ctx, st); !errors.As(err, &invalid) {
+			t.Errorf("%q: err = %v, want InvalidConfigError", y, err)
+		}
+	}
+	st.Close()
+	if _, err := LoadBuilt(ctx, st); err == nil || errors.As(err, &invalid) {
+		t.Errorf("closed database: err = %v, want a read error", err)
+	}
+}

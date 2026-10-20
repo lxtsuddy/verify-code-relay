@@ -131,7 +131,7 @@
             <input class="input input-mono" id="f-password" name="password" type="password" autocomplete="new-password" spellcheck="false"{{if $d.HasPassword}} placeholder="已設定，留空表示不變"{{end}} aria-describedby="f-password-hint{{if $pwErr}} f-password-err{{end}}"{{if $pwErr}} aria-invalid="true"{{end}}>
             <button type="button" class="secret-toggle" data-reveal="f-password" aria-label="顯示密碼" aria-pressed="false">{{template "icon" "eye"}}</button>
           </div>
-          <p class="hint" id="f-password-hint">{{if $d.PasswordDropped}}基於安全，送出的密碼不會帶回表單，請重新輸入。{{else if $d.HasPassword}}只能寫入：儲存後不會再顯示。要更換時直接輸入新的。{{else}}儲存後不會再顯示。Gmail 的應用程式密碼含不含空格都可以。{{end}}</p>
+          <p class="hint" id="f-password-hint">{{if $d.PasswordDropped}}基於安全，送出的密碼不會帶回表單，請重新輸入。{{else if $d.HasPassword}}只能寫入：儲存後不會再顯示。要更換時直接輸入新的；改了主機、埠號或帳號就必須重新輸入。{{else}}儲存後不會再顯示。Gmail 的應用程式密碼含不含空格都可以。{{end}}</p>
           <div id="f-password-err">{{template "field-error" $pwErr}}</div>
         </div>
       </div>
