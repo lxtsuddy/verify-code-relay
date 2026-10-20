@@ -143,7 +143,7 @@ func parsePort(v string) (int, string) {
 func (f mailboxForm) mailbox(old *config.Mailbox, password string) (*config.Mailbox, FieldErrors) {
 	fe := FieldErrors{}
 	m := &config.Mailbox{
-		DisplayName: f.DisplayName, Host: f.Host, Username: f.Username,
+		Name: f.Name, DisplayName: f.DisplayName, Host: f.Host, Username: f.Username,
 		Folders: f.Folders, Targets: f.Targets,
 		Templates: config.Templates{Code: f.TplCode, Link: f.TplLink, Both: f.TplBoth},
 	}
@@ -488,6 +488,7 @@ func (s *Server) saveMailbox(w http.ResponseWriter, r *http.Request, name string
 	if isNew {
 		summary = "新增信箱 " + key
 	}
+	dropToken := false // the stored OAuth token was issued for other settings
 	fe, err = s.mutate(r, summary, func(raw *config.Config) error {
 		if raw.Mailboxes == nil {
 			raw.Mailboxes = map[string]*config.Mailbox{}
@@ -503,9 +504,15 @@ func (s *Server) saveMailbox(w http.ResponseWriter, r *http.Request, name string
 		if len(local) > 0 {
 			return local
 		}
+		if !isNew {
+			// checkbox and probe order is not a change: keep the stored order of the same set
+			next.Folders = keepOrder(cur.Folders, next.Folders)
+			next.Targets = keepOrder(cur.Targets, next.Targets)
+		}
 		if !isNew && reflect.DeepEqual(cur, next) {
 			return errNoChange
 		}
+		dropToken = !isNew && tokenInvalidated(cur, next)
 		raw.Mailboxes[key] = next
 		return nil
 	})
@@ -521,6 +528,19 @@ func (s *Server) saveMailbox(w http.ResponseWriter, r *http.Request, name string
 		return
 	}
 	done := "已儲存信箱 " + key + " 並套用"
+	if dropToken {
+		// after the save, as on delete: a failed save must not lose the token
+		if err := s.o.Store.DeleteOAuthToken(r.Context(), key); err != nil {
+			s.o.Log.Warn("刪除信箱的 OAuth token 失敗", "mailbox", key, "err", err)
+			done += "，但舊的 Microsoft 授權沒有清除成功，詳情請看服務日誌"
+		} else if f.AuthType == authMicrosoft {
+			done += "。帳號或應用程式已變更，舊的 Microsoft 授權已清除，請重新授權。"
+			s.redirect(w, r, "/mailboxes/"+key, &Flash{Kind: "success", Text: done})
+			return
+		} else {
+			done += "，並清除了它的 Microsoft 授權"
+		}
+	}
 	if isNew {
 		done = "已新增信箱 " + key + " 並套用"
 		if f.AuthType == authMicrosoft {
@@ -530,6 +550,41 @@ func (s *Server) saveMailbox(w http.ResponseWriter, r *http.Request, name string
 		}
 	}
 	s.redirect(w, r, "/mailboxes", &Flash{Kind: "success", Text: done})
+}
+
+// keepOrder returns old when next holds the same items in another order, else next.
+func keepOrder(old, next []string) []string {
+	if len(old) != len(next) {
+		return next
+	}
+	count := map[string]int{}
+	for _, x := range old {
+		count[x]++
+	}
+	for _, x := range next {
+		if count[x]--; count[x] < 0 {
+			return next
+		}
+	}
+	return old
+}
+
+// effectiveTenant is the tenant a Microsoft login uses (config defaults blank to common).
+func effectiveTenant(t string) string {
+	if t == "" {
+		return "common"
+	}
+	return t
+}
+
+// tokenInvalidated reports whether a stored OAuth token of mailbox cur no longer fits next:
+// it stopped using Microsoft, or the account, client_id or tenant changed.
+func tokenInvalidated(cur, next *config.Mailbox) bool {
+	if cur == nil || cur.Auth.Type != authMicrosoft {
+		return false
+	}
+	return next.Auth.Type != authMicrosoft || next.Username != cur.Username ||
+		next.Auth.ClientID != cur.Auth.ClientID || effectiveTenant(next.Auth.Tenant) != effectiveTenant(cur.Auth.Tenant)
 }
 
 func (s *Server) postMailboxDelete(w http.ResponseWriter, r *http.Request) {
@@ -634,11 +689,12 @@ func (s *Server) postAPIProbe(w http.ResponseWriter, r *http.Request) {
 			bad("主機、埠號或帳號與已儲存的不同：授權只會用在原本的伺服器，請先儲存再測試")
 			return
 		}
-		if in.ClientID == "" {
-			bad("請輸入應用程式（用戶端）識別碼")
+		if in.ClientID != stored.Auth.ClientID || effectiveTenant(in.Tenant) != effectiveTenant(stored.Auth.Tenant) {
+			bad("應用程式識別碼或 tenant 與已儲存的不同：授權屬於原本的應用程式，請先儲存（需要重新授權）再測試")
 			return
 		}
-		authn = &auth.Microsoft{Mailbox: in.Name, Username: in.Username, ClientID: in.ClientID, Tenant: in.Tenant,
+		// only the stored settings ever drive the stored token
+		authn = &auth.Microsoft{Mailbox: in.Name, Username: stored.Username, ClientID: stored.Auth.ClientID, Tenant: stored.Auth.Tenant,
 			Store: s.o.Store, Authority: s.o.MSAuthority, Log: s.o.Log}
 	case authPassword:
 		pw := in.Password
@@ -699,6 +755,9 @@ func probeFailure(ctx context.Context, host string, port int, err error, passwor
 			text = ie.Text
 		}
 		return "登入失敗：伺服器拒絕了帳號或密碼" + detail(text) + "。Gmail、iCloud 必須使用應用程式密碼，不是平常登入的密碼。"
+	}
+	if errors.Is(err, watcher.ErrListFolders) {
+		return "已登入，但無法列出資料夾" + detail(strings.TrimPrefix(err.Error(), watcher.ErrListFolders.Error()+"："))
 	}
 	if rest, ok := strings.CutPrefix(err.Error(), "認證："); ok { // e.g. a failed OAuth token refresh
 		return "登入過程失敗" + detail(rest)

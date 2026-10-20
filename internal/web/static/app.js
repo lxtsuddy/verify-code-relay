@@ -720,7 +720,8 @@
     var v = function (n) { var x = field(form, n); return x && typeof x.value === "string" ? x.value.trim() : ""; };
     var authBox = form.querySelector('input[name="auth_type"]:checked');
     var body = {
-      name: form.dataset.name || v("name"),
+      // only an edit form names a stored mailbox (whose saved password may be reused)
+      name: form.dataset.name || "",
       host: v("host"), port: v("port"), username: v("username"),
       auth_type: authBox ? authBox.value : "password",
       password: (field(form, "password") || { value: "" }).value,

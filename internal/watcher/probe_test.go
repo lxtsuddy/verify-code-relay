@@ -1,6 +1,7 @@
 package watcher
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net"
@@ -28,6 +29,21 @@ func (s noselectSession) List(w *imapserver.ListWriter, ref string, patterns []s
 
 func startProbeServer(t *testing.T) DialFunc {
 	t.Helper()
+	addr := startProbeAddr(t)
+	return func(ctx context.Context, opts *imapclient.Options) (*imapclient.Client, error) {
+		var d net.Dialer
+		conn, err := d.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			return nil, err
+		}
+		return imapclient.New(conn, opts), nil
+	}
+}
+
+// startProbeAddr runs the server for the probe tests (user u / pw; INBOX, Spam, Archive
+// and a \Noselect "[Gmail]") and returns its address.
+func startProbeAddr(t *testing.T) string {
+	t.Helper()
 	mem := imapmemserver.New()
 	u := imapmemserver.NewUser("u", "pw")
 	for _, f := range []string{"INBOX", "Spam", "Archive"} {
@@ -50,14 +66,7 @@ func startProbeServer(t *testing.T) DialFunc {
 	}
 	go srv.Serve(ln)
 	t.Cleanup(func() { srv.Close() })
-	return func(ctx context.Context, opts *imapclient.Options) (*imapclient.Client, error) {
-		var d net.Dialer
-		conn, err := d.DialContext(ctx, "tcp", ln.Addr().String())
-		if err != nil {
-			return nil, err
-		}
-		return imapclient.New(conn, opts), nil
-	}
+	return ln.Addr().String()
 }
 
 func TestProbeListsSelectableFoldersInboxFirst(t *testing.T) {
@@ -126,5 +135,78 @@ func TestProbeHonoursContext(t *testing.T) {
 	}
 	if d := time.Since(start); d > 5*time.Second {
 		t.Fatalf("probe took %v after ctx expired", d)
+	}
+}
+
+// swallowLogout drops the client's LOGOUT command, so the server never answers it.
+type swallowLogout struct{ net.Conn }
+
+func (c swallowLogout) Write(p []byte) (int, error) {
+	if bytes.Contains(p, []byte("LOGOUT")) {
+		return len(p), nil
+	}
+	return c.Conn.Write(p)
+}
+
+func TestProbeDoesNotWaitLongForLogout(t *testing.T) {
+	old := probeLogoutWait
+	probeLogoutWait = 200 * time.Millisecond
+	defer func() { probeLogoutWait = old }()
+	addr := startProbeAddr(t)
+	dial := func(ctx context.Context, opts *imapclient.Options) (*imapclient.Client, error) {
+		var d net.Dialer
+		conn, err := d.DialContext(ctx, "tcp", addr)
+		if err != nil {
+			return nil, err
+		}
+		return imapclient.New(swallowLogout{conn}, opts), nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	got, err := Probe(ctx, dial, auth.Password{Username: "u", Password: "pw"})
+	if err != nil || len(got) != 3 {
+		t.Fatalf("probe = %q, %v", got, err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("probe waited %v for LOGOUT", d)
+	}
+}
+
+// failList answers LIST with NO after a normal login.
+type failList struct{ imapserver.SessionIMAP4rev2 }
+
+func (failList) List(*imapserver.ListWriter, string, []string, *imap.ListOptions) error {
+	return &imap.Error{Type: imap.StatusResponseTypeNo, Text: "LIST is broken"}
+}
+
+func TestProbeListFailureIsMarked(t *testing.T) {
+	mem := imapmemserver.New()
+	u := imapmemserver.NewUser("u", "pw")
+	u.Create("INBOX", nil)
+	mem.AddUser(u)
+	srv := imapserver.New(&imapserver.Options{
+		NewSession: func(*imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
+			return failList{mem.NewSession().(imapserver.SessionIMAP4rev2)}, nil, nil
+		},
+		Caps: imap.CapSet{imap.CapIMAP4rev1: {}, imap.CapIMAP4rev2: {}}, InsecureAuth: true, Logger: nopLogger{},
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve(ln)
+	defer srv.Close()
+	dial := func(ctx context.Context, opts *imapclient.Options) (*imapclient.Client, error) {
+		conn, err := net.Dial("tcp", ln.Addr().String())
+		if err != nil {
+			return nil, err
+		}
+		return imapclient.New(conn, opts), nil
+	}
+	_, err = Probe(context.Background(), dial, auth.Password{Username: "u", Password: "pw"})
+	var ae *AuthError
+	if !errors.Is(err, ErrListFolders) || errors.As(err, &ae) {
+		t.Fatalf("err = %v, want ErrListFolders", err)
 	}
 }

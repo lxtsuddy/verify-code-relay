@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/url"
 	"strings"
@@ -334,6 +335,10 @@ func TestProbeFailureNeverEchoesThePassword(t *testing.T) {
 	if msg := probeFailure(ctx, "h", 993, errors.New("連線：dial hunter2-secret"), "hunter2-secret"); strings.Contains(msg, "hunter2") {
 		t.Errorf("connect failure = %q", msg)
 	}
+	listErr := fmt.Errorf("%w：%w", watcher.ErrListFolders, errors.New("LIST is broken"))
+	if msg := probeFailure(ctx, "h", 993, listErr, ""); !strings.HasPrefix(msg, "已登入，但無法列出資料夾") || !strings.Contains(msg, "LIST is broken") {
+		t.Errorf("list failure = %q", msg)
+	}
 	if msg := probeFailure(ctx, "h", 993, errors.New("認證：更新 OAuth token 失敗：HTTP 400 unauthorized_client"), ""); !strings.HasPrefix(msg, "登入過程失敗") {
 		t.Errorf("auth-step failure = %q", msg)
 	}
@@ -342,5 +347,130 @@ func TestProbeFailureNeverEchoesThePassword(t *testing.T) {
 	<-expired.Done()
 	if msg := probeFailure(expired, "h", 993, context.DeadlineExceeded, ""); !strings.Contains(msg, "20 秒") {
 		t.Errorf("timeout = %q", msg)
+	}
+}
+
+func TestMailboxNoOpEditStoresNothing(t *testing.T) {
+	e := newEnv(t, withSample)
+	e.login()
+	before, _, _ := e.st.LatestConfigVersion(context.Background())
+	// the gmail sample exactly as the edit page would post it back (password left blank)
+	form := url.Values{"display_name": {"個人 Gmail"}, "host": {"imap.gmail.com"}, "port": {""}, "username": {"me@gmail.com"},
+		"auth_type": {"password"}, "password": {""}, "folders": {"INBOX"}, "targets": {"me"}}
+	resp, _ := e.postForm("/mailboxes/gmail", form)
+	if resp.StatusCode != 303 || e.flash(resp) != msgNoChange {
+		t.Fatalf("no-op edit = %d %q", resp.StatusCode, e.flash(resp))
+	}
+	after, _, _ := e.st.LatestConfigVersion(context.Background())
+	if after.ID != before.ID {
+		t.Fatalf("a no-op edit stored version %d (was %d)", after.ID, before.ID)
+	}
+	// the same targets and folders ticked in another order are no change either
+	e2 := newEnv(t, func(c *config.Config) {
+		withSample(c)
+		c.Targets["family"] = config.Target{Bot: "main", ChatID: 7}
+		c.Mailboxes["gmail"].Targets = []string{"me", "family"}
+		c.Mailboxes["gmail"].Folders = []string{"INBOX", "Spam"}
+	})
+	e2.login()
+	form.Set("targets", "family")
+	form.Add("targets", "me")
+	form["folders"] = []string{"Spam", "INBOX"}
+	if resp, _ := e2.postForm("/mailboxes/gmail", form); e2.flash(resp) != msgNoChange {
+		t.Fatalf("reordered edit = %q", e2.flash(resp))
+	}
+}
+
+func TestProbeWithoutNameNeverUsesStoredCredentials(t *testing.T) {
+	e := newEnvWithIMAP(t, func(c *config.Config) {
+		c.Mailboxes["box"] = &config.Mailbox{Host: "imap.test", Username: "u", Auth: config.Auth{Type: "password", Password: "pw"},
+			Targets: []string{"me"}}
+	})
+	e.login()
+	_, body := e.postJSON("/api/mailboxes/probe", map[string]string{"host": "imap.test", "username": "u", "auth_type": "password"})
+	if !strings.Contains(body, `"ok":false`) || !strings.Contains(body, "請輸入密碼") {
+		t.Fatalf("probe without name = %s", body)
+	}
+	select {
+	case h := <-e.imap.hosts:
+		t.Fatalf("dialled %s without a password", h)
+	default:
+	}
+}
+
+func TestProbeMicrosoftUsesOnlyStoredSettings(t *testing.T) {
+	e := newEnvWithIMAP(t, withOutlookMailbox)
+	e.login()
+	ctx := context.Background()
+	e.st.SaveOAuthToken(ctx, "outlook", store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)})
+	same := map[string]string{"name": "outlook", "host": "outlook.office365.com", "username": "me@outlook.com",
+		"auth_type": "microsoft_oauth", "client_id": "00000000-0000-0000-0000-000000000001", "tenant": "consumers"}
+	for field, v := range map[string]string{"client_id": "attacker-app", "tenant": "organizations", "host": "evil.example", "username": "other@outlook.com"} {
+		in := map[string]string{}
+		for k, x := range same {
+			in[k] = x
+		}
+		in[field] = v
+		_, body := e.postJSON("/api/mailboxes/probe", in)
+		if !strings.Contains(body, `"ok":false`) || !strings.Contains(body, "與已儲存的不同") {
+			t.Errorf("probe with another %s = %s", field, body)
+		}
+	}
+	select {
+	case h := <-e.imap.hosts:
+		t.Fatalf("dialled %s with differing settings", h)
+	default:
+	}
+	// the stored settings go ahead (the in-memory server refuses XOAUTH2: a login failure)
+	_, body := e.postJSON("/api/mailboxes/probe", same)
+	if !strings.Contains(body, "登入失敗") {
+		t.Fatalf("same-server probe = %s", body)
+	}
+	if h := <-e.imap.hosts; h != "outlook.office365.com" {
+		t.Fatalf("dialled %s", h)
+	}
+}
+
+func TestMailboxEditDropsStaleOAuthToken(t *testing.T) {
+	e := newEnv(t, withOutlookMailbox)
+	e.login()
+	ctx := context.Background()
+	tok := store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)}
+	form := url.Values{"display_name": {"Outlook"}, "host": {"outlook.office365.com"}, "username": {"me@outlook.com"},
+		"auth_type": {"microsoft_oauth"}, "client_id": {"00000000-0000-0000-0000-000000000001"}, "tenant": {"consumers"},
+		"folders": {"INBOX"}, "targets": {"me"}}
+	hasToken := func() bool { _, ok, _ := e.st.GetOAuthToken(ctx, "outlook"); return ok }
+	edit := func(kv ...string) {
+		t.Helper()
+		for i := 0; i < len(kv); i += 2 {
+			form.Set(kv[i], kv[i+1])
+		}
+		if resp, body := e.postForm("/mailboxes/outlook", form); resp.StatusCode != 303 {
+			t.Fatalf("edit %v = %d %s", kv, resp.StatusCode, body)
+		}
+	}
+	e.st.SaveOAuthToken(ctx, "outlook", tok)
+	edit("display_name", "Work") // unrelated change: kept
+	if !hasToken() {
+		t.Fatal("token dropped by a display name change")
+	}
+	edit("tenant", "") // consumers → common: another tenant
+	if hasToken() {
+		t.Fatal("token kept after the tenant changed")
+	}
+	e.st.SaveOAuthToken(ctx, "outlook", tok)
+	edit("username", "other@outlook.com")
+	if hasToken() {
+		t.Fatal("token kept after the account changed")
+	}
+	e.st.SaveOAuthToken(ctx, "outlook", tok)
+	edit("client_id", "00000000-0000-0000-0000-000000000002")
+	if hasToken() {
+		t.Fatal("token kept after client_id changed")
+	}
+	e.st.SaveOAuthToken(ctx, "outlook", tok)
+	edit("auth_type", "password", "password", "pw")
+	if hasToken() {
+		t.Fatal("token kept after switching to a password")
 	}
 }
