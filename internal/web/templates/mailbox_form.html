@@ -1,0 +1,286 @@
+{{template "app" .}}
+{{define "content"}}
+{{$d := .Data}}{{$f := .Data.F}}{{$e := .Errors}}
+<a class="back-link" href="/mailboxes">{{template "icon" "arrow-left"}}<span>信箱</span></a>
+<header class="page-head">
+  <div>
+    {{if $d.New}}
+    <h1 class="page-title">新增信箱</h1>
+    <p class="page-desc">選擇服務、填入帳號，按「測試連線」確認登入並挑選資料夾，再勾選要轉發到哪些目標。儲存後立即開始監看。</p>
+    {{else}}
+    <h1 class="page-title">{{with $f.DisplayName}}{{.}}{{else}}{{$d.Name}}{{end}}</h1>
+    <p class="page-desc">信箱 <span class="mono">{{$d.Name}}</span>。修改後按「儲存並套用」，信箱連線會重新建立。</p>
+    {{end}}
+  </div>
+</header>
+
+<form class="mb-form" id="mb-form" method="post" action="{{if $d.New}}/mailboxes/new{{else}}/mailboxes/{{$d.Name}}{{end}}" novalidate data-mailbox-form{{if not $d.New}} data-name="{{$d.Name}}"{{end}}>
+  {{template "csrf" .}}
+
+  {{/* ---------- service ---------- */}}
+  <section class="card" aria-labelledby="svc-title">
+    <header class="card-head">
+      <div>
+        <h2 class="card-title" id="svc-title">服務</h2>
+        <p class="card-desc">選擇後自動帶入主機、埠號與認證方式，之後仍可修改。</p>
+      </div>
+    </header>
+    <div class="card-body">
+      <fieldset class="fieldset">
+        <legend class="sr-only">信箱服務</legend>
+        <div class="stamps">
+          {{range $d.Presets}}
+          <label class="stamp-pick">
+            <input type="radio" name="preset" value="{{.Key}}" data-host="{{.Host}}" data-auth="{{.Auth}}"{{if eq .Key $f.Preset}} checked{{end}}>
+            <span class="stamp">
+              <span class="stamp-face">
+                <span class="stamp-top"><span class="stamp-label">{{.Label}}</span><span class="stamp-value mono">993</span></span>
+                <span class="stamp-glyph" aria-hidden="true">{{.Glyph}}</span>
+                <span class="stamp-note">{{.Note}}</span>
+              </span>
+            </span>
+          </label>
+          {{end}}
+        </div>
+      </fieldset>
+      <div class="preset-hints">
+        <div class="preset-hint" data-preset-hint="gmail">
+          {{template "icon" "info"}}
+          <div>
+            <p><b>Gmail 要用應用程式密碼</b>，不是平常登入的密碼：Google 帳戶需先開啟兩步驟驗證，再到「安全性 → 應用程式密碼」建立。</p>
+            <p>要監看垃圾郵件匣：Gmail 設定 → 標籤，勾選「垃圾郵件」的「在 IMAP 中顯示」，測試連線時就會列出 <span class="mono">[Gmail]/垃圾郵件</span>。</p>
+          </div>
+        </div>
+        <div class="preset-hint" data-preset-hint="icloud">
+          {{template "icon" "info"}}
+          <div><p>到 <b>appleid.apple.com</b> → 登入與安全性 → App 專用密碼，建立一組密碼貼到下方。帳號填完整的 iCloud 郵件地址。</p></div>
+        </div>
+        <div class="preset-hint" data-preset-hint="outlook">
+          {{template "icon" "info"}}
+          <div>
+            <p>Microsoft 已停用 IMAP 的密碼登入，需要先在 Azure 註冊一個應用程式：</p>
+            <ol class="mini-steps">
+              <li>Azure 入口網站 → Microsoft Entra ID → 應用程式註冊 → 新增註冊。個人帳號選「僅限個人 Microsoft 帳戶」；重新導向 URI 不需要。</li>
+              <li>「驗證」→ 進階設定 →「允許公用用戶端流程」設為「是」。</li>
+              <li>「API 權限」→ 新增委派的權限 <code>IMAP.AccessAsUser.All</code> 與 <code>offline_access</code>。</li>
+              <li>把「應用程式（用戶端）識別碼」填到下方；個人帳號的 tenant 填 <code>consumers</code>。</li>
+            </ol>
+          </div>
+        </div>
+        <div class="preset-hint" data-preset-hint="custom">
+          {{template "icon" "info"}}
+          <div><p>填入信箱服務商提供的 IMAP 主機。連線一律使用 SSL/TLS（通常是 993 埠），不支援 STARTTLS。</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {{/* ---------- account ---------- */}}
+  <section class="card" aria-labelledby="acct-title">
+    <header class="card-head">
+      <div>
+        <h2 class="card-title" id="acct-title">帳號</h2>
+        <p class="card-desc">名稱是內部代號，建立後不能修改；顯示名稱會出現在轉發的訊息裡。</p>
+      </div>
+    </header>
+    <div class="card-body form">
+      <div class="grid-2">
+        {{if $d.New}}{{$err := fieldErr $e "name"}}
+        <div class="field">
+          <label class="label" for="f-name">名稱</label>
+          <input class="input input-mono" id="f-name" name="name" type="text" value="{{$f.Name}}" required pattern="[a-z0-9_\-]+" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="f-name-hint{{if $err}} f-name-err{{end}}"{{if $err}} aria-invalid="true"{{end}}>
+          <p class="hint" id="f-name-hint">小寫英文字母、數字、<code>_</code> 與 <code>-</code>，例如 <span class="mono">gmail</span>、<span class="mono">work</span>。</p>
+          <div id="f-name-err">{{template "field-error" $err}}</div>
+        </div>
+        {{else}}
+        <div class="field">
+          <span class="label">名稱</span>
+          <p class="fixed-value mono">{{$d.Name}}{{template "icon" "lock"}}</p>
+          <p class="hint">建立後不能修改：信箱的收信進度與授權都以名稱儲存。</p>
+        </div>
+        {{end}}
+        {{template "mb-input" (dict "ID" "f-display" "Name" "display_name" "Label" "顯示名稱" "Opt" "選填" "Value" $f.DisplayName "Err" (fieldErr $e "display_name") "Placeholder" (or $f.Name "例如 個人 Gmail") "Hint" "留空時使用名稱。")}}
+      </div>
+      <div class="grid-host">
+        {{template "mb-input" (dict "ID" "f-host" "Name" "host" "Label" "IMAP 主機" "Value" $f.Host "Err" (fieldErr $e "host") "Mono" true "Placeholder" "imap.example.com" "Required" true)}}
+        {{template "mb-input" (dict "ID" "f-port" "Name" "port" "Label" "埠號" "Value" $f.Port "Err" (fieldErr $e "port") "Mono" true "Placeholder" "993" "Numeric" true)}}
+      </div>
+      {{template "mb-input" (dict "ID" "f-username" "Name" "username" "Label" "帳號" "Value" $f.Username "Err" (fieldErr $e "username") "Mono" true "Placeholder" "you@gmail.com" "Required" true "Hint" "通常是完整的郵件地址。" "Autocomplete" "username")}}
+
+      {{$authErr := fieldErr $e "auth_type"}}
+      <fieldset class="fieldset">
+        <legend>認證方式</legend>
+        <div class="segmented segmented-2">
+          <label class="segment">
+            <input type="radio" id="auth-password" name="auth_type" value="password"{{if ne $f.AuthType "microsoft_oauth"}} checked{{end}}>
+            <span class="segment-label">應用程式密碼<small>Gmail、iCloud、自架</small></span>
+          </label>
+          <label class="segment">
+            <input type="radio" id="auth-ms" name="auth_type" value="microsoft_oauth"{{if eq $f.AuthType "microsoft_oauth"}} checked{{end}}>
+            <span class="segment-label">Microsoft 授權<small>Outlook、Hotmail、365</small></span>
+          </label>
+        </div>
+        {{template "field-error" $authErr}}
+      </fieldset>
+
+      <div class="auth-panel auth-password">
+        {{$pwErr := fieldErr $e "password"}}
+        <div class="field">
+          <label class="label label-row" for="f-password"><span>應用程式密碼</span>{{if $d.HasPassword}}<span class="tag tag-set">{{template "icon" "lock"}}已設定</span>{{end}}</label>
+          <div class="secret">
+            <input class="input input-mono" id="f-password" name="password" type="password" autocomplete="new-password" spellcheck="false"{{if $d.HasPassword}} placeholder="已設定，留空表示不變"{{end}} aria-describedby="f-password-hint{{if $pwErr}} f-password-err{{end}}"{{if $pwErr}} aria-invalid="true"{{end}}>
+            <button type="button" class="secret-toggle" data-reveal="f-password" aria-label="顯示密碼" aria-pressed="false">{{template "icon" "eye"}}</button>
+          </div>
+          <p class="hint" id="f-password-hint">{{if $d.PasswordDropped}}基於安全，送出的密碼不會帶回表單，請重新輸入。{{else if $d.HasPassword}}只能寫入：儲存後不會再顯示。要更換時直接輸入新的。{{else}}儲存後不會再顯示。Gmail 的應用程式密碼含不含空格都可以。{{end}}</p>
+          <div id="f-password-err">{{template "field-error" $pwErr}}</div>
+        </div>
+      </div>
+
+      <div class="auth-panel auth-ms">
+        <div class="grid-2">
+          {{template "mb-input" (dict "ID" "f-client" "Name" "client_id" "Label" "應用程式（用戶端）識別碼" "Value" $f.ClientID "Err" (fieldErr $e "client_id") "Mono" true "Placeholder" "00000000-0000-0000-0000-000000000000" "Hint" "Azure 應用程式註冊的「概觀」頁。")}}
+          {{template "mb-input" (dict "ID" "f-tenant" "Name" "tenant" "Label" "Tenant" "Opt" "選填" "Value" $f.Tenant "Err" (fieldErr $e "tenant") "Mono" true "Placeholder" "common" "Hint" "個人帳號（Outlook.com、Hotmail）填 consumers；公司帳號填組織的 tenant；留空為 common。")}}
+        </div>
+        <div class="oauth-state">
+          {{if and $d.StoredMicrosoft $d.Authorized}}
+          <span class="oauth-icon is-ok">{{template "icon" "check"}}</span>
+          <div class="oauth-text"><p class="oauth-title">已授權</p><p class="hint">token 會自動更新。換了 Microsoft 帳號或授權失效時再重新授權。</p></div>
+          <button type="button" class="btn btn-sm" data-oauth-start="{{$d.Name}}">{{template "icon" "refresh"}}<span>重新授權</span></button>
+          {{else if $d.StoredMicrosoft}}
+          <span class="oauth-icon is-warn">{{template "icon" "alert"}}</span>
+          <div class="oauth-text"><p class="oauth-title">尚未授權</p><p class="hint">這個信箱沒有 Microsoft 授權（例如剛新增，或還原了已刪除信箱的舊設定），授權前無法收信。</p></div>
+          <button type="button" class="btn btn-primary btn-sm" data-oauth-start="{{$d.Name}}">{{template "icon" "lock"}}<span>授權</span></button>
+          {{else}}
+          <span class="oauth-icon">{{template "icon" "info"}}</span>
+          <div class="oauth-text"><p class="oauth-title">儲存後授權</p><p class="hint">先儲存信箱，回到這一頁按「授權」，在瀏覽器輸入顯示的代碼登入 Microsoft 帳號。</p></div>
+          {{end}}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {{/* ---------- folders ---------- */}}
+  {{$folderErr := fieldErr $e "folders"}}
+  <section class="card" aria-labelledby="folders-title">
+    <header class="card-head">
+      <div>
+        <h2 class="card-title" id="folders-title">資料夾</h2>
+        <p class="card-desc">勾選要監看的資料夾；全部不勾時監看 INBOX。</p>
+      </div>
+      <button type="button" class="btn" data-probe>{{template "icon" "refresh"}}<span>測試連線</span></button>
+    </header>
+    <div class="card-body">
+      <div class="probe" data-probe-out aria-live="polite">
+        <span class="probe-icon">{{template "icon" "info"}}</span>
+        <p class="probe-text">「測試連線」會用上面填的資料實際登入，列出伺服器上的資料夾供勾選；不會儲存任何東西。</p>
+      </div>
+      <ul class="folders{{if $folderErr}} is-invalid{{end}}" data-folder-list aria-label="要監看的資料夾"{{if $folderErr}} aria-describedby="f-folders-err"{{end}}>{{range $f.Folders}}<li><label class="folder"><input type="checkbox" name="folders" value="{{.}}" checked><span class="folder-name mono">{{.}}</span></label></li>{{end}}</ul>
+      <div class="folder-add">
+        <label class="sr-only" for="f-folder-new">手動加入資料夾</label>
+        <input class="input input-mono" id="f-folder-new" type="text" placeholder="手動加入，例如 [Gmail]/垃圾郵件" autocomplete="off" spellcheck="false" data-folder-input>
+        <button type="button" class="btn" data-folder-add>{{template "icon" "plus"}}<span>加入</span></button>
+      </div>
+      <div id="f-folders-err">{{template "field-error" $folderErr}}</div>
+    </div>
+  </section>
+
+  {{/* ---------- routes ---------- */}}
+  {{$tErr := fieldErr $e "targets"}}
+  <section class="card" aria-labelledby="routes-title">
+    <header class="card-head">
+      <div>
+        <h2 class="card-title" id="routes-title">轉發到</h2>
+        <p class="card-desc">驗證碼與登入連結會送到每個勾選的目標，至少一個。</p>
+      </div>
+    </header>
+    <div class="card-body">
+      {{if $d.Targets}}
+      <fieldset class="fieldset">
+        <legend class="sr-only">轉發目標</legend>
+        <div class="routes"{{if $tErr}} aria-describedby="f-targets-err"{{end}}>
+          {{range $d.Targets}}
+          <label class="route-pick">
+            <input type="checkbox" name="targets" value="{{.Name}}"{{if .Checked}} checked{{end}}{{if $tErr}} aria-invalid="true"{{end}}>
+            <span class="route-card">
+              <span class="route-name mono">{{.Name}}</span>
+              <span class="route" aria-label="由 Bot {{.Bot}} 送到 chat {{.ChatID}}">
+                <span class="route-bot mono">{{.Bot}}</span>
+                <span class="route-line" aria-hidden="true"></span>
+                <span class="route-chat mono">{{.ChatID}}</span>
+              </span>
+              <span class="route-check" aria-hidden="true">{{template "icon" "check"}}</span>
+            </span>
+          </label>
+          {{end}}
+        </div>
+      </fieldset>
+      {{else}}
+      <div class="callout callout-warn">{{template "icon" "alert"}}<p>還沒有任何 Telegram 目標。請先到 <a href="/telegram">Telegram</a> 新增 Bot 與目標，再回來勾選。</p></div>
+      {{end}}
+      <div id="f-targets-err">{{template "field-error" $tErr}}</div>
+    </div>
+  </section>
+
+  {{/* ---------- advanced ---------- */}}
+  <details class="card advanced"{{if $d.AdvancedOpen}} open{{end}}>
+    <summary class="card-head advanced-summary">
+      <div>
+        <h2 class="card-title">進階設定</h2>
+        <p class="card-desc">時效、保留時間、輪詢間隔與這個信箱專用的訊息範本。{{if $d.AdvancedSet}}<span class="tag">已自訂 {{$d.AdvancedSet}} 項</span>{{end}}</p>
+      </div>
+      <span class="advanced-chevron" aria-hidden="true"></span>
+    </summary>
+    <div class="card-body form">
+      <div class="grid-3">
+        {{template "mb-input" (dict "ID" "f-max-age" "Name" "max_age" "Label" "郵件時效" "Value" $f.MaxAge "Err" (fieldErr $e "max_age") "Mono" true "Placeholder" $d.Defaults.MaxAge "Hint" "超過這段時間的信不轉發。")}}
+        {{template "mb-input" (dict "ID" "f-ttl" "Name" "ttl" "Label" "待發訊息保留" "Value" $f.TTL "Err" (fieldErr $e "ttl") "Mono" true "Placeholder" $d.Defaults.TTL "Hint" "送不出去時最多等多久。")}}
+        {{template "mb-input" (dict "ID" "f-poll" "Name" "poll_interval" "Label" "輪詢間隔" "Value" $f.PollInterval "Err" (fieldErr $e "poll_interval") "Mono" true "Placeholder" $d.Defaults.PollInterval "Hint" "伺服器不支援 IDLE 時使用。")}}
+      </div>
+      <p class="hint">留空沿用<a href="/settings">系統設定</a>的預設值（欄位中的灰字）。格式：<code>30s</code>、<code>10m</code>、<code>1h30m</code>。</p>
+      {{template "mb-textarea" (dict "ID" "f-tpl-code" "Name" "tpl_code" "Label" "驗證碼範本" "Value" $f.TplCode "Err" (fieldErr $e "tpl_code"))}}
+      {{template "mb-textarea" (dict "ID" "f-tpl-link" "Name" "tpl_link" "Label" "登入連結範本" "Value" $f.TplLink "Err" (fieldErr $e "tpl_link"))}}
+      {{template "mb-textarea" (dict "ID" "f-tpl-both" "Name" "tpl_both" "Label" "驗證碼＋連結範本" "Value" $f.TplBoth "Err" (fieldErr $e "tpl_both"))}}
+      <p class="hint">留空沿用全域範本。Go 範本語法，可用 <code>{{"{{.Code}}"}}</code> <code>{{"{{.URL}}"}}</code> <code>{{"{{.Service}}"}}</code> <code>{{"{{.Subject}}"}}</code> <code>{{"{{.Mailbox}}"}}</code> 等欄位。</p>
+    </div>
+  </details>
+
+  <div class="save-bar">
+    <a class="btn btn-ghost" href="/mailboxes">取消</a>
+    <button type="submit" class="btn btn-primary" data-busy-text="驗證並套用中…">{{template "icon" "check"}}<span>{{if $d.New}}新增信箱{{else}}儲存並套用{{end}}</span></button>
+  </div>
+</form>
+
+{{if not $d.New}}
+<section class="card danger-zone" aria-labelledby="danger-title">
+  <div class="danger-body">
+    <div>
+      <h2 class="card-title" id="danger-title">刪除信箱</h2>
+      <p class="card-desc">停止監看並移除設定{{if $d.StoredMicrosoft}}，同時刪除它的 Microsoft 授權{{end}}。可以從版本歷史還原設定{{if $d.StoredMicrosoft}}，但授權需要重新進行{{end}}。</p>
+    </div>
+    <form method="post" action="/mailboxes/{{$d.Name}}/delete" data-confirm="刪除信箱 {{$d.Name}}？&#10;會立即停止監看{{if $d.StoredMicrosoft}}，並刪除它的 Microsoft 授權{{end}}。" data-confirm-ok="刪除">
+      {{template "csrf" .}}
+      <button type="submit" class="btn btn-danger">{{template "icon" "trash"}}<span>刪除信箱</span></button>
+    </form>
+  </div>
+</section>
+{{end}}
+{{end}}
+
+{{/* mb-input: dict ID Name Label Value Err [Opt Placeholder Hint Mono Required Numeric Autocomplete] */}}
+{{define "mb-input"}}
+<div class="field">
+  <label class="label" for="{{.ID}}">{{.Label}}{{with .Opt}}<span class="opt">{{.}}</span>{{end}}</label>
+  <input class="input{{if .Mono}} input-mono{{end}}" id="{{.ID}}" name="{{.Name}}" type="text" value="{{.Value}}"{{with .Placeholder}} placeholder="{{.}}"{{end}}{{if .Required}} required{{end}}{{if .Numeric}} inputmode="numeric"{{end}} autocomplete="{{with .Autocomplete}}{{.}}{{else}}off{{end}}" autocapitalize="none" spellcheck="false"{{if or .Hint .Err}} aria-describedby="{{if .Hint}}{{.ID}}-hint{{end}}{{if .Err}} {{.ID}}-err{{end}}"{{end}}{{if .Err}} aria-invalid="true"{{end}}>
+  {{with .Hint}}<p class="hint" id="{{$.ID}}-hint">{{.}}</p>{{end}}
+  <div id="{{.ID}}-err">{{template "field-error" .Err}}</div>
+</div>
+{{end}}
+
+{{/* mb-textarea: dict ID Name Label Value Err */}}
+{{define "mb-textarea"}}
+<div class="field">
+  <label class="label" for="{{.ID}}">{{.Label}}<span class="opt">選填</span></label>
+  <textarea class="textarea input-mono" id="{{.ID}}" name="{{.Name}}" rows="3" spellcheck="false" placeholder="留空沿用全域範本"{{if .Err}} aria-invalid="true" aria-describedby="{{.ID}}-err"{{end}}>{{.Value}}</textarea>
+  <div id="{{.ID}}-err">{{template "field-error" .Err}}</div>
+</div>
+{{end}}

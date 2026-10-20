@@ -18,11 +18,12 @@ var authedPosts = []string{
 	"/telegram/bots", "/telegram/bots/main", "/telegram/bots/main/delete",
 	"/telegram/targets", "/telegram/targets/me", "/telegram/targets/me/delete", "/telegram/targets/me/test",
 	"/api/telegram/getme", "/api/telegram/chats",
+	"/mailboxes/new", "/mailboxes/gmail", "/mailboxes/gmail/delete", "/api/mailboxes/probe",
 }
 
 func TestRoutesRequireLogin(t *testing.T) {
 	e := newEnv(t, nil)
-	for _, path := range []string{"/", "/mailboxes", "/telegram", "/rules", "/templates", "/logs", "/settings", "/settings/versions", "/api/status"} {
+	for _, path := range []string{"/", "/mailboxes", "/mailboxes/new", "/mailboxes/gmail", "/telegram", "/rules", "/templates", "/logs", "/settings", "/settings/versions", "/api/status"} {
 		resp, _ := e.get(path)
 		if resp.StatusCode != http.StatusSeeOther && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusNotFound {
 			t.Errorf("GET %s without login = %d", path, resp.StatusCode)
@@ -42,7 +43,7 @@ func TestRoutesRequireLogin(t *testing.T) {
 	p.postForm("/login", url.Values{"password": {testPassword}})
 	_, page := p.get("/setup/totp")
 	p.csrf = extractCSRF(page)
-	for _, path := range []string{"/settings", "/settings/versions", "/telegram"} {
+	for _, path := range []string{"/settings", "/settings/versions", "/telegram", "/mailboxes", "/mailboxes/new"} {
 		if resp, _ := p.get(path); resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/setup/totp" {
 			t.Errorf("GET %s while pending = %d %s", path, resp.StatusCode, resp.Header.Get("Location"))
 		}

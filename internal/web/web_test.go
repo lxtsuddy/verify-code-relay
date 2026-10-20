@@ -175,7 +175,8 @@ type env struct {
 	csrf   string
 	now    time.Time // the server's clock; see root()
 	tg     *fakeTelegram
-	secret string // TOTP secret of the test admin ("" for newEnvNoTOTP)
+	secret string    // TOTP secret of the test admin ("" for newEnvNoTOTP)
+	imap   *imapDial // newEnvWithIMAP's in-memory IMAP server (nil otherwise)
 
 	clock *testClock
 	base  *env // set on clones: the env that owns the clock

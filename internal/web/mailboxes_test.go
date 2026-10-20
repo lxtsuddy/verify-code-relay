@@ -1,0 +1,346 @@
+package web
+
+import (
+	"context"
+	"errors"
+	"net"
+	"net/url"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/imapclient"
+	"github.com/emersion/go-imap/v2/imapserver"
+	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
+
+	"verify-code-relay/internal/config"
+	"verify-code-relay/internal/runtime"
+	"verify-code-relay/internal/store"
+	"verify-code-relay/internal/watcher"
+)
+
+type nopIMAPLogger struct{}
+
+func (nopIMAPLogger) Printf(string, ...any) {}
+
+// imapDial records the hosts the web server asked to dial.
+type imapDial struct {
+	addr  string
+	hosts chan string
+}
+
+// startIMAP runs an in-memory IMAP server with user u / pw and folders INBOX and Spam.
+func startIMAP(t *testing.T) *imapDial {
+	t.Helper()
+	mem := imapmemserver.New()
+	u := imapmemserver.NewUser("u", "pw")
+	for _, f := range []string{"INBOX", "Spam"} {
+		if err := u.Create(f, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mem.AddUser(u)
+	srv := imapserver.New(&imapserver.Options{
+		NewSession: func(*imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
+			return mem.NewSession(), nil, nil
+		},
+		Caps:         imap.CapSet{imap.CapIMAP4rev1: {}, imap.CapIMAP4rev2: {}},
+		InsecureAuth: true,
+		Logger:       nopIMAPLogger{},
+	})
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	go srv.Serve(ln)
+	t.Cleanup(func() { srv.Close() })
+	return &imapDial{addr: ln.Addr().String(), hosts: make(chan string, 16)}
+}
+
+// factory dials the in-memory server whatever host was asked for (and records the host).
+func (d *imapDial) factory(host string, _ int) watcher.DialFunc {
+	return func(ctx context.Context, opts *imapclient.Options) (*imapclient.Client, error) {
+		select {
+		case d.hosts <- host:
+		default:
+		}
+		var nd net.Dialer
+		conn, err := nd.DialContext(ctx, "tcp", d.addr)
+		if err != nil {
+			return nil, err
+		}
+		return imapclient.New(conn, opts), nil
+	}
+}
+
+// newEnvWithIMAP is newEnv whose web server (not the runtime) dials an in-memory IMAP
+// server: user u / pw, folders INBOX and Spam. cfg may be nil.
+func newEnvWithIMAP(t *testing.T, cfg ...func(c *config.Config)) *env {
+	t.Helper()
+	d := startIMAP(t)
+	var mod func(c *config.Config)
+	if len(cfg) > 0 {
+		mod = cfg[0]
+	}
+	e := newEnv(t, mod, func(o *Options) { o.Dial = d.factory })
+	e.imap = d
+	return e
+}
+
+func TestCreateEditDeleteMailbox(t *testing.T) {
+	e := newEnv(t, nil) // base config: bot main, target me; no mailboxes
+	e.login()
+	form := url.Values{"name": {"work"}, "display_name": {"工作信箱"}, "host": {"imap.example.com"}, "port": {""},
+		"username": {"u@example.com"}, "auth_type": {"password"}, "password": {"SECRET-PW-1"},
+		"folders": {"INBOX", "Spam", ""}, "targets": {"me"}, "max_age": {"5m"}}
+	if resp, body := e.postForm("/mailboxes/new", form); resp.StatusCode != 303 {
+		t.Fatalf("create = %d %s", resp.StatusCode, body)
+	}
+	raw, _, _ := runtime.LoadConfig(context.Background(), e.st)
+	m := raw.Mailboxes["work"]
+	if m == nil || m.Port != 0 || len(m.Folders) != 2 || m.MaxAge.Duration != 5*time.Minute || m.Auth.Password != "SECRET-PW-1" {
+		t.Fatalf("stored = %+v", m)
+	}
+	if len(e.rt.Snapshot().Watchers) != 2 {
+		t.Fatal("new mailbox not applied")
+	}
+	if _, body := e.get("/mailboxes/work"); strings.Contains(body, "SECRET-PW-1") {
+		t.Fatal("edit page leaks the password")
+	}
+	form.Del("name")
+	form.Set("password", "")
+	form.Set("display_name", "Work")
+	if resp, _ := e.postForm("/mailboxes/work", form); resp.StatusCode != 303 {
+		t.Fatalf("edit = %d", resp.StatusCode)
+	}
+	raw, _, _ = runtime.LoadConfig(context.Background(), e.st)
+	if raw.Mailboxes["work"].Auth.Password != "SECRET-PW-1" || raw.Mailboxes["work"].DisplayName != "Work" {
+		t.Fatal("blank password must keep the stored one")
+	}
+	e.st.SaveOAuthToken(context.Background(), "work", store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now()})
+	if resp, _ := e.postForm("/mailboxes/work/delete", nil); resp.StatusCode != 303 {
+		t.Fatalf("delete = %d", resp.StatusCode)
+	}
+	if _, ok, _ := e.st.GetOAuthToken(context.Background(), "work"); ok {
+		t.Error("OAuth token not deleted with the mailbox")
+	}
+	raw, _, _ = runtime.LoadConfig(context.Background(), e.st)
+	if _, ok := raw.Mailboxes["work"]; ok {
+		t.Error("mailbox not deleted")
+	}
+}
+
+func TestMailboxValidationErrorsShowOnFields(t *testing.T) {
+	e := newEnv(t, nil)
+	e.login()
+	resp, body := e.postForm("/mailboxes/new", url.Values{"name": {"x"}, "host": {""}, "username": {"u"}, "auth_type": {"password"}, "password": {"p"}})
+	if resp.StatusCode != 422 || !strings.Contains(body, "不可為空") || !strings.Contains(body, "至少需要一個目標") {
+		t.Fatalf("= %d", resp.StatusCode)
+	}
+	// the messages sit under their fields, not in the form-level callout
+	if strings.Contains(body, "mailboxes.x.host") || !strings.Contains(body, `id="f-host" name="host"`) {
+		t.Error("host error shown as a raw path")
+	}
+	if !strings.Contains(body, `aria-invalid="true"`) {
+		t.Error("no field marked invalid")
+	}
+	// a submitted password is never sent back
+	if strings.Contains(body, `value="p"`) {
+		t.Error("password echoed into the form")
+	}
+}
+
+func TestMailboxFormRejects(t *testing.T) {
+	e := newEnv(t, withSample)
+	e.login()
+	base := url.Values{"host": {"imap.example.com"}, "username": {"u"}, "auth_type": {"password"}, "password": {"p"}, "targets": {"me"}}
+	with := func(kv ...string) url.Values {
+		f := url.Values{}
+		for k, v := range base {
+			f[k] = v
+		}
+		for i := 0; i < len(kv); i += 2 {
+			f.Set(kv[i], kv[i+1])
+		}
+		return f
+	}
+	cases := []struct {
+		form url.Values
+		want string
+	}{
+		{with("name", "gmail"), "名稱已存在"},
+		{with("name", "new"), "保留"},
+		{with("name", "Bad Name"), msgNameRule},
+		{with("name", "a", "port", "99999"), "1 到 65535"},
+		{with("name", "a", "max_age", "5"), "缺少單位"},
+		{with("name", "a", "targets", "nobody"), "找不到目標"},
+	}
+	for _, c := range cases {
+		resp, body := e.postForm("/mailboxes/new", c.form)
+		if resp.StatusCode != 422 || !strings.Contains(body, c.want) {
+			t.Errorf("%v = %d, want 422 with %q", c.form, resp.StatusCode, c.want)
+		}
+	}
+	// duplicate folders: reported under the folder group
+	f := with("name", "a")
+	f["folders"] = []string{"INBOX", "INBOX"}
+	if resp, body := e.postForm("/mailboxes/new", f); resp.StatusCode != 422 || !strings.Contains(body, "重複") {
+		t.Errorf("duplicate folders = %d", resp.StatusCode)
+	}
+	raw, _, _ := runtime.LoadConfig(context.Background(), e.st)
+	if len(raw.Mailboxes) != 1 {
+		t.Fatalf("rejected forms stored mailboxes: %v", sortedNames(raw.Mailboxes))
+	}
+}
+
+func TestMailboxAuthSwitchClearsOtherFields(t *testing.T) {
+	e := newEnv(t, withSample)
+	e.login()
+	form := url.Values{"display_name": {"x"}, "host": {"outlook.office365.com"}, "username": {"me@outlook.com"},
+		"auth_type": {"microsoft_oauth"}, "password": {""}, "client_id": {"cid"}, "tenant": {"consumers"}, "targets": {"me"}}
+	if resp, body := e.postForm("/mailboxes/gmail", form); resp.StatusCode != 303 {
+		t.Fatalf("switch to oauth = %d %s", resp.StatusCode, body)
+	}
+	raw, _, _ := runtime.LoadConfig(context.Background(), e.st)
+	if a := raw.Mailboxes["gmail"].Auth; a.Password != "" || a.ClientID != "cid" || a.Tenant != "consumers" {
+		t.Fatalf("auth = %+v", a)
+	}
+	// back to password: client_id/tenant are dropped and a password is required again
+	form.Set("auth_type", "password")
+	if resp, body := e.postForm("/mailboxes/gmail", form); resp.StatusCode != 422 || !strings.Contains(body, "不可為空") {
+		t.Fatalf("password without a stored one = %d", resp.StatusCode)
+	}
+	form.Set("password", "new-pw")
+	if resp, _ := e.postForm("/mailboxes/gmail", form); resp.StatusCode != 303 {
+		t.Fatalf("switch back = %d", resp.StatusCode)
+	}
+	raw, _, _ = runtime.LoadConfig(context.Background(), e.st)
+	if a := raw.Mailboxes["gmail"].Auth; a.Password != "new-pw" || a.ClientID != "" || a.Tenant != "" {
+		t.Fatalf("auth = %+v", a)
+	}
+}
+
+func TestMailboxPages(t *testing.T) {
+	e := newEnv(t, withSecrets)
+	e.login()
+	resp, body := e.get("/mailboxes")
+	if resp.StatusCode != 200 || !strings.Contains(body, "個人 Gmail") || !strings.Contains(body, "me@gmail.com") || !strings.Contains(body, "尚未授權") {
+		t.Fatalf("list = %d", resp.StatusCode)
+	}
+	if strings.Contains(body, "SECRET-PW-XYZ") {
+		t.Fatal("list leaks the password")
+	}
+	_, body = e.get("/mailboxes/gmail")
+	if !strings.Contains(body, "已設定，留空表示不變") || strings.Contains(body, "SECRET-PW-XYZ") {
+		t.Fatal("edit page: secret state wrong or leaked")
+	}
+	_, body = e.get("/mailboxes/outlook")
+	if !strings.Contains(body, `data-oauth-start="outlook"`) || !strings.Contains(body, "尚未授權") {
+		t.Fatal("outlook page lacks the authorise element / state")
+	}
+	e.st.SaveOAuthToken(context.Background(), "outlook", store.OAuthToken{RefreshToken: "REFRESH-SECRET", AccessToken: "ACCESS-SECRET", ExpiresAt: time.Now().Add(time.Hour)})
+	_, body = e.get("/mailboxes/outlook")
+	if !strings.Contains(body, "已授權") || strings.Contains(body, "REFRESH-SECRET") || strings.Contains(body, "ACCESS-SECRET") {
+		t.Fatal("authorised state wrong or token leaked")
+	}
+	if resp, _ := e.get("/mailboxes/nope"); resp.StatusCode != 404 {
+		t.Errorf("unknown mailbox = %d", resp.StatusCode)
+	}
+	if resp, body := e.get("/mailboxes/new"); resp.StatusCode != 200 || !strings.Contains(body, `name="preset"`) {
+		t.Errorf("new form = %d", resp.StatusCode)
+	}
+	if resp, _ := e.postForm("/mailboxes/nope/delete", nil); resp.StatusCode != 303 || !strings.Contains(e.flash(resp), "找不到") {
+		t.Errorf("delete unknown = %d %q", resp.StatusCode, e.flash(resp))
+	}
+}
+
+func TestMailboxEmptyState(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) { c.Admin = ""; c.Targets = map[string]config.Target{} })
+	e.login()
+	_, body := e.get("/mailboxes")
+	if !strings.Contains(body, "先新增 Bot 與目標，再新增信箱") {
+		t.Fatal("empty state without targets lacks the guidance")
+	}
+}
+
+func TestProbeEndpoint(t *testing.T) {
+	e := newEnvWithIMAP(t) // in-memory IMAP server; env.Dial points at it; user u / pw, folders INBOX, Spam
+	e.login()
+	_, body := e.postJSON("/api/mailboxes/probe", map[string]string{"host": "imap.test", "port": "993", "username": "u", "auth_type": "password", "password": "pw"})
+	if !strings.Contains(body, `"ok":true`) || !strings.Contains(body, "Spam") {
+		t.Fatalf("probe = %s", body)
+	}
+	_, body = e.postJSON("/api/mailboxes/probe", map[string]string{"host": "imap.test", "port": "993", "username": "u", "auth_type": "password", "password": "bad"})
+	if !strings.Contains(body, `"ok":false`) || strings.Contains(body, "bad") {
+		t.Fatalf("bad password probe = %s", body)
+	}
+}
+
+func TestProbeUsesStoredPasswordOnlyForTheSameServer(t *testing.T) {
+	e := newEnvWithIMAP(t, func(c *config.Config) {
+		c.Mailboxes["box"] = &config.Mailbox{Host: "imap.test", Username: "u", Auth: config.Auth{Type: "password", Password: "pw"},
+			Targets: []string{"me"}}
+	})
+	e.login()
+	_, body := e.postJSON("/api/mailboxes/probe", map[string]string{"name": "box", "host": "imap.test", "port": "", "username": "u", "auth_type": "password"})
+	if !strings.Contains(body, `"ok":true`) {
+		t.Fatalf("probe with stored password = %s", body)
+	}
+	<-e.imap.hosts
+	// another host (or account) never receives the stored password
+	_, body = e.postJSON("/api/mailboxes/probe", map[string]string{"name": "box", "host": "evil.example", "port": "993", "username": "u", "auth_type": "password"})
+	if !strings.Contains(body, `"ok":false`) || !strings.Contains(body, "請輸入密碼") {
+		t.Fatalf("probe of another host = %s", body)
+	}
+	select {
+	case h := <-e.imap.hosts:
+		t.Fatalf("dialled %s with the stored password", h)
+	default:
+	}
+}
+
+func TestProbeMicrosoftNeedsAuthorisation(t *testing.T) {
+	e := newEnvWithIMAP(t, withOutlookMailbox)
+	e.login()
+	for _, name := range []string{"outlook", ""} {
+		_, body := e.postJSON("/api/mailboxes/probe", map[string]string{"name": name, "host": "outlook.office365.com", "username": "me@outlook.com",
+			"auth_type": "microsoft_oauth", "client_id": "cid", "tenant": "consumers"})
+		if !strings.Contains(body, "請先完成 Microsoft 授權") {
+			t.Errorf("probe %q = %s", name, body)
+		}
+	}
+}
+
+func TestProbeRejectsMissingFields(t *testing.T) {
+	e := newEnvWithIMAP(t)
+	e.login()
+	_, body := e.postJSON("/api/mailboxes/probe", map[string]string{"host": "", "username": "u", "auth_type": "password", "password": "pw"})
+	if !strings.Contains(body, `"ok":false`) || !strings.Contains(body, "主機") {
+		t.Fatalf("probe without host = %s", body)
+	}
+}
+
+func TestProbeFailureNeverEchoesThePassword(t *testing.T) {
+	ctx := context.Background()
+	echo := &watcher.AuthError{Err: &imap.Error{Type: imap.StatusResponseTypeNo, Text: "bad login for hunter2-secret"}}
+	if msg := probeFailure(ctx, "h", 993, echo, "hunter2-secret"); strings.Contains(msg, "hunter2") || !strings.Contains(msg, "登入失敗") {
+		t.Errorf("auth failure = %q", msg)
+	}
+	plain := &watcher.AuthError{Err: &imap.Error{Type: imap.StatusResponseTypeNo, Text: "[AUTHENTICATIONFAILED] Invalid credentials"}}
+	if msg := probeFailure(ctx, "h", 993, plain, "pw"); !strings.Contains(msg, "Invalid credentials") {
+		t.Errorf("server text dropped without reason: %q", msg)
+	}
+	if msg := probeFailure(ctx, "h", 993, errors.New("連線：dial hunter2-secret"), "hunter2-secret"); strings.Contains(msg, "hunter2") {
+		t.Errorf("connect failure = %q", msg)
+	}
+	if msg := probeFailure(ctx, "h", 993, errors.New("認證：更新 OAuth token 失敗：HTTP 400 unauthorized_client"), ""); !strings.HasPrefix(msg, "登入過程失敗") {
+		t.Errorf("auth-step failure = %q", msg)
+	}
+	expired, cancel := context.WithTimeout(ctx, 0)
+	defer cancel()
+	<-expired.Done()
+	if msg := probeFailure(expired, "h", 993, context.DeadlineExceeded, ""); !strings.Contains(msg, "20 秒") {
+		t.Errorf("timeout = %q", msg)
+	}
+}

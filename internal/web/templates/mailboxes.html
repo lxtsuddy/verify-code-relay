@@ -1,0 +1,55 @@
+{{template "app" .}}
+{{define "content"}}
+<header class="page-head">
+  <div>
+    <h1 class="page-title">信箱</h1>
+    <p class="page-desc">每個信箱登入 IMAP 監看指定的資料夾，收到驗證碼或登入連結就轉發到勾選的 Telegram 目標。</p>
+  </div>
+  {{if and .Data.Mailboxes .Data.HasTargets}}<div class="page-actions"><a class="btn btn-primary" href="/mailboxes/new">{{template "icon" "plus"}}<span>新增信箱</span></a></div>{{end}}
+</header>
+
+{{if .Data.Applying}}<div class="callout callout-info">{{template "icon" "refresh"}}<p>設定正在套用，信箱連線重新建立中，狀態稍後更新。</p></div>{{end}}
+
+{{if .Data.Mailboxes}}
+<ul class="mb-list" aria-label="信箱列表">
+  {{range .Data.Mailboxes}}
+  <li class="mb-item">
+    <span class="mb-glyph" aria-hidden="true">{{.Glyph}}</span>
+    <div class="mb-main">
+      <p class="mb-title"><a class="mb-link" href="/mailboxes/{{.Name}}">{{.DisplayName}}</a>{{if ne .DisplayName .Name}} <span class="tag mono">{{.Name}}</span>{{end}}{{if .NeedsAuth}} <span class="badge badge-warn">尚未授權</span>{{end}}</p>
+      <p class="mb-account"><span class="mono">{{.Username}}</span><span class="mb-host"> · {{.Host}}{{if ne .Port 993}}:{{.Port}}{{end}}</span></p>
+    </div>
+    <ul class="mb-folders" aria-label="資料夾與狀態">
+      {{range .Folders}}<li class="mb-folder"><span class="mb-folder-name mono">{{.Name}}</span><span class="badge {{.Class}}{{if .Live}} badge-live{{end}}">{{.Label}}</span></li>{{end}}
+    </ul>
+    <p class="mb-route" aria-label="轉發到">
+      <span class="route-line" aria-hidden="true"></span>
+      {{range .Targets}}<span class="route-chat mono">{{.}}</span>{{end}}
+    </p>
+    <div class="mb-actions">
+      <a class="btn btn-sm" href="/mailboxes/{{.Name}}" aria-label="編輯信箱 {{.Name}}">{{template "icon" "edit"}}<span class="tg-btn-text">編輯</span></a>
+    </div>
+  </li>
+  {{end}}
+</ul>
+{{if not .Data.HasTargets}}<div class="callout callout-warn mb-after">{{template "icon" "alert"}}<p>目前沒有任何 Telegram 目標，新增信箱前請先到 <a href="/telegram">Telegram</a> 新增。</p></div>{{end}}
+{{else}}
+<section class="empty">
+  <span class="empty-icon">{{template "icon" "mail"}}</span>
+  <h2 class="empty-title">還沒有信箱</h2>
+  {{if .Data.HasTargets}}
+  <p class="empty-text">新增要監看的信箱：選擇服務、填入帳號與應用程式密碼，按「測試連線」挑選資料夾，再勾選要轉發的目標。</p>
+  <a class="btn btn-primary" href="/mailboxes/new">{{template "icon" "plus"}}<span>新增信箱</span></a>
+  {{else}}
+  <p class="empty-text">先新增 Bot 與目標，再新增信箱。驗證碼要送到哪個 Telegram 聊天室，是由目標決定的。</p>
+  <ol class="empty-steps">
+    <li class="{{if .Data.HasBots}}is-done{{end}}">新增 Bot</li>
+    <li>新增目標</li>
+    <li>新增信箱</li>
+  </ol>
+  <a class="btn btn-primary" href="/telegram">{{template "icon" "send"}}<span>前往 Telegram</span></a>
+  {{end}}
+</section>
+{{end}}
+{{end}}
+

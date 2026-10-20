@@ -25,6 +25,9 @@
             以 data-modal-open="x" 開啟。
     代碼    <p class="postcode"><span>8</span><span>3</span>…</p>
     清單    <ul class="tg-list"><li class="tg-item">主要文字 | 使用情況 | .tg-actions</li></ul>（Telegram 頁；每列一筆可操作的項目）
+    郵票    <label class="stamp-pick"><input type="radio"><span class="stamp"><span class="stamp-face">…</span></span></label>
+            信箱頁的服務選擇：打孔邊緣（mask）、刻字縮寫；選中時蓋上郵戳。每頁只用在一處。
+    勾選卡  <label class="route-pick"><input type="checkbox"><span class="route-card">…<span class="route-check">check icon</span></span></label>
     路徑    <p class="route"><span class="route-bot">bot</span><span class="route-line"></span><span class="route-chat">chat_id</span></p>
     表單彈出 <dialog class="modal modal-form" data-open?><form>modal-head／modal-body／modal-foot</form></dialog>；
             伺服器退回表單時在 dialog 加 data-open，載入後自動開啟。
@@ -72,6 +75,8 @@
 
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang TC", "Noto Sans TC", "Noto Sans CJK TC",
     "Microsoft JhengHei", "Heiti TC", system-ui, sans-serif;
+  /* an engraved face for stamp initials only */
+  --engrave: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, "Noto Serif TC", serif;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
 
   --rail-w: 232px;
@@ -827,6 +832,228 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .chats-state.is-err .icon { color: var(--red); }
 .spinner { width: 22px; height: 22px; border: 2.5px solid var(--green-200); border-right-color: var(--green-700); border-radius: 50%; animation: spin 0.7s linear infinite; }
 
+/* ---------- mailboxes ---------- */
+
+/* list: one address label per mailbox — engraved initial, account, folders with their
+   live status, and the routing line to the targets */
+.mb-list {
+  margin: 0; padding: 0; list-style: none;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1);
+}
+.mb-item {
+  display: grid; grid-template-columns: 44px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 0.8fr) auto; gap: 8px 20px; align-items: center;
+  padding: 16px 20px; border-bottom: 1px solid var(--line);
+}
+.mb-item:last-child { border-bottom: 0; }
+.mb-item:hover { background: #fafcf9; }
+.mb-glyph {
+  display: grid; place-items: center; width: 44px; height: 50px;
+  border: 1.5px solid var(--green-700); outline: 3px solid var(--green-50); outline-offset: -6px;
+  background: #fff; color: var(--green-800);
+  font-family: var(--engrave); font-size: 24px; font-weight: 700; line-height: 1;
+}
+.mb-main { min-width: 0; }
+.mb-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 16px; font-weight: 700; }
+.mb-link { color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+.mb-link:hover { color: var(--green-700); text-decoration: underline; }
+.mb-account { margin-top: 1px; font-size: 13.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.mb-host { color: var(--muted); }
+.mb-folders { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.mb-folder { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 13.5px; }
+.mb-folder-name { overflow-wrap: anywhere; color: var(--ink-2); }
+.mb-folder .badge { font-size: 12px; line-height: 18px; }
+.mb-route { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13.5px; }
+.mb-route .route-line { margin: 0 4px 0 0; width: 22px; }
+.mb-actions { display: flex; justify-content: flex-end; }
+.mb-after { margin-top: 18px; }
+.empty-steps li.is-done::before { content: "✓"; background: var(--green-100); color: var(--green-800); }
+
+/* the form: one column of cards, the save bar stays at the bottom of the viewport */
+.mb-form { max-width: 860px; }
+.mb-form > .card + .card { margin-top: 18px; }
+.mb-form .card-head .btn { flex: none; }
+.grid-host { display: grid; grid-template-columns: minmax(0, 1fr) 7.5em; gap: 18px 20px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px 20px; }
+.fixed-value {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  min-height: 42px; padding: 9px 12px; border: 1px dashed var(--line-2); border-radius: var(--radius-sm);
+  background: var(--surface-2); color: var(--ink-2); font-size: 15px;
+}
+.fixed-value .icon { width: 15px; height: 15px; color: var(--faint); }
+
+/* service cards are postage stamps: a perforated edge (a mask punches the holes), an
+   engraved initial and the port as the denomination; the chosen one is postmarked */
+.stamps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+.stamp-pick { position: relative; display: block; cursor: pointer; filter: drop-shadow(0 1px 1.5px rgba(13, 61, 44, 0.16)); }
+.stamp-pick input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; z-index: 1; }
+.stamp {
+  --hole: 3.5px; --pitch: 11px;
+  display: block; padding: 8px;
+  background: var(--sunken);
+  -webkit-mask:
+    linear-gradient(#000 0 0) var(--hole) var(--hole) / calc(100% - 2 * var(--hole)) calc(100% - 2 * var(--hole)) no-repeat,
+    radial-gradient(circle at center, transparent var(--hole), #000 calc(var(--hole) + 0.5px)) calc(var(--pitch) / -2) calc(var(--pitch) / -2) / var(--pitch) var(--pitch) round;
+  mask:
+    linear-gradient(#000 0 0) var(--hole) var(--hole) / calc(100% - 2 * var(--hole)) calc(100% - 2 * var(--hole)) no-repeat,
+    radial-gradient(circle at center, transparent var(--hole), #000 calc(var(--hole) + 0.5px)) calc(var(--pitch) / -2) calc(var(--pitch) / -2) / var(--pitch) var(--pitch) round;
+  transition: transform 0.18s var(--ease);
+}
+.stamp-face {
+  position: relative; display: grid; grid-template-rows: auto 1fr auto; min-height: 128px;
+  padding: 8px 10px 9px; border: 1.5px solid var(--line-2); background: #fff;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.stamp-top { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.stamp-label { font-size: 14.5px; font-weight: 700; letter-spacing: 0.03em; color: var(--ink); }
+.stamp-value { font-size: 12px; font-weight: 600; color: var(--muted); }
+.stamp-glyph {
+  display: grid; place-items: center; padding: 2px 0;
+  font-family: var(--engrave); font-size: 46px; font-weight: 700; line-height: 1; color: var(--ink-2);
+}
+.stamp-note { font-size: 12px; color: var(--muted); text-align: center; letter-spacing: 0.02em; }
+.stamp-pick:hover .stamp { transform: translateY(-2px); }
+.stamp-pick:hover .stamp-face { border-color: var(--green-300); }
+.stamp-pick input:focus-visible + .stamp { outline: 2.5px solid var(--green-600); outline-offset: 3px; }
+.stamp-pick input:checked + .stamp { background: var(--green-100); }
+.stamp-pick input:checked + .stamp .stamp-face { border-color: var(--green-700); background: #fff; }
+.stamp-pick input:checked + .stamp .stamp-glyph { color: var(--green-800); }
+.stamp-pick input:checked + .stamp .stamp-value { color: var(--green-700); }
+/* the postmark: two rings and wavy cancel lines over the corner */
+.stamp-pick input:checked + .stamp .stamp-face::after {
+  content: ""; position: absolute; right: 4px; bottom: 16px; width: 50px; height: 50px;
+  border: 2px solid var(--green-700); border-radius: 50%;
+  box-shadow: inset 0 0 0 3px #fff, inset 0 0 0 4.5px var(--green-700);
+  background:
+    repeating-linear-gradient(0deg, transparent 0 6px, rgba(19, 98, 70, 0.55) 6px 7.5px) center / 100% 60% no-repeat;
+  opacity: 0.8; transform: rotate(-14deg);
+  animation: stamp 0.35s var(--ease) backwards;
+  pointer-events: none;
+}
+
+.preset-hints { margin-top: 16px; }
+.preset-hint {
+  display: none; gap: 10px; padding: 12px 14px;
+  border-radius: var(--radius-sm); background: var(--blue-50); color: #174f7c; font-size: 14px;
+}
+.preset-hint > .icon { margin-top: 3px; }
+.preset-hint p + p, .preset-hint p + .mini-steps { margin-top: 6px; }
+.preset-hint .mini-steps li { color: #174f7c; font-size: 13.5px; }
+.preset-hint .mini-steps li::before { background: #fff; color: var(--blue); }
+.mb-form:has(input[name="preset"][value="gmail"]:checked) [data-preset-hint="gmail"],
+.mb-form:has(input[name="preset"][value="icloud"]:checked) [data-preset-hint="icloud"],
+.mb-form:has(input[name="preset"][value="outlook"]:checked) [data-preset-hint="outlook"],
+.mb-form:has(input[name="preset"][value="custom"]:checked) [data-preset-hint="custom"] { display: flex; }
+
+/* authentication: only the chosen method's fields are shown */
+.segmented-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.segmented-2 .segment-label { padding: 7px 6px; }
+.auth-panel { display: grid; gap: 18px; }
+.mb-form:has(#auth-password:checked) .auth-ms,
+.mb-form:has(#auth-ms:checked) .auth-password { display: none; }
+.oauth-state {
+  display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2);
+}
+.oauth-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; background: var(--sunken); color: var(--muted); }
+.oauth-icon.is-ok { background: var(--green-50); color: var(--green-700); }
+.oauth-icon.is-warn { background: var(--amber-50); color: var(--amber-ink); }
+.oauth-title { font-weight: 700; }
+.oauth-icon.is-warn + .oauth-text .oauth-title { color: var(--amber-ink); }
+
+/* filled in from a service card: a short green flash on the changed fields */
+.input.is-filled { animation: filled 0.9s var(--ease); }
+@keyframes filled { from { border-color: var(--green-600); background: var(--green-50); } }
+
+/* connection test and folders */
+.probe {
+  display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px;
+  padding: 11px 14px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--line);
+  font-size: 14px; color: var(--muted);
+}
+.probe-icon { display: grid; place-items: center; height: 22px; flex: none; }
+.probe-icon .spinner { width: 17px; height: 17px; border-width: 2px; }
+.probe-text { min-width: 0; overflow-wrap: anywhere; }
+.probe-text b { color: var(--ink); }
+.probe-time { margin-left: 6px; font-family: var(--mono); font-size: 12.5px; color: var(--faint); }
+.probe.is-busy { color: var(--ink-2); }
+.probe.is-ok { background: var(--green-50); border-color: var(--green-100); color: var(--green-800); }
+.probe.is-err { background: var(--red-50); border-color: var(--red-100); color: var(--red-700); font-weight: 600; }
+
+.folders { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.folders:empty::before { content: "未勾選任何資料夾：將監看 INBOX"; font-size: 13.5px; color: var(--muted); }
+.folder {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 5px 12px 5px 10px;
+  border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: #fff; cursor: pointer;
+  font-size: 14px; transition: background-color 0.15s, border-color 0.15s;
+}
+.folder input { width: 16px; height: 16px; }
+.folder:hover { border-color: var(--green-300); }
+.folder:has(input:checked) { border-color: var(--green-600); background: var(--green-50); }
+.folder:has(input:focus-visible) { outline: 2.5px solid var(--green-600); outline-offset: 2px; }
+.folder-name { overflow-wrap: anywhere; }
+.folder-tag { padding: 0 6px; border-radius: 4px; background: var(--sunken); color: var(--muted); font-size: 11.5px; font-weight: 600; line-height: 18px; white-space: nowrap; }
+.folder-tag.is-warn { background: var(--amber-50); color: var(--amber-ink); }
+.folder.is-new { animation: rise-in 0.3s var(--ease); }
+.folders.is-invalid .folder { border-color: var(--red); }
+.folder-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; max-width: 520px; margin-top: 14px; }
+.folder-add .btn { min-height: 42px; }
+#f-folders-err:not(:empty), #f-targets-err:not(:empty) { margin-top: 10px; }
+
+/* forwarding routes: one card per target, ticked like a checklist */
+.routes { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
+.route-pick { position: relative; display: block; cursor: pointer; }
+.route-pick input { position: absolute; top: 14px; left: 14px; opacity: 0; }
+.route-card {
+  position: relative; display: grid; gap: 2px; padding: 12px 44px 12px 14px;
+  border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: #fff;
+  transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.route-card .route { margin-top: 4px; }
+.route-name { font-size: 15px; font-weight: 700; }
+.route-check {
+  position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 22px; height: 22px;
+  border: 1.5px solid var(--line-2); border-radius: 6px; background: #fff; color: transparent;
+}
+.route-check .icon { width: 15px; height: 15px; stroke-width: 2.6; }
+.route-pick:hover .route-card { border-color: var(--green-300); }
+.route-pick input:checked + .route-card { border-color: var(--green-600); background: var(--green-50); box-shadow: inset 0 0 0 1px var(--green-600); }
+.route-pick input:checked + .route-card .route-check { border-color: var(--green-700); background: var(--green-700); color: #fff; }
+.route-pick input:focus-visible + .route-card { outline: 2.5px solid var(--green-600); outline-offset: 2px; }
+.route-pick input[aria-invalid="true"] + .route-card { border-color: var(--red); }
+
+/* advanced settings: a card that opens */
+.advanced > summary { list-style: none; cursor: pointer; border-bottom: 0; }
+.advanced > summary::-webkit-details-marker { display: none; }
+.advanced[open] > summary { border-bottom: 1px solid var(--line); }
+.advanced > summary:hover .card-title { color: var(--green-700); }
+.advanced .card-desc .tag { margin-left: 8px; }
+.advanced-chevron {
+  width: 10px; height: 10px; flex: none; margin-right: 6px;
+  border-right: 2px solid var(--muted); border-bottom: 2px solid var(--muted);
+  transform: rotate(45deg); transition: transform 0.2s var(--ease);
+}
+.advanced[open] .advanced-chevron { transform: rotate(-135deg); }
+
+.save-bar {
+  position: sticky; bottom: 0; z-index: 5;
+  display: flex; justify-content: flex-end; gap: 10px;
+  margin-top: 18px; padding: 12px 0 calc(12px + env(safe-area-inset-bottom));
+  background: linear-gradient(to bottom, rgba(242, 244, 239, 0), var(--paper) 14px);
+}
+
+.danger-zone { max-width: 860px; margin-top: 36px; border-color: var(--red-100); }
+.danger-body { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 16px 20px; }
+.danger-body .card-title { color: var(--red-700); }
+
+/* the list's five columns need room: below that, folders and route go under the account */
+@media (max-width: 1080px) {
+  .mb-item { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px 16px; }
+  .mb-glyph { grid-row: span 3; align-self: start; }
+  .mb-actions { grid-column: 3; grid-row: 1; align-self: start; }
+  .mb-folders { grid-column: 2 / 4; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+  .mb-route { grid-column: 2 / 4; }
+}
+
 .callout p, .flash-text { white-space: pre-line; }
 
 /* ---------- motion ---------- */
@@ -923,6 +1150,18 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .chats-hint { margin: 0 16px 12px; }
   .chat-row { padding: 11px 16px; }
   .chat-pick { display: none; }
+  .mb-item { padding: 14px 16px; }
+  .stamps { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .stamp-face { min-height: 112px; }
+  .stamp-glyph { font-size: 40px; }
+  .grid-3 { grid-template-columns: minmax(0, 1fr); }
+  .oauth-state { grid-template-columns: 34px minmax(0, 1fr); }
+  .oauth-state .btn { grid-column: 2; justify-self: start; }
+  .mb-form .card-head { flex-wrap: wrap; }
+  .mb-form .advanced > summary { flex-wrap: nowrap; }
+  .stamp-pick input:checked + .stamp .stamp-face::after { width: 38px; height: 38px; right: 2px; bottom: 24px; }
+  .save-bar .btn { flex: 1; }
+  .danger-body { padding: 14px 16px; }
 }
 
 @keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } }

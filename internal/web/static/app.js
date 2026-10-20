@@ -578,6 +578,219 @@
     if (btn) setResult(byId(btn.dataset.getmeOut), null, "");
   });
 
+  /* ---------- mailbox form ----------
+
+    form[data-mailbox-form] (data-name="名稱"：編輯時)
+      input[name=preset][data-host][data-auth]   服務郵票：改選時帶入主機、埠號（清空＝993）與認證方式，
+                                                 被改到的欄位短暫標示綠色。
+      [data-probe]                               「測試連線」：以表單目前的值 POST /api/mailboxes/probe，
+                                                 結果寫進 [data-probe-out]；成功時把伺服器的資料夾列進
+                                                 [data-folder-list]（已勾選的保持勾選，伺服器上沒有的另外標示）。
+      [data-folder-input] ＋ [data-folder-add]   手動加入資料夾（Enter 也可以）。
+    資料夾名稱來自 IMAP 伺服器，一律以 textContent 寫入。
+  */
+
+  var PRESET_HOSTS = ["imap.gmail.com", "imap.mail.me.com", "outlook.office365.com"];
+  var JUNK_RE = /spam|junk|bulk|垃圾/i;
+
+  function mailboxForm(node) { return node && node.closest ? node.closest("form[data-mailbox-form]") : null; }
+
+  function field(form, name) { return form.elements.namedItem(name); }
+
+  function flashFilled(input) {
+    if (!input) return;
+    input.classList.remove("is-filled");
+    void input.offsetWidth; // restart the animation
+    input.classList.add("is-filled");
+  }
+
+  function applyPreset(radio) {
+    var form = mailboxForm(radio);
+    if (!form) return;
+    var host = field(form, "host");
+    var port = field(form, "port");
+    var want = radio.dataset.host || "";
+    if (host) {
+      // "custom" only clears a host that one of the other cards filled in
+      if (want || PRESET_HOSTS.indexOf(host.value.trim()) >= 0) {
+        if (host.value !== want) { host.value = want; flashFilled(host); }
+        host.removeAttribute("aria-invalid");
+      }
+    }
+    if (port && port.value !== "") { port.value = ""; flashFilled(port); }
+    var auth = form.querySelector('input[name="auth_type"][value="' + (radio.dataset.auth || "password") + '"]');
+    if (auth && !auth.checked) { auth.checked = true; auth.dispatchEvent(new Event("change", { bubbles: true })); }
+    var tenant = field(form, "tenant");
+    if (radio.value === "outlook" && tenant && !tenant.value) { tenant.value = "consumers"; flashFilled(tenant); }
+    probeStale(form);
+  }
+
+  // folderChip builds one checkbox row of the folder list.
+  function folderChip(name, checked, tag, warn) {
+    var li = el("li");
+    var label = el("label", "folder");
+    var box = el("input");
+    box.type = "checkbox";
+    box.name = "folders";
+    box.value = name;
+    box.checked = !!checked;
+    label.appendChild(box);
+    label.appendChild(el("span", "folder-name mono", name));
+    if (tag) label.appendChild(el("span", "folder-tag" + (warn ? " is-warn" : ""), tag));
+    li.appendChild(label);
+    return li;
+  }
+
+  function folderTag(name) {
+    if (name.toUpperCase() === "INBOX") return "收件匣";
+    return JUNK_RE.test(name) ? "垃圾郵件" : "";
+  }
+
+  function currentFolders(list) {
+    var all = [], checked = {};
+    list.querySelectorAll('input[name="folders"]').forEach(function (b) {
+      all.push(b.value);
+      if (b.checked) checked[b.value] = true;
+    });
+    return { all: all, checked: checked };
+  }
+
+  function showFolders(list, serverFolders) {
+    var cur = currentFolders(list);
+    var onServer = {};
+    list.textContent = "";
+    serverFolders.forEach(function (f) {
+      onServer[f] = true;
+      list.appendChild(folderChip(f, cur.checked[f], folderTag(f), false));
+    });
+    // chosen folders the server does not list stay (and stay chosen), marked
+    cur.all.forEach(function (f) {
+      if (cur.checked[f] && !onServer[f]) list.appendChild(folderChip(f, true, "伺服器上沒有", true));
+    });
+    list.classList.remove("is-invalid");
+  }
+
+  function addFolder(form) {
+    var input = form.querySelector("[data-folder-input]");
+    var list = form.querySelector("[data-folder-list]");
+    if (!input || !list) return;
+    var name = input.value.trim();
+    if (!name) { input.focus(); return; }
+    var existing = null;
+    list.querySelectorAll('input[name="folders"]').forEach(function (b) { if (b.value === name) existing = b; });
+    if (existing) {
+      existing.checked = true;
+      toast("已勾選 " + name, "info");
+    } else {
+      var chip = folderChip(name, true, folderTag(name), false);
+      chip.firstChild.classList.add("is-new");
+      list.appendChild(chip);
+    }
+    input.value = "";
+    input.focus();
+  }
+
+  function probeOut(form) { return form.querySelector("[data-probe-out]"); }
+
+  // setProbe shows the connection test state: kind busy|ok|err|idle.
+  function setProbe(out, kind, text, strong) {
+    if (!out) return;
+    out.className = "probe" + (kind === "idle" ? "" : " is-" + kind);
+    var ic = out.querySelector(".probe-icon");
+    var p = out.querySelector(".probe-text");
+    ic.textContent = "";
+    if (kind === "busy") ic.appendChild(el("span", "spinner"));
+    else ic.appendChild(icon(kind === "ok" ? "check" : kind === "err" ? "alert" : "info"));
+    p.textContent = "";
+    if (strong) p.appendChild(el("b", null, strong));
+    if (text) p.appendChild(document.createTextNode(text));
+    return p;
+  }
+
+  function probeStale(form) {
+    var out = probeOut(form);
+    if (out && /is-(ok|err)/.test(out.className) && !form.dataset.probing) {
+      setProbe(out, "idle", "設定已變更，可以再測試一次。");
+    }
+  }
+
+  function runProbe(btn) {
+    var form = mailboxForm(btn);
+    if (!form || form.dataset.probing) return;
+    var v = function (n) { var x = field(form, n); return x && typeof x.value === "string" ? x.value.trim() : ""; };
+    var authBox = form.querySelector('input[name="auth_type"]:checked');
+    var body = {
+      name: form.dataset.name || v("name"),
+      host: v("host"), port: v("port"), username: v("username"),
+      auth_type: authBox ? authBox.value : "password",
+      password: (field(form, "password") || { value: "" }).value,
+      client_id: v("client_id"), tenant: v("tenant")
+    };
+    var out = probeOut(form);
+    if (!body.host) { setProbe(out, "err", "請先填入 IMAP 主機"); field(form, "host").focus(); return; }
+    if (!body.username) { setProbe(out, "err", "請先填入帳號"); field(form, "username").focus(); return; }
+    form.dataset.probing = "1";
+    btn.setAttribute("aria-busy", "true");
+    btn.disabled = true;
+    var target = body.host + ":" + (body.port || "993");
+    var p = setProbe(out, "busy", " 並登入…", "正在連線 " + target);
+    var started = Date.now();
+    var clock = el("span", "probe-time", "0 秒");
+    p.appendChild(clock);
+    var timer = setInterval(function () { clock.textContent = Math.round((Date.now() - started) / 1000) + " 秒"; }, 1000);
+    fetchJSON("/api/mailboxes/probe", body).then(
+      function (d) {
+        if (d.ok) {
+          var folders = d.folders || [];
+          showFolders(form.querySelector("[data-folder-list]"), folders);
+          setProbe(out, "ok", "：伺服器上有 " + folders.length + " 個資料夾，勾選要監看的。", "登入成功");
+        } else {
+          setProbe(out, "err", d.error || "測試失敗");
+        }
+      },
+      function (err) { setProbe(out, "err", err.message); }
+    ).then(function () {
+      clearInterval(timer);
+      delete form.dataset.probing;
+      btn.removeAttribute("aria-busy");
+      btn.disabled = false;
+    });
+  }
+
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (!(t instanceof HTMLInputElement) || !mailboxForm(t)) return;
+    if (t.name === "preset" && t.checked) applyPreset(t);
+    if (t.name === "targets") {
+      t.form.querySelectorAll('input[name="targets"][aria-invalid]').forEach(function (b) { b.removeAttribute("aria-invalid"); });
+    }
+    if (t.name === "folders") t.closest("[data-folder-list]").classList.remove("is-invalid");
+  });
+
+  document.addEventListener("input", function (e) {
+    var t = e.target;
+    if (!(t instanceof HTMLInputElement) || !mailboxForm(t)) return;
+    if (t.getAttribute("aria-invalid") === "true" && t.type !== "checkbox") t.removeAttribute("aria-invalid");
+    if (["host", "port", "username", "password", "client_id", "tenant"].indexOf(t.name) >= 0) probeStale(t.form);
+  });
+
+  document.addEventListener("keydown", function (e) {
+    var t = e.target;
+    if (e.key === "Enter" && t instanceof HTMLInputElement && t.hasAttribute("data-folder-input")) {
+      e.preventDefault(); // add the folder instead of submitting the form
+      addFolder(mailboxForm(t));
+    }
+  });
+
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!(t instanceof Element)) return;
+    var probe = t.closest("[data-probe]");
+    if (probe) { runProbe(probe); return; }
+    var add = t.closest("[data-folder-add]");
+    if (add) addFolder(mailboxForm(add));
+  });
+
   window.relay = {
     localTimes: localTimes,
     fetchJSON: fetchJSON,
