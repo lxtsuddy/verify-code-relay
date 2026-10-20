@@ -36,7 +36,7 @@ func cmdTest(configPath string, args []string, stdout, stderr io.Writer) int {
 	}
 	displayName, username := "（測試）", ""
 	if *mailbox != "" {
-		m, ok := a.cfg.Mailboxes[*mailbox]
+		m, ok := a.Config.Mailboxes[*mailbox]
 		if !ok {
 			return fail(stderr, fmt.Errorf("找不到信箱 %q", *mailbox))
 		}
@@ -52,7 +52,7 @@ func cmdTest(configPath string, args []string, stdout, stderr io.Writer) int {
 	for _, l := range msg.Links {
 		fmt.Fprintf(stdout, "  %s  [%s]\n", l.URL, l.Text)
 	}
-	res, ignore, tr := a.recognizer.Recognize(msg)
+	res, ignore, tr := a.Recognizer.Recognize(msg)
 	fmt.Fprintln(stdout, "── 辨識過程 ──")
 	for _, s := range tr.Steps {
 		fmt.Fprintln(stdout, "  "+s)
@@ -72,7 +72,7 @@ func cmdTest(configPath string, args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "規則：%s\n驗證碼：%s\n連結：%s\n服務：%s\n", res.Rule, res.Code, res.URL, res.Service)
 
-	out, err := a.renderer.Render(*mailbox, render.Data{Code: res.Code, URL: res.URL, Service: res.Service,
+	out, err := a.Renderer.Render(*mailbox, render.Data{Code: res.Code, URL: res.URL, Service: res.Service,
 		FromName: msg.From.Name, FromAddr: msg.From.Addr, To: pipeline.Recipient(msg.To, username),
 		Subject: msg.Subject, Mailbox: displayName, Rule: res.Rule, Date: msg.Date})
 	if err != nil {
@@ -81,11 +81,11 @@ func cmdTest(configPath string, args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "── Telegram 訊息 ──\n%s\n── 按鈕 ──\n%s\n", out.Text, out.ReplyMarkup)
 
 	if *sendTo != "" {
-		t, ok := a.cfg.Targets[*sendTo]
+		t, ok := a.Config.Targets[*sendTo]
 		if !ok {
 			return fail(stderr, fmt.Errorf("找不到目標 %q", *sendTo))
 		}
-		err := telegramClient().Send(context.Background(), telegram.SendRequest{Token: a.cfg.Bots[t.Bot].Token,
+		err := telegramClient().Send(context.Background(), telegram.SendRequest{Token: a.Config.Bots[t.Bot].Token,
 			ChatID: t.ChatID, Text: out.Text, HTML: true, ReplyMarkup: out.ReplyMarkup})
 		if err != nil {
 			return fail(stderr, err)

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -9,8 +8,7 @@ import (
 	"os"
 
 	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/recognize"
-	"verify-code-relay/internal/render"
+	"verify-code-relay/internal/runtime"
 	"verify-code-relay/internal/telegram"
 )
 
@@ -42,41 +40,19 @@ func parseInterspersed(fs *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
-type app struct {
-	cfg        *config.Config
-	recognizer *recognize.Chain
-	renderer   *render.Renderer
-}
-
-// loadApp loads + validates config and compiles rules and templates. All problems are
-// reported together.
-func loadApp(path string) (*app, error) {
-	cfg, err := config.Load(path)
+// loadApp loads the YAML config (expanding ${ENV}) and builds it with runtime.Build, so
+// all problems are reported together.
+func loadApp(path string) (*runtime.Built, error) {
+	raw, err := config.LoadRaw(path)
 	if err != nil {
 		return nil, err
 	}
-	var errs []error
-	if err := cfg.Validate(); err != nil {
-		errs = append(errs, err)
-	}
-	rec, err := recognize.New(cfg.Rules, cfg.Recognize)
-	if err != nil {
-		errs = append(errs, err)
-	}
-	rnd, err := render.New(cfg)
-	if err != nil {
-		errs = append(errs, err)
-	}
-	if len(errs) > 0 {
-		return nil, errors.Join(errs...)
-	}
-	return &app{cfg: cfg, recognizer: rec, renderer: rnd}, nil
+	return runtime.Build(raw)
 }
 
-func newLogger(level string, w io.Writer) *slog.Logger {
-	var l slog.Level
-	_ = l.UnmarshalText([]byte(level))
-	return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: l}))
+// newLogger returns a JSON logger whose level is read from lv on every record.
+func newLogger(lv *slog.LevelVar, w io.Writer) *slog.Logger {
+	return slog.New(slog.NewJSONHandler(w, &slog.HandlerOptions{Level: lv}))
 }
 
 func telegramClient() *telegram.Client {

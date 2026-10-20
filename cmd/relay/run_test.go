@@ -2,8 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -12,13 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
-
-	"verify-code-relay/internal/dispatcher"
-	"verify-code-relay/internal/store"
 )
 
 // TestRunSmoke boots the full service with an unreachable IMAP host and checks that
@@ -55,6 +48,17 @@ func TestRunSmoke(t *testing.T) {
 	}
 	if code != http.StatusServiceUnavailable {
 		t.Fatalf("healthz = %d, want 503 while IMAP is unreachable", code)
+	}
+	// 存活與就緒不受 IMAP 連線影響：資料庫可用即就緒
+	for _, path := range []string{"/livez", "/readyz"} {
+		resp, err := http.Get("http://" + httpAddr + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("%s = %d, want 200", path, resp.StatusCode)
+		}
 	}
 	// run 會收緊 umask；資料庫與 -wal／-shm 檔（服務執行中才存在）都不可讓其他人讀取
 	if m := umaskNow(); m != 0o077 {
@@ -115,96 +119,6 @@ func TestRunFailsFastOnHTTPBindError(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("run did not fail fast on HTTP bind error")
 		// (the leaked run goroutine is acceptable: the test has already failed)
-	}
-}
-
-// slowPruner blocks until shutdown, then takes a while to return.
-type slowPruner struct{ returned atomic.Bool }
-
-func (p *slowPruner) PruneLog(ctx context.Context, _ time.Time) (int64, error) {
-	<-ctx.Done()
-	time.Sleep(100 * time.Millisecond)
-	p.returned.Store(true)
-	return 0, ctx.Err()
-}
-
-// TestStartWaitsForPruneLoop: wait must not return while pruneLoop may still use the
-// store (cmdRun closes it right after).
-func TestStartWaitsForPruneLoop(t *testing.T) {
-	st, err := store.Open(filepath.Join(t.TempDir(), "relay.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	log := slog.New(slog.DiscardHandler)
-	p := &slowPruner{}
-	s := &service{st: p, log: log, disp: dispatcher.New(dispatcher.Options{Store: st, Log: log})}
-	ctx, cancel := context.WithCancel(context.Background())
-	wait := s.start(ctx)
-	cancel()
-	wait()
-	if !p.returned.Load() {
-		t.Fatal("wait returned before pruneLoop stopped")
-	}
-}
-
-type fakePruner struct {
-	n      int64
-	err    error
-	before chan time.Time
-}
-
-func (p *fakePruner) PruneLog(_ context.Context, before time.Time) (int64, error) {
-	p.before <- before
-	return p.n, p.err
-}
-
-type recLog struct {
-	mu    sync.Mutex
-	lines []string
-}
-
-func (l *recLog) Info(msg string, _ ...any) { l.add("INFO " + msg) }
-func (l *recLog) Warn(msg string, _ ...any) { l.add("WARN " + msg) }
-func (l *recLog) add(s string) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.lines = append(l.lines, s)
-}
-
-func TestPruneLoop(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		n         int64
-		err       error
-		cancelled bool // ctx already cancelled: errors are expected and not logged
-		want      string
-	}{
-		{name: "pruned", n: 3, want: "INFO 已清理舊轉發紀錄"},
-		{name: "nothing", want: ""},
-		{name: "error", err: errors.New("disk I/O error"), want: "WARN 清理轉發紀錄失敗"},
-		{name: "error after cancel", err: context.Canceled, cancelled: true, want: ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			p := &fakePruner{n: tc.n, err: tc.err, before: make(chan time.Time, 1)}
-			log := &recLog{}
-			ctx, cancel := context.WithCancel(context.Background())
-			if tc.cancelled {
-				cancel()
-			}
-			done := make(chan struct{})
-			go func() { pruneLoop(ctx, p, log); close(done) }()
-			before := <-p.before
-			cancel()
-			<-done
-			if d := time.Since(before) - 30*24*time.Hour; d < 0 || d > time.Minute {
-				t.Errorf("before = %v, want about 30 days ago", before)
-			}
-			got := strings.Join(log.lines, "\n")
-			if got != tc.want {
-				t.Errorf("log = %q, want %q", got, tc.want)
-			}
-		})
 	}
 }
 

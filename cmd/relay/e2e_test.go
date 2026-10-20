@@ -22,6 +22,7 @@ import (
 	"github.com/emersion/go-imap/v2/imapserver"
 	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
 
+	"verify-code-relay/internal/runtime"
 	"verify-code-relay/internal/telegram"
 	"verify-code-relay/internal/watcher"
 )
@@ -117,7 +118,7 @@ mailboxes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := openStore(a.cfg)
+	st, err := openStore(a.Config)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,10 +139,9 @@ mailboxes:
 	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	sender := &telegram.Client{BaseURL: tg.URL, HTTP: tg.Client()}
-	svc := newService(a, st, log, sender, dial)
-	ctx, cancel := context.WithCancel(context.Background())
-	wait := svc.start(ctx)
-	defer func() { cancel(); wait() }()
+	rt := runtime.New(runtime.Options{Store: st, Log: log, Sender: sender, Dial: dial})
+	rt.Apply(a)
+	defer rt.Stop()
 
 	// imapmemserver announces new mail only to a client that is already idling.
 	waitFor(t, "watcher idling", func() bool { return idles.Load() >= 1 })
