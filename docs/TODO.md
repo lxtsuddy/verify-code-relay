@@ -82,6 +82,8 @@
 - [x] `relay config import` 不會清除因主機／帳號變更而失效的 OAuth token；改主機請在 Web 上操作，或匯入後重新授權。（`cmd/relay/configcmd.go`）（已修正）
 - [x] 信箱改成 Microsoft 授權時，若資料庫殘留舊 token 不會被清掉。（`internal/web/page_mailboxes.go` `tokenInvalidated`）（已修正）
 - [ ] 服務執行中用 `relay config import` 改了主機或帳號時，舊服務若在重新啟動前剛好更新 token，會把已清除的 token 寫回（CLI 無法停住執行中的服務）；匯入後請立即重新啟動。可改由 runtime 的 token store 在儲存前核對資料庫中最新的設定。（`internal/runtime`）
+- [ ] 「測試連線」更新 token 的期間若刪除信箱再以相同名稱、相同帳號重新建立，測試仍可能把舊授權寫回新信箱（帳號核對無法分辨）；可改以設定版本或信箱的世代編號核對。（`internal/web/msauth.go` `probeStore`）
+- [ ] 「測試連線」在 saveMu 之外讀取已儲存的信箱設定，讀取後到開始連線之間有極短的空檔可能用到剛被修改前的設定。（`internal/web/page_mailboxes.go` `postAPIProbe`）
 - [ ] 登入限速是全域的（每秒 1 次），網路上任何人都能以約每秒一次的請求讓管理員難以登入；可考慮在全域上限下再加每 IP 的限速。（`internal/web/server.go`）
 - [ ] 每次存檔都會重建所有信箱連線並重置告警去重狀態；可改為只重建有變更的信箱。（`internal/runtime`）
 - [ ] 總覽：短暫重新連線就整頁轉紅、「這段期間收到的驗證碼不會轉發」說法過重（重連後會補抓）；輪詢錯誤沒有退避。（`internal/web/page_dashboard.go`、`static/app.js`）

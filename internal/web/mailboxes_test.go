@@ -511,6 +511,26 @@ func TestProbeRefreshDoesNotRestoreDroppedToken(t *testing.T) {
 	}
 }
 
+// Without a concurrent change, a token the connection test refreshes is stored: the
+// rotated refresh token must not be lost.
+func TestProbeRefreshStoresRotatedToken(t *testing.T) {
+	ms := newFakeMicrosoft(t)
+	ms.setToken(func(int) (int, string) { return 200, fakeGrant })
+	e := newEnvWithIMAPOpts(t, withOutlookMailbox, withFakeMicrosoft(ms))
+	e.login()
+	ctx := context.Background()
+	e.st.SaveOAuthToken(ctx, "outlook", store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(-time.Hour)})
+	_, body := e.postJSON("/api/mailboxes/probe", map[string]string{"name": "outlook", "host": "outlook.office365.com", "username": "me@outlook.com",
+		"auth_type": "microsoft_oauth", "client_id": "00000000-0000-0000-0000-000000000001", "tenant": "consumers"})
+	if !strings.Contains(body, `"ok":false`) { // the in-memory server refuses XOAUTH2
+		t.Fatalf("probe = %s", body)
+	}
+	tok, ok, err := e.st.GetOAuthToken(ctx, "outlook")
+	if err != nil || !ok || tok.AccessToken != "SECRET-ACCESS" || tok.RefreshToken != "SECRET-REFRESH" || !tok.ExpiresAt.After(time.Now()) {
+		t.Fatalf("stored token = %+v %v %v, want the refreshed one", tok, ok, err)
+	}
+}
+
 // A mailbox that switches to Microsoft authorisation never keeps a token left over from
 // earlier (for example from a deleted mailbox of the same name whose token was not cleared).
 func TestMailboxBecomingMicrosoftDropsLeftoverToken(t *testing.T) {
