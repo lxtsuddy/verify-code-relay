@@ -12,12 +12,12 @@ import (
 	"unicode/utf8"
 
 	"verify-code-relay/internal/config"
+	"verify-code-relay/internal/tglen"
 )
 
 const (
-	MaxTextRunes = 4096
 	maxCopyRunes = 256
-	maxInlineURL = 4000
+	maxInlineURL = 4000 // UTF-16 units of the escaped URL
 	kindCode     = "code"
 	kindLink     = "link"
 	kindBoth     = "both"
@@ -59,6 +59,11 @@ func compile(path, src string) (*template.Template, error) {
 	}
 	if err := t.Execute(&bytes.Buffer{}, trialData); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	// Fields can be empty at run time (and Render empties the subject and URL to fit the
+	// limit), so branches taken only on empty values must be checked too.
+	if err := t.Execute(&bytes.Buffer{}, Data{}); err != nil {
+		return nil, fmt.Errorf("%s: 欄位為空值時執行失敗：%w", path, err)
 	}
 	return t, nil
 }
@@ -126,38 +131,73 @@ func (r *Renderer) Render(mailbox string, d Data) (Rendered, error) {
 		return Rendered{}, err
 	}
 
-	text, err := exec(t, d)
+	text, err := fitText(t, d)
 	if err != nil {
 		return Rendered{}, err
 	}
-	// 1) shrink the subject until it fits
-	for utf8.RuneCountInString(text) > MaxTextRunes && d.Subject != "" {
-		subj := []rune(strings.TrimSuffix(d.Subject, "…"))
-		over := utf8.RuneCountInString(text) - MaxTextRunes
-		keep := len(subj) - over - 1
-		if keep < 0 {
-			keep = 0
-		}
-		d.Subject = string(subj[:keep]) + "…"
-		if keep == 0 {
-			d.Subject = ""
-		}
-		if text, err = exec(t, d); err != nil {
-			return Rendered{}, err
-		}
-	}
-	// 2) a gigantic URL stays only in the button
-	if utf8.RuneCountInString(text) > MaxTextRunes && utf8.RuneCountInString(d.URL) > maxInlineURL {
-		d.URL = ""
-		if text, err = exec(t, d); err != nil {
-			return Rendered{}, err
-		}
-	}
-	// 3) last resort: hard cut (may break HTML; the dispatcher's plain-text fallback handles that)
-	if utf8.RuneCountInString(text) > MaxTextRunes {
-		text = string([]rune(text)[:MaxTextRunes])
-	}
 	return Rendered{Text: text, ReplyMarkup: markup}, nil
+}
+
+func fits(text string) bool { return tglen.Len(text) <= tglen.Max }
+
+// fitText renders d and, while the text is over Telegram's limit, gives things up in
+// this order: an over-long URL (the button keeps it), the tail of the subject, any URL,
+// and finally whatever a hard cut removes. The code is never shortened before the cut.
+func fitText(t *template.Template, d Data) (string, error) {
+	text, err := exec(t, d)
+	if err != nil || fits(text) {
+		return text, err
+	}
+	// 1) a URL that cannot fit by itself stays only in the button
+	if tglen.Len(template.HTMLEscapeString(d.URL)) > maxInlineURL {
+		d.URL = ""
+	}
+	// 2) keep as much of the subject as fits
+	if text, err = fitSubject(t, d); err != nil || fits(text) {
+		return text, err
+	}
+	// 3) drop any URL from the text, then try the whole subject again
+	if d.URL != "" {
+		d.URL = ""
+		if text, err = fitSubject(t, d); err != nil || fits(text) {
+			return text, err
+		}
+	}
+	// 4) last resort: hard cut (may break HTML; the dispatcher's plain-text fallback handles that)
+	return tglen.Cut(text, tglen.Max), nil
+}
+
+// fitSubject renders d with the longest subject prefix (ending in "…") that fits, or with
+// no subject at all if not even one rune fits. The result may still be over the limit.
+func fitSubject(t *template.Template, d Data) (string, error) {
+	text, err := exec(t, d)
+	if err != nil || fits(text) || d.Subject == "" {
+		return text, err
+	}
+	subj := []rune(d.Subject)
+	// Binary search for the largest n in [1, len(subj)) whose text fits: escaping and
+	// characters outside the BMP make one rune of subject cost a varying number of units.
+	best, bestText := 0, ""
+	for lo, hi := 1, len(subj)-1; lo <= hi; {
+		mid := lo + (hi-lo)/2
+		e := d
+		e.Subject = string(subj[:mid]) + "…"
+		text, err := exec(t, e)
+		if err != nil {
+			return "", err
+		}
+		if fits(text) {
+			best, bestText = mid, text
+			lo = mid + 1
+		} else {
+			hi = mid - 1
+		}
+	}
+	if best > 0 {
+		return bestText, nil
+	}
+	d.Subject = ""
+	return exec(t, d)
 }
 
 func exec(t *template.Template, d Data) (string, error) {
