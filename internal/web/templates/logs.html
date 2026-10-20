@@ -1,0 +1,62 @@
+{{template "app" .}}
+{{define "content"}}
+{{$d := .Data}}
+<header class="page-head">
+  <div>
+    <h1 class="page-title">轉發紀錄</h1>
+    <p class="page-desc">每一封檢查過的郵件：辨識出什麼、有沒有送到 Telegram。主旨裡的驗證碼已遮蔽，紀錄不保存驗證碼與連結。</p>
+  </div>
+</header>
+
+<form class="log-filter" method="get" action="/logs" role="search" aria-label="篩選轉發紀錄">
+  <div class="field">
+    <label class="label" for="f-mailbox">信箱</label>
+    <select class="select" id="f-mailbox" name="mailbox">
+      <option value="">全部信箱</option>
+      {{range $d.Mailboxes}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+  </div>
+  <div class="field">
+    <label class="label" for="f-result">結果</label>
+    <select class="select" id="f-result" name="result">
+      <option value="">全部結果</option>
+      {{range $d.Results}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+  </div>
+  <div class="log-filter-actions">
+    <button type="submit" class="btn">{{template "icon" "logs"}}<span>篩選</span></button>
+    {{if $d.Filtered}}<a class="btn btn-ghost" href="{{$d.ClearURL}}">{{template "icon" "x"}}<span>清除篩選</span></a>{{end}}
+  </div>
+</form>
+
+{{if $d.Rows}}
+<p class="log-count" role="status">{{if $d.Filtered}}符合條件的{{end}}共 {{$d.Total}} 筆{{if gt $d.Pages 1}}，這頁是第 {{$d.First}}–{{$d.Last}} 筆{{end}}</p>
+<div class="table-wrap">
+  <table class="table log-table log-table-full">
+    <thead><tr><th scope="col">時間</th><th scope="col">信箱／資料夾</th><th scope="col">主旨與寄件者</th><th scope="col">種類</th><th scope="col">規則</th><th scope="col">結果</th></tr></thead>
+    <tbody>{{range $d.Rows}}{{template "log-row" (dict "R" . "Rule" true)}}{{end}}</tbody>
+  </table>
+</div>
+{{if gt $d.Pages 1}}
+<nav class="pager" aria-label="分頁">
+  {{if $d.PrevURL}}<a class="btn btn-sm" href="{{$d.PrevURL}}" rel="prev">{{template "icon" "arrow-left"}}<span>較新</span></a>{{else}}<span class="btn btn-sm" aria-disabled="true">{{template "icon" "arrow-left"}}<span>較新</span></span>{{end}}
+  <span class="pager-pos" aria-current="page">第 {{$d.Page}} / {{$d.Pages}} 頁</span>
+  {{if $d.NextURL}}<a class="btn btn-sm" href="{{$d.NextURL}}" rel="next"><span>較舊</span>{{template "icon" "arrow-right"}}</a>{{else}}<span class="btn btn-sm" aria-disabled="true"><span>較舊</span>{{template "icon" "arrow-right"}}</span>{{end}}
+</nav>
+{{end}}
+{{else if $d.Filtered}}
+<section class="empty">
+  <span class="empty-icon">{{template "icon" "logs"}}</span>
+  <h2 class="empty-title">沒有符合條件的紀錄</h2>
+  <p class="empty-text">換個信箱或結果再試，或清除篩選看全部紀錄。</p>
+  <a class="btn" href="{{$d.ClearURL}}">{{template "icon" "x"}}<span>清除篩選</span></a>
+</section>
+{{else}}
+<section class="empty">
+  <span class="empty-icon">{{template "icon" "inbox"}}</span>
+  <h2 class="empty-title">還沒有轉發紀錄</h2>
+  <p class="empty-text">信箱收到新郵件後，每一封的處理結果都會記在這裡：辨識到驗證碼或連結、被規則略過，或是否送達 Telegram。</p>
+  <a class="btn btn-primary" href="/">{{template "icon" "dashboard"}}<span>回到總覽</span></a>
+</section>
+{{end}}
+{{end}}

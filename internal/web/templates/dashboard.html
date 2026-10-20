@@ -1,0 +1,121 @@
+{{template "app" .}}
+{{define "content"}}
+{{$d := .Data}}
+<header class="page-head">
+  <div>
+    <h1 class="page-title">總覽</h1>
+    <p class="page-desc">服務與每個信箱現在的狀態，以及最近轉發了什麼。</p>
+  </div>
+  <p class="live-note" data-live-note><span class="live-dot" aria-hidden="true"></span><span data-live-text>每 10 秒自動更新</span></p>
+</header>
+
+<div class="board" data-status-board data-state="{{$d.Health.State}}">
+
+<section class="health" aria-labelledby="health-title">
+  <div class="health-seal" aria-hidden="true">
+    <svg class="postmark health-mark" viewBox="0 0 160 160" focusable="false">
+      <defs>
+        <path id="hm-top" d="M 28 80 A 52 52 0 0 1 132 80"/>
+        <path id="hm-bottom" d="M 26 80 A 54 54 0 0 0 134 80"/>
+      </defs>
+      <circle class="pm-ring" cx="80" cy="80" r="74"/>
+      <circle class="pm-ring pm-thin" cx="80" cy="80" r="69"/>
+      <text class="pm-arc"><textPath href="#hm-top" startOffset="50%">驗證碼轉發</textPath></text>
+      <text class="pm-arc pm-arc-time"><textPath href="#hm-bottom" startOffset="50%" data-health-stamp>即時狀態</textPath></text>
+      <path class="pm-band" d="M 7 64 H 153 M 7 96 H 153"/>
+      <text class="pm-mid" x="80" y="86" data-health-word>{{$d.Health.Word}}</text>
+    </svg>
+  </div>
+  <div class="health-body">
+    <p class="eyebrow">系統狀態</p>
+    <h2 class="health-title" id="health-title" data-health-title>{{$d.Health.Title}}</h2>
+    <p class="health-text" data-health-text>{{$d.Health.Text}}</p>
+    <dl class="health-facts">
+      <div><dt>信箱</dt><dd data-fact="mailboxes">{{$d.Health.Mailboxes}}</dd></div>
+      <div class="fact-ok{{if $d.Health.OK}} is-hot{{end}}" data-fact-cell="ok"><dt>正常</dt><dd data-fact="ok">{{$d.Health.OK}}</dd></div>
+      <div class="fact-bad{{if $d.Health.Bad}} is-hot{{end}}" data-fact-cell="bad"><dt>異常</dt><dd data-fact="bad">{{$d.Health.Bad}}</dd></div>
+      <div class="fact-pending{{if $d.Pending}} is-hot{{end}}" data-fact-cell="pending"><dt>待發佇列</dt><dd data-fact="pending">{{$d.Pending}}</dd></div>
+      <div class="fact-time"><dt>最近套用</dt><dd data-fact="applied">{{if $d.AppliedAt.IsZero}}尚未套用{{else}}{{localtime $d.AppliedAt}}{{end}}</dd></div>
+    </dl>
+  </div>
+</section>
+
+{{if not $d.Cards}}
+<section class="setup" data-first-run aria-labelledby="setup-title">
+  <h2 class="section-title" id="setup-title">開始使用：三個步驟</h2>
+  <ol class="setup-steps">
+    <li class="setup-step{{if $d.HasBots}} is-done{{else}} is-current{{end}}">
+      <span class="setup-no" aria-hidden="true">{{if $d.HasBots}}{{template "icon" "check"}}{{else}}1{{end}}</span>
+      <h3 class="setup-title">新增 Bot{{if $d.HasBots}}<span class="sr-only">（已完成）</span>{{end}}</h3>
+      <p class="setup-text">在 Telegram 向 @BotFather 建立一個 Bot，把它給的 token 貼到 Telegram 頁。</p>
+      {{if $d.HasBots}}<span class="badge badge-ok">已完成</span>{{else}}<a class="btn btn-primary btn-sm" href="/telegram">{{template "icon" "send"}}<span>前往 Telegram</span></a>{{end}}
+    </li>
+    <li class="setup-step{{if $d.HasTargets}} is-done{{else if $d.HasBots}} is-current{{end}}">
+      <span class="setup-no" aria-hidden="true">{{if $d.HasTargets}}{{template "icon" "check"}}{{else}}2{{end}}</span>
+      <h3 class="setup-title">新增目標{{if $d.HasTargets}}<span class="sr-only">（已完成）</span>{{end}}</h3>
+      <p class="setup-text">選擇驗證碼要送到哪個聊天室：自己、群組或頻道。</p>
+      {{if $d.HasTargets}}<span class="badge badge-ok">已完成</span>{{else if $d.HasBots}}<a class="btn btn-primary btn-sm" href="/telegram">{{template "icon" "users"}}<span>新增目標</span></a>{{else}}<span class="setup-wait">完成上一步後</span>{{end}}
+    </li>
+    <li class="setup-step{{if $d.HasTargets}} is-current{{end}}">
+      <span class="setup-no" aria-hidden="true">3</span>
+      <h3 class="setup-title">新增信箱</h3>
+      <p class="setup-text">填入信箱帳號與應用程式密碼，Outlook 則用 Microsoft 授權，再勾選要轉發的目標。</p>
+      {{if $d.HasTargets}}<a class="btn btn-primary btn-sm" href="/mailboxes/new">{{template "icon" "plus"}}<span>新增信箱</span></a>{{else}}<span class="setup-wait">完成上一步後</span>{{end}}
+    </li>
+  </ol>
+</section>
+{{end}}
+
+<div class="callout callout-info board-changed" data-board-changed hidden>{{template "icon" "info"}}<p>信箱設定已變更。<a href="/" class="link">重新整理</a>以顯示最新的信箱。</p></div>
+
+{{if $d.Cards}}
+<section class="dash-section" aria-labelledby="cards-title">
+  <div class="section-head">
+    <h2 class="section-title" id="cards-title">信箱</h2>
+    <a class="section-link" href="/mailboxes">管理信箱{{template "icon" "arrow-right"}}</a>
+  </div>
+  <ul class="dash-cards">
+    {{range $d.Cards}}
+    <li class="dash-card" data-mb="{{.Name}}" data-state="{{.State}}" data-oauth-user="{{.Username}}">
+      <div class="dash-card-head">
+        <span class="mb-glyph dash-glyph" aria-hidden="true">{{.Glyph}}</span>
+        <div class="dash-id">
+          <a class="dash-name" href="/mailboxes/{{.Name}}">{{.DisplayName}}</a>
+          <p class="dash-user mono">{{.Username}}</p>
+        </div>
+      </div>
+      <ul class="dash-folders" aria-label="{{.DisplayName}} 的資料夾">
+        {{range .Folders}}<li class="dash-folder" data-folder="{{.Name}}"><span class="dash-folder-name mono">{{.Name}}</span><span class="badge {{.Class}}{{if .Live}} badge-live{{end}}">{{.Label}}</span></li>{{end}}
+      </ul>
+      <div class="dash-foot" data-mb-foot{{if not .Note}} hidden{{end}}>
+        <p class="dash-note" data-mb-note>{{.Note}}</p>
+        <div class="dash-action" data-mb-action>
+          {{- if eq .Action "oauth"}}<button type="button" class="btn btn-sm btn-auth" data-oauth-start="{{.Name}}" data-oauth-user="{{.Username}}">{{template "icon" "lock"}}<span>{{if .NeedsAuth}}授權{{else}}重新授權{{end}}</span></button>
+          {{- else if eq .Action "edit"}}<a class="btn btn-sm" href="/mailboxes/{{.Name}}">{{template "icon" "edit"}}<span>檢查信箱設定</span></a>{{end -}}
+        </div>
+      </div>
+    </li>
+    {{end}}
+  </ul>
+</section>
+<template id="tpl-mb-oauth"><button type="button" class="btn btn-sm btn-auth">{{template "icon" "lock"}}<span>重新授權</span></button></template>
+<template id="tpl-mb-edit"><a class="btn btn-sm">{{template "icon" "edit"}}<span>檢查信箱設定</span></a></template>
+{{template "oauth-dialog"}}
+{{end}}
+
+<section class="dash-section" aria-labelledby="recent-title">
+  <div class="section-head">
+    <h2 class="section-title" id="recent-title">最近轉發</h2>
+    <a class="section-link" href="/logs">全部紀錄{{template "icon" "arrow-right"}}</a>
+  </div>
+  <div class="table-wrap" data-recent-wrap{{if not $d.Recent}} hidden{{end}}>
+    <table class="table log-table">
+      <thead><tr><th scope="col">時間</th><th scope="col">信箱</th><th scope="col">主旨與寄件者</th><th scope="col">種類</th><th scope="col">結果</th></tr></thead>
+      <tbody data-recent>{{range $d.Recent}}{{template "log-row" (dict "R" . "Rule" false)}}{{end}}</tbody>
+    </table>
+  </div>
+  <p class="quiet-empty" data-recent-empty{{if $d.Recent}} hidden{{end}}>{{template "icon" "inbox"}}<span>還沒有轉發紀錄。信箱收到新郵件後，處理結果會出現在這裡。</span></p>
+</section>
+
+</div>
+{{end}}

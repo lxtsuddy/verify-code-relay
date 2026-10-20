@@ -1562,6 +1562,219 @@
     document.querySelectorAll("[data-tpl-preview]").forEach(runPreview);
   });
 
+  /* ---------- overview ----------
+
+    [data-status-board]   總覽：每 10 秒 GET /api/status，原地更新系統狀態（郵戳、摘要數字）、每張信箱卡片
+                          （[data-mb] 的狀態、[data-folder] 徽章、說明與動作）與最近轉發（[data-recent]）。
+                          標籤、樣式與判斷都由伺服器決定，這裡只寫入；文字一律 textContent。
+                          分頁隱藏時暫停，回到前景立即更新；這個輪詢不算使用中（session 照樣會閒置逾時）。
+                          信箱增減時不重新整理，只顯示 [data-board-changed]。卡片的動作按鈕取自
+                          <template id="tpl-mb-oauth">／<template id="tpl-mb-edit">。
+  */
+
+  var STATUS_EVERY = 10000;
+  var board = { gen: 0, timer: 0, recent: null };
+
+  function boardEl() { return document.querySelector("[data-status-board]"); }
+
+  function setText(root, sel, text) {
+    var n = root.querySelector(sel);
+    if (n && n.textContent !== String(text)) n.textContent = String(text);
+    return n;
+  }
+
+  function timeEl(iso) {
+    var t = el("time", null, iso.replace("T", " ").replace(/:\d\dZ$/, " UTC"));
+    t.setAttribute("datetime", iso);
+    t.setAttribute("data-localtime", "");
+    return t;
+  }
+
+  function liveNote(ok, text) {
+    var n = document.querySelector("[data-live-note]");
+    if (!n) return;
+    n.classList.toggle("is-off", !ok);
+    setText(n, "[data-live-text]", text);
+  }
+
+  function badge(cls, live, label) {
+    return el("span", "badge " + (cls || "badge-idle") + (live ? " badge-live" : ""), label);
+  }
+
+  function setBadge(node, cls, live, label) {
+    var want = "badge " + (cls || "badge-idle") + (live ? " badge-live" : "");
+    if (node.className !== want) node.className = want;
+    if (node.textContent !== label) node.textContent = label;
+  }
+
+  function updateHealth(root, d) {
+    var h = d.health || {};
+    if (root.dataset.state !== h.state) {
+      root.dataset.state = h.state || "idle";
+      var mark = root.querySelector(".health-mark");
+      if (mark && !reducedMotion()) {
+        mark.classList.remove("is-restamp");
+        void mark.getBoundingClientRect();
+        mark.classList.add("is-restamp");
+      }
+    }
+    setText(root, "[data-health-word]", h.word || "");
+    setText(root, "[data-health-title]", h.title || "");
+    setText(root, "[data-health-text]", h.text || "");
+    setText(root, '[data-fact="mailboxes"]', h.mailboxes || 0);
+    setText(root, '[data-fact="ok"]', h.ok || 0);
+    setText(root, '[data-fact="bad"]', h.bad || 0);
+    setText(root, '[data-fact="pending"]', d.pending || 0);
+    var ok = root.querySelector('[data-fact-cell="ok"]');
+    if (ok) ok.classList.toggle("is-hot", h.ok > 0);
+    var bad = root.querySelector('[data-fact-cell="bad"]');
+    if (bad) bad.classList.toggle("is-hot", h.bad > 0);
+    var pend = root.querySelector('[data-fact-cell="pending"]');
+    if (pend) pend.classList.toggle("is-hot", d.pending > 0);
+    var applied = root.querySelector('[data-fact="applied"]');
+    if (applied) {
+      var cur = applied.querySelector("time");
+      if (!d.applied_at) setText(root, '[data-fact="applied"]', "尚未套用");
+      else if (!cur || cur.getAttribute("datetime") !== d.applied_at) {
+        applied.textContent = "";
+        applied.appendChild(timeEl(d.applied_at));
+        localTimes(applied);
+      }
+    }
+    var now = new Date();
+    setText(root, "[data-health-stamp]", pad(now.getHours()) + ":" + pad(now.getMinutes()) + " 更新");
+  }
+
+  function cardAction(card, c) {
+    var slot = card.querySelector("[data-mb-action]");
+    if (!slot) return;
+    var has = slot.querySelector("[data-oauth-start]") ? "oauth" : slot.querySelector("a") ? "edit" : "";
+    if (has === (c.action || "")) return;
+    slot.textContent = "";
+    var tpl = byId(c.action === "oauth" ? "tpl-mb-oauth" : c.action === "edit" ? "tpl-mb-edit" : "");
+    if (!tpl) return;
+    var node = tpl.content.firstElementChild.cloneNode(true);
+    var name = card.dataset.mb;
+    if (c.action === "oauth") {
+      node.dataset.oauthStart = name;
+      node.dataset.oauthUser = card.dataset.oauthUser || "";
+    } else node.href = "/mailboxes/" + encodeURIComponent(name);
+    slot.appendChild(node);
+  }
+
+  // updateCards writes each card's verdict; it reports whether the set of mailboxes changed.
+  function updateCards(root, d) {
+    var byName = {};
+    (d.mailboxes || []).forEach(function (c) { byName[c.mailbox] = c; });
+    var cards = root.querySelectorAll("[data-mb]");
+    var changed = cards.length !== (d.mailboxes || []).length;
+    cards.forEach(function (card) {
+      var c = byName[card.dataset.mb];
+      if (!c) { changed = true; return; }
+      if (card.dataset.state !== c.state) card.dataset.state = c.state;
+      var folders = {};
+      (c.folders || []).forEach(function (f) { folders[f.folder] = f; });
+      card.querySelectorAll("[data-folder]").forEach(function (row) {
+        var f = folders[row.dataset.folder];
+        var b = row.querySelector(".badge");
+        if (!f) { changed = true; return; }
+        if (b) setBadge(b, f.class, f.live, f.label);
+        else row.appendChild(badge(f.class, f.live, f.label));
+      });
+      if ((c.folders || []).length !== card.querySelectorAll("[data-folder]").length) changed = true;
+      var foot = card.querySelector("[data-mb-foot]");
+      setText(card, "[data-mb-note]", c.note || "");
+      cardAction(card, c);
+      if (foot) foot.hidden = !c.note && !c.action;
+    });
+    return changed;
+  }
+
+  function recentRow(r) {
+    var tr = document.createElement("tr");
+    var time = el("td", "c-time");
+    if (r.at) time.appendChild(timeEl(r.at));
+    tr.appendChild(time);
+    var mb = el("td", "c-mb");
+    mb.appendChild(el("span", "log-mb", r.mailbox));
+    mb.appendChild(el("span", "log-folder mono", r.folder));
+    tr.appendChild(mb);
+    var msg = el("td", "c-msg");
+    var subj = el("span", "log-subject", r.subject ? r.subject : null);
+    if (!r.subject) subj.appendChild(el("span", "muted", "（沒有主旨）"));
+    msg.appendChild(subj);
+    msg.appendChild(el("span", "log-from mono", r.from));
+    tr.appendChild(msg);
+    var kind = el("td", "c-kind");
+    kind.appendChild(el("span", "tag" + (r.hit ? " tag-hit" : ""), r.kind_label));
+    tr.appendChild(kind);
+    var res = el("td", "c-result");
+    res.appendChild(badge(r.result_class, r.live, r.result_label));
+    tr.appendChild(res);
+    return tr;
+  }
+
+  function updateRecent(root, d) {
+    var body = root.querySelector("[data-recent]");
+    if (!body) return;
+    var rows = d.recent || [];
+    var sig = JSON.stringify(rows);
+    if (sig === board.recent) return;
+    board.recent = sig;
+    var frag = document.createDocumentFragment();
+    rows.forEach(function (r) { frag.appendChild(recentRow(r)); });
+    body.textContent = "";
+    body.appendChild(frag);
+    localTimes(body);
+    var wrap = root.querySelector("[data-recent-wrap]");
+    var empty = root.querySelector("[data-recent-empty]");
+    if (wrap) wrap.hidden = rows.length === 0;
+    if (empty) empty.hidden = rows.length > 0;
+  }
+
+  function boardFetch() {
+    clearTimeout(board.timer);
+    var root = boardEl();
+    if (!root || document.visibilityState === "hidden") return;
+    var gen = ++board.gen;
+    fetchJSON("/api/status").then(
+      function (d) {
+        if (gen !== board.gen) return;
+        if (!d || d.ok === false || !d.health) {
+          liveNote(false, "暫時無法更新狀態" + (d && d.error ? "：" + d.error : "") + "，稍後自動重試");
+        } else {
+          updateHealth(root, d);
+          var changed = updateCards(root, d);
+          var note = root.querySelector("[data-board-changed]");
+          if (note) note.hidden = !changed;
+          updateRecent(root, d);
+          liveNote(true, "每 10 秒自動更新");
+        }
+        board.timer = setTimeout(boardFetch, STATUS_EVERY);
+      },
+      function (err) {
+        if (gen !== board.gen) return;
+        liveNote(false, err.message + "，稍後自動重試");
+        board.timer = setTimeout(boardFetch, STATUS_EVERY);
+      }
+    );
+  }
+
+  ready(function () {
+    var root = boardEl();
+    if (!root) return;
+    var now = new Date();
+    setText(root, "[data-health-stamp]", pad(now.getHours()) + ":" + pad(now.getMinutes()) + " 更新");
+    board.timer = setTimeout(boardFetch, STATUS_EVERY);
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "hidden") {
+        clearTimeout(board.timer);
+        board.gen++; // an answer still on its way is dropped
+        liveNote(true, "分頁在背景，已暫停更新");
+      } else boardFetch();
+    });
+  });
+
   ready(snapshotForms);
 
   window.relay = {

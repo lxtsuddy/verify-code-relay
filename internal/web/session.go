@@ -70,7 +70,7 @@ func (s *Server) loadSession(next http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 			return
 		}
-		if now.Sub(se.LastSeen) > touchEvery {
+		if now.Sub(se.LastSeen) > touchEvery && !backgroundPoll(r) {
 			if err := s.o.Store.TouchSession(ctx, hash, now); err != nil {
 				s.o.Log.Warn("更新 session 時間失敗", "err", err)
 			}
@@ -78,6 +78,12 @@ func (s *Server) loadSession(next http.Handler) http.Handler {
 		si := &sessionInfo{TokenHash: hash, CSRF: se.CSRF, Pending: admin.TOTPSecret == ""}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, ctxKey{}, si)))
 	})
+}
+
+// backgroundPoll reports whether r is the overview's automatic status refresh, which must
+// not keep an unattended session from reaching its idle timeout.
+func backgroundPoll(r *http.Request) bool {
+	return r.Method == http.MethodGet && r.URL.Path == "/api/status"
 }
 
 // startSession replaces the request's session (if any) with a fresh one and sets its

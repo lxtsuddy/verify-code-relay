@@ -39,6 +39,9 @@
     標籤    <div class="field kw-field" data-tags><textarea data-tags-source>一行一個</textarea></div>，app.js 轉成 .tags-box。
     未儲存  form[data-dirty-watch] 內放 <p class="save-note" data-dirty-note hidden>…</p>（通常在 .save-bar 裡）。
     預覽    figure.tg-phone：Telegram 對話的樣子（.tg-bar／.tg-chat 裡的 .tg-bubble 與 .tg-kb／.tg-meta）。
+    健康    總覽頁首的 section.health：郵戳（.health-mark）的顏色與中間字是整體狀態，底弧是最近一次更新時間；
+            顏色來自外層 [data-state]（ok｜info｜warn｜err｜idle），信箱卡片 .dash-card[data-state] 為 ok｜busy｜bad。
+    紀錄    table.table.log-table，每列用 {{template "log-row" …}}（_logs.html）；640px 以下每列變成一張小卡。
 */
 
 :root {
@@ -1448,6 +1451,210 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .tpl-editor { padding: 16px; }
   .tpl-tab { padding-left: 12px; font-size: 14px; }
   .tg-msg { max-width: 100%; }
+}
+
+/* ---------- overview ----------
+   The health verdict is a postmark: its colour and middle word carry the state, the
+   bottom arc the time of the last refresh (written by app.js). Every colour on the page
+   follows [data-state] on the board, a card or the seal: ok green, info blue, warn amber,
+   err red, idle grey. Mailbox cards keep the engraved initial of the mailbox list; a card
+   in trouble turns red and carries its action. */
+.live-note { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green-600); animation: pulse 1.6s ease-in-out infinite; }
+.live-note.is-off { color: var(--amber-ink); }
+.live-note.is-off .live-dot { background: var(--amber); animation: none; }
+
+.board { --tone: var(--green-800); --tone-soft: var(--green-50); --tone-line: var(--green-100); }
+.board[data-state="info"] { --tone: var(--blue); --tone-soft: var(--blue-50); --tone-line: var(--blue-100); }
+.board[data-state="warn"] { --tone: var(--amber-ink); --tone-soft: var(--amber-50); --tone-line: var(--amber-100); }
+.board[data-state="err"] { --tone: var(--red); --tone-soft: var(--red-50); --tone-line: var(--red-100); }
+.board[data-state="idle"] { --tone: var(--faint); --tone-soft: var(--surface-2); --tone-line: var(--line); }
+
+.health {
+  display: grid; grid-template-columns: 176px minmax(0, 1fr); gap: 8px 30px; align-items: center;
+  padding: 22px 26px 22px 22px;
+  background: linear-gradient(100deg, var(--tone-soft) 0, var(--surface) 46%);
+  border: 1px solid var(--tone-line); border-radius: var(--radius); box-shadow: var(--shadow-1);
+  transition: border-color 0.3s, background-color 0.3s;
+}
+.health-seal { display: grid; place-items: center; }
+.health .health-mark { width: 156px; height: 156px; color: var(--tone); opacity: 0.88; transition: color 0.3s; }
+.health-mark.is-restamp { animation: stamp 0.45s var(--ease); }
+.pm-arc-time { font-family: var(--mono); font-size: 13px; letter-spacing: 0.18em; }
+.health-body { min-width: 0; }
+.health .eyebrow { color: var(--tone); }
+.health-title { font-size: 23px; line-height: 1.3; font-weight: 800; letter-spacing: 0.04em; }
+.health-text { margin-top: 4px; max-width: 60ch; color: var(--ink-2); }
+.health-facts {
+  display: flex; flex-wrap: wrap; margin: 16px 0 0; padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.health-facts > div { padding: 10px 22px 0 0; margin-right: 22px; border-right: 1px solid var(--line); }
+.health-facts > div:last-child { border-right: 0; margin-right: 0; }
+.health-facts dt { font-size: 12.5px; color: var(--muted); }
+.health-facts dd { font-family: var(--mono); font-size: 22px; font-weight: 600; line-height: 1.35; font-variant-numeric: tabular-nums; color: var(--ink); }
+.health-facts .is-hot.fact-ok dd { color: var(--green-700); }
+.health-facts .is-hot.fact-bad dd { color: var(--red); }
+.health-facts .is-hot.fact-pending dd { color: var(--amber-ink); }
+.health-facts .fact-time dd { font-family: var(--font); font-size: 15px; font-weight: 600; line-height: 33px; }
+.health-facts .fact-time time { font-variant-numeric: tabular-nums; }
+
+/* first run: three steps, each number in a postcode box, joined by the routing line */
+.setup .section-title { margin-top: 30px; }
+.setup-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 0; padding: 0; list-style: none; }
+.setup-step {
+  position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  padding: 18px 18px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow-1); color: var(--muted);
+}
+.setup-step + .setup-step::before {
+  content: ""; position: absolute; left: -15px; top: 35px; width: 16px; border-top: 1.5px dashed var(--line-2);
+}
+.setup-no {
+  display: grid; place-items: center; width: 30px; height: 36px; margin-bottom: 4px;
+  border: 1.5px solid var(--line-2); background: #fff; color: var(--faint);
+  font-family: var(--mono); font-size: 18px; font-weight: 700;
+}
+.setup-no .icon { width: 17px; height: 17px; }
+.setup-title { font-size: 16px; font-weight: 700; letter-spacing: 0.02em; color: var(--ink-2); }
+.setup-text { flex: 1; margin-bottom: 8px; font-size: 13.5px; line-height: 1.6; }
+.setup-wait { font-size: 13px; color: var(--faint); line-height: 32px; }
+.setup-step.is-current { border-color: var(--green-300); box-shadow: var(--shadow-1), 0 0 0 3px var(--green-50); color: var(--ink-2); }
+.setup-step.is-current .setup-no { border-color: var(--red); color: var(--ink); }
+.setup-step.is-current .setup-title { color: var(--ink); }
+.setup-step.is-done .setup-no { border-color: var(--green-700); background: var(--green-50); color: var(--green-700); }
+.setup-step.is-done .setup-title { color: var(--ink); }
+
+.board-changed { margin-top: 20px; }
+.board-changed[hidden] { display: none; }
+
+.dash-section .section-title { font-size: 18px; }
+.section-link { display: inline-flex; align-items: center; gap: 5px; font-size: 14px; font-weight: 600; text-decoration: none; }
+.section-link:hover { text-decoration: underline; }
+.section-link .icon { width: 15px; height: 15px; }
+
+.dash-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 16px; margin: 0; padding: 0; list-style: none; }
+.dash-card {
+  --tone: var(--green-600);
+  display: flex; flex-direction: column; min-width: 0;
+  padding: 16px 18px 14px 20px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  box-shadow: var(--shadow-1), inset 4px 0 0 var(--tone);
+  transition: border-color 0.3s, box-shadow 0.3s, background-color 0.3s;
+}
+.dash-card[data-state="busy"] { --tone: var(--blue); }
+.dash-card[data-state="bad"] { --tone: var(--red); border-color: var(--red-100); background: linear-gradient(180deg, var(--red-50), var(--surface) 70px); }
+.dash-card-head { display: flex; align-items: center; gap: 12px; }
+.dash-glyph { width: 38px; height: 44px; font-size: 20px; flex: none; }
+.dash-card[data-state="bad"] .dash-glyph { border-color: var(--red); outline-color: var(--red-50); color: var(--red-700); }
+.dash-id { min-width: 0; }
+.dash-name { display: block; font-size: 15.5px; font-weight: 700; color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
+.dash-name:hover { color: var(--green-700); text-decoration: underline; }
+.dash-user { font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-folders { margin: 12px 0 0; padding: 0; list-style: none; }
+.dash-folder {
+  display: flex; align-items: center; justify-content: space-between; gap: 6px 12px;
+  padding: 7px 0; border-top: 1px dashed var(--line);
+}
+.dash-folder-name { min-width: 0; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.dash-folder .badge { font-size: 12px; line-height: 18px; }
+.dash-foot { display: grid; gap: 10px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
+.dash-foot[hidden] { display: none; }
+.dash-card[data-state="bad"] .dash-foot { border-top-color: var(--red-100); }
+.dash-note { font-size: 13.5px; line-height: 1.55; color: var(--muted); }
+.dash-card[data-state="bad"] .dash-note { color: var(--red-700); font-weight: 600; }
+.dash-action { display: flex; flex-wrap: wrap; gap: 8px; }
+.dash-action:empty { display: none; }
+
+/* forward log rows (the overview's latest and the log page) */
+.log-table td { vertical-align: middle; }
+.log-table .c-time { white-space: nowrap; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.log-table .c-mb { min-width: 7em; }
+.log-mb { display: block; font-weight: 600; overflow-wrap: anywhere; }
+.log-folder { display: block; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.log-table .c-msg { width: 100%; min-width: 14em; }
+.log-subject { display: block; overflow-wrap: anywhere; color: var(--ink); }
+.log-from { display: block; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.log-table .c-kind, .log-table .c-result { white-space: nowrap; }
+.log-table .c-rule { min-width: 8.5em; max-width: 14em; font-size: 13px; overflow-wrap: break-word; }
+.log-rule { color: var(--ink-2); }
+.faint { color: var(--faint); }
+.tag-hit { background: var(--green-50); color: var(--green-800); }
+.log-table .badge { font-size: 12px; line-height: 18px; }
+
+.quiet-empty {
+  display: flex; align-items: center; gap: 10px; padding: 18px 20px;
+  border: 1.5px dashed var(--line-2); border-radius: var(--radius); background: var(--surface-2); color: var(--muted);
+}
+.quiet-empty[hidden], .table-wrap[hidden] { display: none; }
+.quiet-empty .icon { color: var(--faint); }
+
+/* log page */
+.log-filter {
+  display: flex; flex-wrap: wrap; align-items: flex-end; gap: 14px 16px;
+  margin-bottom: 18px; padding: 16px 18px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1);
+}
+.log-filter .field { flex: 1 1 200px; max-width: 300px; }
+.log-filter-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.log-count { margin: 0 0 10px; font-size: 13.5px; color: var(--muted); }
+.pager { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 18px; }
+.pager-pos { font-size: 14px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.pager [aria-disabled="true"] { opacity: 0.45; pointer-events: none; }
+
+@media (max-width: 860px) {
+  .health { grid-template-columns: 132px minmax(0, 1fr); gap: 8px 20px; padding: 18px; }
+  .health .health-mark { width: 124px; height: 124px; }
+  .setup-steps { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .setup-step + .setup-step::before { left: 33px; top: -11px; width: 0; height: 12px; border-top: 0; border-left: 1.5px dashed var(--line-2); }
+}
+
+@media (max-width: 640px) {
+  .page-head .live-note { order: -1; }
+  /* seal beside the verdict, then the text and figures across the full width */
+  .health { grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 0 14px; padding: 16px; }
+  .health-body { display: contents; }
+  .health-seal { grid-row: 1 / span 2; }
+  .health .eyebrow { align-self: end; margin-bottom: 2px; }
+  .health-title { align-self: start; }
+  .health-text, .health-facts { grid-column: 1 / -1; }
+  .health-text { margin-top: 10px; }
+  .health .health-mark { width: 96px; height: 96px; }
+  .health-title { font-size: 19px; }
+  .health-text { font-size: 14px; }
+  .health-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 12px; }
+  .health-facts > div { padding: 8px 0 6px; margin: 0; border-right: 0; border-bottom: 1px solid var(--line); }
+  .health-facts > div:nth-child(odd) { padding-right: 12px; }
+  .health-facts > div:nth-child(even) { padding-left: 12px; border-left: 1px solid var(--line); }
+  .health-facts .fact-time { grid-column: 1 / -1; border-bottom: 0; }
+  .health-facts .fact-time dd { line-height: 1.5; }
+  .health-facts dd { font-size: 20px; }
+  .dash-cards { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+
+  /* log rows become cards: time and result on top, then subject, then mailbox and kind */
+  .log-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .log-table, .log-table tbody { display: block; }
+  .log-table tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px;
+    grid-template-areas: "time result" "msg msg" "mb kind" "rule rule";
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+  }
+  .log-table tbody tr:last-child { border-bottom: 0; }
+  .log-table td { display: block; padding: 0; border: 0; }
+  .log-table .c-time { grid-area: time; align-self: center; }
+  .log-table .c-result { grid-area: result; justify-self: end; }
+  .log-table .c-msg { grid-area: msg; width: auto; min-width: 0; }
+  .log-table .c-mb { grid-area: mb; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font-size: 13px; }
+  .log-table .c-mb .log-mb, .log-table .c-mb .log-folder { display: inline; }
+  .log-table .c-kind { grid-area: kind; justify-self: end; align-self: center; }
+  .log-table .c-rule { grid-area: rule; font-size: 12.5px; color: var(--muted); }
+  .log-table .c-rule:has(.faint) { display: none; }
+  .log-table .c-rule .log-rule::before { content: "規則："; color: var(--faint); }
+  .log-filter { padding: 14px 16px; }
+  .log-filter .field { max-width: none; }
+  .log-filter-actions { width: 100%; }
+  .log-filter-actions .btn { flex: 1; }
+  .pager { justify-content: space-between; }
 }
 
 /* ---------- motion ---------- */

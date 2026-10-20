@@ -243,21 +243,20 @@ type mailboxesData struct {
 	Applying   bool
 }
 
-// statusBadge describes a watcher status for the list.
+// statusBadge describes a watcher status as a badge ("" = no watcher reports it yet).
 func statusBadge(st watcher.Status) (label, class string, live bool) {
+	label = statusLabels[st]
 	switch st {
 	case watcher.StatusConnected:
-		return "已連線", "badge-ok", false
+		return label, "badge-ok", false
 	case watcher.StatusConnecting:
-		return "連線中", "badge-info", true
+		return label, "badge-info", true
 	case watcher.StatusReconnecting:
-		return "重連中", "badge-warn", true
-	case watcher.StatusAuthFailed:
-		return "認證失敗", "badge-err", false
-	case watcher.StatusNeedsLogin:
-		return "需要授權", "badge-err", false
+		return label, "badge-warn", true
+	case watcher.StatusAuthFailed, watcher.StatusNeedsLogin:
+		return label, "badge-err", false
 	case watcher.StatusStopped:
-		return "已停止", "badge-idle", false
+		return label, "badge-idle", false
 	}
 	return "套用中", "badge-idle", true
 }

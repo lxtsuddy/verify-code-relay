@@ -19,7 +19,9 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /setup/totp", s.pendingOK(s.postTOTPSetup))
 	m.HandleFunc("GET /setup/totp.png", s.pendingOK(s.getTOTPQR))
 
-	m.HandleFunc("GET /{$}", s.authed(s.getHome))
+	m.HandleFunc("GET /{$}", s.authed(s.getDashboard))
+	m.HandleFunc("GET /api/status", s.authed(s.getAPIStatus))
+	m.HandleFunc("GET /logs", s.authed(s.getLogs))
 
 	m.HandleFunc("GET /settings", s.authed(s.getSettings))
 	m.HandleFunc("POST /settings/general", s.authed(s.postSettingsGeneral))
@@ -75,20 +77,4 @@ func (s *Server) static() http.Handler {
 		w.Header().Set("Cache-Control", "public, max-age=3600")
 		files.ServeHTTP(w, r)
 	})
-}
-
-// getHome is a placeholder overview until the dashboard (Task 12) replaces it.
-func (s *Server) getHome(w http.ResponseWriter, r *http.Request) {
-	snap := s.o.Runtime.Snapshot()
-	cfg := s.o.Runtime.Current()
-	d := homeData{Watchers: len(snap.Watchers), Applying: snap.Applying}
-	if cfg != nil {
-		d.Mailboxes, d.Bots, d.Targets = len(cfg.Config.Mailboxes), len(cfg.Config.Bots), len(cfg.Config.Targets)
-	}
-	s.render(w, r, http.StatusOK, "home", Page{Title: "總覽", Nav: "dashboard", Data: d})
-}
-
-type homeData struct {
-	Mailboxes, Bots, Targets, Watchers int
-	Applying                           bool
 }
