@@ -806,6 +806,7 @@
   */
 
   var OAUTH_POLL = 3000;
+  var OAUTH_GRACE = 15000; // after the code expired, how long network errors are still retried
   var oauth = { name: "", user: "", gen: 0, poll: 0, tick: 0, deadline: 0, life: 0, hasCode: false, done: false };
 
   function oq(sel) { var d = byId("dlg-oauth"); return d ? d.querySelector(sel) : null; }
@@ -819,10 +820,10 @@
     });
   }
 
-  // oauthStatus fills the status line: kind wait | ok | err.
+  // oauthStatus fills the status line: kind wait | ok | warn | err.
   function oauthStatus(kind, title, text) {
     var box = oq("[data-oauth-status]");
-    box.className = "oauth-status" + (kind === "ok" ? " is-ok" : kind === "err" ? " is-err" : "");
+    box.className = "oauth-status" + (kind === "wait" ? "" : " is-" + kind);
     var ic = oq("[data-oauth-status-icon]");
     ic.textContent = "";
     ic.appendChild(kind === "wait" ? el("span", "pulse-dot") : icon(kind === "ok" ? "check" : "alert"));
@@ -876,11 +877,14 @@
     if (retry) retry.focus();
   }
 
-  function oauthDone() {
+  // oauthDone shows the finished sign-in; warning (from the server) says the new token is
+  // stored but not in use yet.
+  function oauthDone(warning) {
     oauthStop();
     oauth.done = true;
     oauthView("done");
-    oauthStatus("ok", "授權完成", "信箱正在用新的授權重新連線。");
+    if (warning) oauthStatus("warn", "授權已儲存，但還沒有生效", warning);
+    else oauthStatus("ok", "授權完成", "信箱正在用新的授權重新連線。");
     var ok = oq('[data-oauth-only="done"]');
     if (ok) ok.focus();
   }
@@ -895,12 +899,16 @@
           else if (d.state === "pending") {
             oauthStatus("wait", "等待你在 Microsoft 完成登入", "這裡每 3 秒自動檢查一次。");
             oauthPoll(gen, OAUTH_POLL);
-          } else if (d.state === "done") oauthDone();
+          } else if (d.state === "done") oauthDone(d.warning);
           else if (d.state === "error") oauthFail(d.error || "授權失敗");
           else oauthFail("這組代碼已失效：信箱設定可能已變更，或服務已重新啟動。請按「重試」取得新的代碼。");
         },
         function (err) {
           if (gen !== oauth.gen) return;
+          if (Date.now() > oauth.deadline + OAUTH_GRACE) {
+            oauthFail("代碼已過期，而且無法連線到服務確認結果（" + err.message + "）。確認網路後請按「重試」。");
+            return;
+          }
           oauthStatus("wait", "暫時無法確認進度", err.message + "，稍後自動再試。");
           oauthPoll(gen, OAUTH_POLL);
         }
@@ -931,7 +939,7 @@
         oauthStatus("wait", "等待你在 Microsoft 完成登入", "這裡每 3 秒自動檢查一次。");
         var first = oq(".oauth-copy");
         if (first) first.focus();
-        if (d.state === "done") oauthDone();
+        if (d.state === "done") oauthDone(d.warning);
         else oauthPoll(gen, OAUTH_POLL);
       },
       function (err) { if (gen === oauth.gen) oauthFail(err.message); }

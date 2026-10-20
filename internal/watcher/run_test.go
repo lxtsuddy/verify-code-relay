@@ -119,8 +119,8 @@ func TestRunNeedsLoginStops(t *testing.T) {
 	if len(alerts) != 1 || alerts[0] != "needs_login:mb" {
 		t.Fatalf("alerts = %v", alerts)
 	}
-	if txt := e.alerts.alertText("needs_login:mb"); !strings.Contains(txt, "relay login mb") {
-		t.Errorf("alert text = %q, want the relay login command", txt)
+	if txt := e.alerts.alertText("needs_login:mb"); !strings.Contains(txt, "Web 管理介面的信箱頁重新授權") || !strings.Contains(txt, "relay login mb") {
+		t.Errorf("alert text = %q, want the Web admin and the relay login command", txt)
 	}
 }
 

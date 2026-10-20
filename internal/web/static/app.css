@@ -1134,6 +1134,8 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .oauth-status .pulse-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--blue); animation: pulse 1.6s ease-in-out infinite; }
 .oauth-status.is-ok { background: var(--green-50); border-color: var(--green-100); color: var(--green-800); }
 .oauth-status.is-ok b { color: var(--green-800); }
+.oauth-status.is-warn { background: var(--amber-50); border-color: var(--amber-100); color: var(--amber-ink); }
+.oauth-status.is-warn b { color: var(--amber-ink); }
 .oauth-status.is-err { background: var(--red-50); border-color: var(--red-100); color: var(--red-700); }
 .oauth-status.is-err b { color: var(--red-700); }
 .modal-oauth[data-state="loading"] .oauth-status { display: none; }

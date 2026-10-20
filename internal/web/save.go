@@ -48,6 +48,7 @@ func (s *Server) mutateAs(r *http.Request, source, summary string, fn func(raw *
 	if err != nil {
 		return nil, err
 	}
+	s.cancelStaleFlows(raw) // before the caller deletes any token
 	s.o.Runtime.Apply(b)
 	s.o.Log.Info("設定已儲存並套用", "version", id, "source", source, "summary", summary, "ip", ip)
 	return nil, nil

@@ -39,11 +39,11 @@ type Server struct {
 	saveMu sync.Mutex // serialises config changes (see mutate)
 
 	// Microsoft authorisation flows (msauth.go)
-	flowMu      sync.Mutex
-	flows       map[string]*deviceFlow // by mailbox
-	closed      bool                   // Close was called: no new flows
-	flowStartMu sync.Mutex             // serialises devicecode requests
-	flowWG      sync.WaitGroup         // running flow goroutines
+	flowMu     sync.Mutex
+	flows      map[string]*deviceFlow // by mailbox
+	closed     bool                   // Close was called: no new flows
+	startLocks map[string]*startLock  // serialise starts per mailbox
+	flowWG     sync.WaitGroup         // running flow goroutines
 
 	failMu      sync.Mutex
 	failures    []time.Time // failed logins within the last hour
@@ -70,7 +70,7 @@ func New(o Options) *Server {
 	if o.Telegram == nil {
 		o.Telegram = telegram.New()
 	}
-	s := &Server{o: o, mux: http.NewServeMux(), flows: map[string]*deviceFlow{}}
+	s := &Server{o: o, mux: http.NewServeMux(), flows: map[string]*deviceFlow{}, startLocks: map[string]*startLock{}}
 	s.limiter = websec.NewLimiter(1, 5, s.now)
 	s.assetV = assetVersion()
 	s.pages = s.parsePages()

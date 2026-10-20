@@ -27,6 +27,7 @@ type fakeMicrosoft struct {
 	polls    int
 	tenants  []string
 	devBody  string                    // devicecode reply (200)
+	devGate  map[string]chan struct{}  // by tenant: devicecode answers once the channel is closed
 	token    func(n int) (int, string) // n = 1 for the first poll
 }
 
@@ -64,7 +65,14 @@ func (f *fakeMicrosoft) serve(w http.ResponseWriter, r *http.Request) {
 	switch parts[3] {
 	case "devicecode":
 		f.devCalls++
-		status, body = 200, f.devBody
+		gate := f.devGate[parts[0]]
+		body = f.devBody
+		f.mu.Unlock()
+		if gate != nil {
+			<-gate
+		}
+		io.WriteString(w, body)
+		return
 	case "token":
 		f.polls++
 		token = f.token
@@ -263,37 +271,64 @@ func TestOAuthFlowErrorsAndRetry(t *testing.T) {
 	}
 }
 
-// Deleting the mailbox or changing its account while a flow waits cancels the flow, and
-// a token granted afterwards is never stored.
+// outlookForm is the edit form of withOutlookMailbox with fields changed by kv.
+func outlookForm(kv ...string) url.Values {
+	f := url.Values{"host": {"outlook.office365.com"}, "username": {"me@outlook.com"},
+		"auth_type": {"microsoft_oauth"}, "client_id": {"00000000-0000-0000-0000-000000000001"}, "tenant": {"consumers"},
+		"folders": {"INBOX"}, "targets": {"me"}}
+	for i := 0; i+1 < len(kv); i += 2 {
+		f.Set(kv[i], kv[i+1])
+	}
+	return f
+}
+
+// blockedGrant makes the token endpoint wait for release before granting; polled
+// receives a value at the first poll.
+func blockedGrant(ms *fakeMicrosoft) (polled <-chan struct{}, release chan struct{}) {
+	p := make(chan struct{}, 1)
+	release = make(chan struct{})
+	ms.setToken(func(int) (int, string) {
+		select {
+		case p <- struct{}{}:
+		default:
+		}
+		<-release // the user finishes signing in only when the test says so
+		return 200, fakeGrant
+	})
+	return p, release
+}
+
+// Deleting the mailbox or changing its account or authentication while a flow waits
+// cancels the flow, and a token granted afterwards is never stored.
 func TestOAuthFlowCancelledByMailboxChange(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
-		change func(e *env)
+		change func(e *env) *http.Response
 	}{
-		{"delete", func(e *env) { e.postForm("/mailboxes/outlook/delete", nil) }},
-		{"username", func(e *env) {
-			e.postForm("/mailboxes/outlook", url.Values{"host": {"outlook.office365.com"}, "username": {"other@outlook.com"},
-				"auth_type": {"microsoft_oauth"}, "client_id": {"00000000-0000-0000-0000-000000000001"}, "tenant": {"consumers"},
-				"folders": {"INBOX"}, "targets": {"me"}})
+		{"delete", func(e *env) *http.Response { r, _ := e.postForm("/mailboxes/outlook/delete", nil); return r }},
+		{"username", func(e *env) *http.Response {
+			r, _ := e.postForm("/mailboxes/outlook", outlookForm("username", "other@outlook.com"))
+			return r
+		}},
+		{"tenant", func(e *env) *http.Response {
+			r, _ := e.postForm("/mailboxes/outlook", outlookForm("tenant", "organizations"))
+			return r
+		}},
+		{"password", func(e *env) *http.Response {
+			r, _ := e.postForm("/mailboxes/outlook", outlookForm("auth_type", "password", "password", "app-password", "client_id", "", "tenant", ""))
+			return r
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ms := newFakeMicrosoft(t)
-			release := make(chan struct{})
-			polled := make(chan struct{}, 1)
-			ms.setToken(func(n int) (int, string) {
-				select {
-				case polled <- struct{}{}:
-				default:
-				}
-				<-release // the user finishes signing in only after the change
-				return 200, fakeGrant
-			})
+			polled, release := blockedGrant(ms)
 			e := newEnv(t, withOutlookMailbox, withFakeMicrosoft(ms))
 			e.login()
 			e.postJSON("/api/mailboxes/outlook/oauth/start", nil)
 			<-polled
-			tc.change(e)
+			if resp := tc.change(e); resp.StatusCode != http.StatusSeeOther {
+				t.Fatalf("change = %d", resp.StatusCode)
+			}
 			close(release)
 			if tc.name == "delete" {
 				if resp, _ := e.get("/api/mailboxes/outlook/oauth/status"); resp.StatusCode != 404 {
@@ -302,16 +337,137 @@ func TestOAuthFlowCancelledByMailboxChange(t *testing.T) {
 			} else {
 				e.waitOAuthState("outlook", "none")
 			}
-			time.Sleep(200 * time.Millisecond) // let a (wrong) save happen
+			e.srv.Close() // waits for the flow goroutine: any (wrong) save has happened by now
 			if _, ok, _ := e.st.GetOAuthToken(context.Background(), "outlook"); ok {
 				t.Error("token stored for a changed or deleted mailbox")
 			}
-			for _, m := range e.tg.messages() { // after the pause above: no need to wait 5 s
+			for _, m := range e.tg.messages() {
 				if strings.Contains(m.Text, "授權已完成") {
 					t.Error("a cancelled flow was reported as completed")
 				}
 			}
 		})
+	}
+}
+
+// Restoring a version with another client_id cancels the waiting flow.
+func TestOAuthFlowCancelledByRestore(t *testing.T) {
+	ms := newFakeMicrosoft(t)
+	polled, release := blockedGrant(ms)
+	e := newEnv(t, withOutlookMailbox, withFakeMicrosoft(ms)) // version 1: client_id …001
+	raw, _, err := loadRaw(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw.Mailboxes["outlook"].Auth.ClientID = "00000000-0000-0000-0000-000000000002"
+	saveRaw(e, raw) // version 2, the current one
+	e.login()
+	e.postJSON("/api/mailboxes/outlook/oauth/start", nil)
+	<-polled
+	if resp, _ := e.postForm("/settings/versions/1/restore", nil); resp.StatusCode != http.StatusSeeOther {
+		t.Fatalf("restore = %d", resp.StatusCode)
+	}
+	close(release)
+	e.waitOAuthState("outlook", "none")
+	e.srv.Close()
+	if _, ok, _ := e.st.GetOAuthToken(context.Background(), "outlook"); ok {
+		t.Error("token stored after the restore changed the client_id")
+	}
+}
+
+// Concurrent starts for one mailbox share one flow; a start for another mailbox does not
+// wait for them.
+func TestOAuthStartsArePerMailbox(t *testing.T) {
+	ms := newFakeMicrosoft(t)
+	ms.setToken(func(int) (int, string) { return 400, `{"error":"authorization_pending"}` })
+	gate := make(chan struct{})
+	ms.mu.Lock()
+	ms.devGate = map[string]chan struct{}{"consumers": gate}
+	ms.mu.Unlock()
+	opened := false
+	defer func() {
+		if !opened {
+			close(gate)
+		}
+	}()
+	e := newEnv(t, func(c *config.Config) {
+		withOutlookMailbox(c)
+		m := *c.Mailboxes["outlook"]
+		m.Username, m.Auth.Tenant = "me@contoso.com", "organizations"
+		c.Mailboxes["work"] = &m
+	}, withFakeMicrosoft(ms))
+	e.login()
+	answers := make(chan string, 2)
+	for range 2 {
+		go func() {
+			_, b := e.postJSON("/api/mailboxes/outlook/oauth/start", nil)
+			answers <- b
+		}()
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for ms.deviceCodeCalls() < 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("no devicecode request")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	other := make(chan *http.Response, 1)
+	go func() {
+		r, _ := e.postJSON("/api/mailboxes/work/oauth/start", nil)
+		other <- r
+	}()
+	select {
+	case r := <-other:
+		if r.StatusCode != 200 {
+			t.Errorf("work start = %d", r.StatusCode)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a start for another mailbox waited for outlook's")
+	}
+	opened = true
+	close(gate)
+	for range 2 {
+		if b := <-answers; !strings.Contains(b, "ABCD-EFGH") {
+			t.Errorf("outlook start = %s", b)
+		}
+	}
+	if n := ms.deviceCodeCalls(); n != 2 {
+		t.Errorf("devicecode calls = %d, want one per mailbox", n)
+	}
+}
+
+// When applying the config fails after a successful sign-in, the token is kept and both
+// the page and the notification say that it is not in use yet.
+func TestOAuthReloadFailureIsReported(t *testing.T) {
+	ms := newFakeMicrosoft(t)
+	polled, release := blockedGrant(ms)
+	e := newEnv(t, withOutlookMailbox, withFakeMicrosoft(ms))
+	e.login()
+	e.postJSON("/api/mailboxes/outlook/oauth/start", nil)
+	<-polled
+	// a stored config that does not build (written around the validation)
+	raw, _, err := loadRaw(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw.Targets["ghost"] = config.Target{Bot: "missing", ChatID: 1}
+	data, err := config.Encode(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.st.SaveConfigVersion(context.Background(), store.ConfigVersion{CreatedAt: e.now, Source: "test", YAML: string(data)}); err != nil {
+		t.Fatal(err)
+	}
+	close(release)
+	st := e.waitOAuthState("outlook", "done")
+	if w, _ := st["warning"].(string); !strings.Contains(w, "重新套用設定失敗") {
+		t.Errorf("warning = %q", w)
+	}
+	if _, ok, _ := e.st.GetOAuthToken(context.Background(), "outlook"); !ok {
+		t.Error("token not kept")
+	}
+	if !e.notified("重新套用設定失敗") {
+		t.Error("the failed reload was not notified")
 	}
 }
 

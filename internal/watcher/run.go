@@ -57,7 +57,7 @@ func (w *Watcher) Run(ctx context.Context) {
 			w.setStatus(StatusNeedsLogin)
 			name := w.cfg.Mailbox.Name
 			w.log.Error("OAuth 授權失效，停止監看", "err", err)
-			w.cfg.Alert.Alert("needs_login:"+name, fmt.Sprintf("信箱 %s 的 Microsoft 授權已失效，請執行：relay login %s", name, name))
+			w.cfg.Alert.Alert("needs_login:"+name, fmt.Sprintf("信箱 %s 的 Microsoft 授權已失效，請到 Web 管理介面的信箱頁重新授權（或執行 relay login %s）", name, name))
 			return
 		case errors.As(err, &ae):
 			w.setStatus(StatusAuthFailed)

@@ -539,7 +539,6 @@ func (s *Server) saveMailbox(w http.ResponseWriter, r *http.Request, name string
 	}
 	done := "已儲存信箱 " + key + " 並套用"
 	if dropToken {
-		s.cancelFlow(key) // before deleting: a flow for the old account must not save its token
 		// after the save, as on delete: a failed save must not lose the token
 		if err := s.o.Store.DeleteOAuthToken(r.Context(), key); err != nil {
 			s.o.Log.Warn("刪除信箱的 OAuth token 失敗", "mailbox", key, "err", err)
@@ -616,7 +615,6 @@ func (s *Server) postMailboxDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// after the change is stored: a failed save must not lose the token
-	s.cancelFlow(name)
 	if err := s.o.Store.DeleteOAuthToken(r.Context(), name); err != nil {
 		s.o.Log.Warn("刪除信箱的 OAuth token 失敗", "mailbox", name, "err", err)
 		s.redirect(w, r, "/mailboxes", &Flash{Kind: "info", Text: "已刪除信箱 " + name + "，但它的 Microsoft 授權沒有清除成功，詳情請看服務日誌"})
