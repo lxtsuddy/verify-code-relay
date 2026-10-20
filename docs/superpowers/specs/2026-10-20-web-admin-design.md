@@ -109,7 +109,7 @@ CREATE TABLE sessions (
 - 以互斥鎖序列化，同一時間只有一次重載。
 - 停掉舊服務（cancel context → 等待 watchers、dispatcher、pruneLoop 結束；超過 30 秒記錄警告並繼續等待），再以新設定建立並啟動服務。資料庫與 HTTP 伺服器不中斷。
 - 重載期間狀態為「套用中」。IMAP 連線會重建；補抓依 `last_uid`，不漏信；outbox 在資料庫中，不遺失。
-- 建立新服務失敗（驗證已擋下，理論上不會發生）時：記錄錯誤、發告警，並以前一版設定重新啟動。
+- 驗證與編譯（`runtime.Build`）在寫入資料庫與 `Apply` 之前完成，`Apply` 只接受已建好的設定，因此不會失敗，不需要回復前一版的機制。
 
 `runtime` 同時提供狀態快照：各 watcher 的 key 與狀態、待發佇列數量、服務是否套用中。
 
