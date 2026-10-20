@@ -3,6 +3,7 @@ package watcher
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -35,11 +36,12 @@ func TestRunReconnectsAfterKill(t *testing.T) {
 	eventually(t, "redialled", func() bool { return e.dialer.count.Load() >= 2 && e.w.Status() == StatusConnected })
 	// dial() bumps count before it registers the new conn, so wait for the second
 	// conn itself; otherwise last() could still be the killed one.
-	eventually(t, "second connection idling", func() bool {
+	eventually(t, "second connection registered", func() bool {
 		e.dialer.mu.Lock()
 		defer e.dialer.mu.Unlock()
-		return len(e.dialer.conns) >= 2 && e.dialer.conns[len(e.dialer.conns)-1].idles.Load() >= 1
+		return len(e.dialer.conns) >= 2
 	})
+	waitIdle(t, e)
 	e.srv.appendMsg(t, "after reconnect")
 	eventually(t, "uid 1 processed", func() bool { return equalUIDs(e.proc.got(), 1) })
 }
@@ -117,6 +119,126 @@ func TestRunNeedsLoginStops(t *testing.T) {
 	if len(alerts) != 1 || alerts[0] != "needs_login:mb" {
 		t.Fatalf("alerts = %v", alerts)
 	}
+	if txt := e.alerts.alertText("needs_login:mb"); !strings.Contains(txt, "relay login mb") {
+		t.Errorf("alert text = %q, want the relay login command", txt)
+	}
+}
+
+func TestRunStoppedAfterCancelWhileConnected(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	stop := startRun(t, e)
+	eventually(t, "connected", func() bool { return e.w.Status() == StatusConnected })
+	stop()
+	if s := e.w.Status(); s != StatusStopped {
+		t.Fatalf("status = %s, want stopped", s)
+	}
+}
+
+func TestRunStoppedAfterCancelDuringBackoff(t *testing.T) {
+	e := newEnv(t, nil, func(c *Config) {
+		c.MinBackoff = time.Minute
+		c.MaxBackoff = time.Minute
+	})
+	e.dialer.fail.Store(true)
+	stop := startRun(t, e)
+	eventually(t, "waiting to redial", func() bool { return e.w.Status() == StatusReconnecting })
+	stop() // fails if Run sleeps out the one-minute backoff
+	if s := e.w.Status(); s != StatusStopped {
+		t.Fatalf("status = %s, want stopped", s)
+	}
+}
+
+func TestRunDisconnectedAlertedOnlyOnce(t *testing.T) {
+	e := newEnv(t, nil, func(c *Config) { c.AlertAfter = 50 * time.Millisecond })
+	e.dialer.fail.Store(true)
+	stop := startRun(t, e)
+	defer stop()
+	eventually(t, "disconnected alert", func() bool {
+		a, _ := e.alerts.snapshot()
+		return len(a) >= 1
+	})
+	base := e.dialer.count.Load()
+	eventually(t, "more failed dials", func() bool { return e.dialer.count.Load()-base >= 4 })
+	if a, _ := e.alerts.snapshot(); len(a) != 1 || a[0] != "disconnected:mb/INBOX" {
+		t.Fatalf("alerts = %v, want a single disconnected alert", a)
+	}
+}
+
+// switchAuth logs in with the right or the wrong password.
+type switchAuth struct{ bad atomic.Bool }
+
+func (a *switchAuth) Authenticate(ctx context.Context, c *imapclient.Client) error {
+	pw := "pw"
+	if a.bad.Load() {
+		pw = "nope"
+	}
+	return auth.Password{Username: "me@example.com", Password: pw}.Authenticate(ctx, c)
+}
+
+func TestRunAuthRecovered(t *testing.T) {
+	sw := &switchAuth{}
+	sw.bad.Store(true)
+	e := newEnv(t, nil, func(c *Config) { c.Auth = sw })
+	stop := startRun(t, e)
+	defer stop()
+	eventually(t, "auth alert", func() bool {
+		a, _ := e.alerts.snapshot()
+		return len(a) == 1 && a[0] == "auth:mb/INBOX" && e.w.Status() == StatusAuthFailed
+	})
+	if txt := e.alerts.alertText("auth:mb/INBOX"); !strings.Contains(txt, "認證失敗") {
+		t.Errorf("alert text = %q", txt)
+	}
+	sw.bad.Store(false)
+	eventually(t, "recovered", func() bool {
+		_, r := e.alerts.snapshot()
+		return len(r) == 1 && r[0] == "auth:mb/INBOX" && e.w.Status() == StatusConnected
+	})
+	if txt := e.alerts.recoveredText("auth:mb/INBOX"); !strings.Contains(txt, "認證已恢復") {
+		t.Errorf("recovered text = %q", txt)
+	}
+	if a, _ := e.alerts.snapshot(); len(a) != 1 {
+		t.Errorf("alerts = %v, want only the auth alert", a)
+	}
+}
+
+// An auth failure suppresses the disconnected alert, but once the failure turns
+// into a network one the disconnected alert is raised. The outage is counted
+// from the first failure of either kind, so with AlertAfter already elapsed it
+// fires on the first network failure.
+func TestRunAuthFailureThenNetworkFailureAlerts(t *testing.T) {
+	sw := &switchAuth{}
+	sw.bad.Store(true)
+	e := newEnv(t, nil, func(c *Config) {
+		c.Auth = sw
+		c.AlertAfter = 100 * time.Millisecond
+	})
+	stop := startRun(t, e)
+	defer stop()
+	eventually(t, "auth alert", func() bool {
+		a, _ := e.alerts.snapshot()
+		return len(a) == 1 && a[0] == "auth:mb/INBOX"
+	})
+	time.Sleep(150 * time.Millisecond) // past AlertAfter, still only the auth alert
+	if a, _ := e.alerts.snapshot(); len(a) != 1 {
+		t.Fatalf("alerts = %v during the auth failure", a)
+	}
+	e.dialer.fail.Store(true)
+	eventually(t, "disconnected alert", func() bool {
+		a, _ := e.alerts.snapshot()
+		return len(a) == 2 && a[1] == "disconnected:mb/INBOX"
+	})
+	if txt := e.alerts.alertText("disconnected:mb/INBOX"); !strings.Contains(txt, "無法連線") {
+		t.Errorf("alert text = %q", txt)
+	}
+	if e.w.Status() != StatusReconnecting {
+		t.Errorf("status = %s", e.w.Status())
+	}
+	e.dialer.fail.Store(false)
+	sw.bad.Store(false)
+	eventually(t, "both recovered", func() bool {
+		_, r := e.alerts.snapshot()
+		return len(r) == 2 && e.w.Status() == StatusConnected
+	})
 }
 
 func TestRunDisconnectedAlertAndRecovery(t *testing.T) {
@@ -131,11 +253,44 @@ func TestRunDisconnectedAlertAndRecovery(t *testing.T) {
 	if e.w.Status() != StatusReconnecting {
 		t.Errorf("status = %s", e.w.Status())
 	}
+	if txt := e.alerts.alertText("disconnected:mb/INBOX"); !strings.Contains(txt, "無法連線") || !strings.Contains(txt, "dial refused") {
+		t.Errorf("alert text = %q, want 無法連線 with the dial error", txt)
+	}
 	e.dialer.fail.Store(false)
 	eventually(t, "recovered", func() bool {
 		_, r := e.alerts.snapshot()
 		return len(r) == 1 && r[0] == "disconnected:mb/INBOX"
 	})
+	if txt := e.alerts.recoveredText("disconnected:mb/INBOX"); !strings.Contains(txt, "已恢復連線") {
+		t.Errorf("recovered text = %q", txt)
+	}
+}
+
+// When the server is reachable but the first catch-up keeps failing, the alert
+// must say the catch-up fails, not that the server cannot be reached.
+func TestRunCatchUpFailureAlertText(t *testing.T) {
+	e := newEnv(t, nil, func(c *Config) { c.AlertAfter = 100 * time.Millisecond })
+	initWatermark(t, e)
+	e.srv.appendMsg(t, "always fails")
+	e.proc.failAll.Store(true)
+	stop := startRun(t, e)
+	defer stop()
+	eventually(t, "disconnected alert", func() bool {
+		a, _ := e.alerts.snapshot()
+		return len(a) == 1 && a[0] == "disconnected:mb/INBOX"
+	})
+	txt := e.alerts.alertText("disconnected:mb/INBOX")
+	if !strings.Contains(txt, "無法完成補抓") || strings.Contains(txt, "無法連線") || !strings.Contains(txt, "boom") {
+		t.Errorf("alert text = %q, want 無法完成補抓 with the processing error", txt)
+	}
+	e.proc.failAll.Store(false)
+	eventually(t, "recovered", func() bool {
+		_, r := e.alerts.snapshot()
+		return len(r) == 1 && r[0] == "disconnected:mb/INBOX"
+	})
+	if txt := e.alerts.recoveredText("disconnected:mb/INBOX"); strings.Contains(txt, "連線") {
+		t.Errorf("recovered text = %q, must not talk about the connection", txt)
+	}
 }
 
 func TestRunDisconnectedAlertFiresAtDeadlineNotAfterBackoff(t *testing.T) {

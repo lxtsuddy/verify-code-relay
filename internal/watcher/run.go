@@ -26,6 +26,7 @@ func (w *Watcher) Run(ctx context.Context) {
 	backoff := w.cfg.MinBackoff
 	var downSince time.Time
 	alertedDown, alertedAuth := false, false
+	alertedCatchUp := false // the down alert was about a failing catch-up, not the connection
 
 	for {
 		err := w.session(ctx, func() {
@@ -34,7 +35,11 @@ func (w *Watcher) Run(ctx context.Context) {
 			backoff = w.cfg.MinBackoff
 			downSince = time.Time{}
 			if alertedDown {
-				w.cfg.Alert.Recovered("disconnected:"+key, fmt.Sprintf("信箱 %s 已恢復連線", key))
+				text := fmt.Sprintf("信箱 %s 已恢復連線", key)
+				if alertedCatchUp {
+					text = fmt.Sprintf("信箱 %s 已完成補抓，恢復監看", key)
+				}
+				w.cfg.Alert.Recovered("disconnected:"+key, text)
 				alertedDown = false
 			}
 			if alertedAuth {
@@ -70,7 +75,14 @@ func (w *Watcher) Run(ctx context.Context) {
 		// An auth failure is already covered by the auth:<key> alert.
 		if ae == nil && !alertedDown {
 			if w.now().Sub(downSince) >= w.cfg.AlertAfter {
-				w.cfg.Alert.Alert("disconnected:"+key, fmt.Sprintf("信箱 %s 已超過 %s 無法連線：%v", key, w.cfg.AlertAfter, err))
+				// The key stays disconnected:<key> so that Recovered pairs with either text.
+				var ce *catchUpError
+				alertedCatchUp = errors.As(err, &ce)
+				what := "無法連線"
+				if alertedCatchUp {
+					what = "無法完成補抓"
+				}
+				w.cfg.Alert.Alert("disconnected:"+key, fmt.Sprintf("信箱 %s 已超過 %s %s：%v", key, w.cfg.AlertAfter, what, err))
 				alertedDown = true
 			} else if rem := w.cfg.AlertAfter - w.now().Sub(downSince); rem < wait {
 				// Wake at the alert deadline instead of sleeping past it.
