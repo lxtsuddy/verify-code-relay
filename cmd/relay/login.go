@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -41,7 +42,8 @@ func cmdLogin(configPath string, args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 	defer st.Close()
-	ms := &auth.Microsoft{Mailbox: name, Username: m.Username, ClientID: m.Auth.ClientID, Tenant: m.Auth.Tenant, Store: st}
+	ms := &auth.Microsoft{Mailbox: name, Username: m.Username, ClientID: m.Auth.ClientID, Tenant: m.Auth.Tenant, Store: st,
+		Log: slog.New(slog.NewTextHandler(stderr, nil))}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	dc, err := ms.StartDeviceLogin(ctx)
