@@ -33,8 +33,9 @@ func (s *Server) static() http.Handler {
 	}
 	files := http.StripPrefix("/static/", http.FileServerFS(sub))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/") {
-			s.notFound(w, r)
+		name := strings.TrimPrefix(r.URL.Path, "/static/")
+		if fi, err := fs.Stat(sub, name); err != nil || fi.IsDir() {
+			s.notFound(w, r) // keeps no-store: a missing file must not be cached
 			return
 		}
 		w.Header().Set("Cache-Control", "public, max-age=3600")

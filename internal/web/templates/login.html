@@ -3,12 +3,12 @@
 <section class="auth-card" aria-labelledby="login-title">
   <header class="auth-head">
     <h1 id="login-title" class="auth-title">登入管理後台</h1>
-    {{if .Data.Bound}}<p class="auth-sub">輸入密碼，以及手機驗證器 App 上的 6 位數驗證碼。</p>
-    {{else if .Data.HasAdmin}}<p class="auth-sub">第一次登入只需要密碼，接著會帶你綁定兩步驟驗證。</p>{{end}}
+    {{if .Data.HasAdmin}}<p class="auth-sub">輸入密碼，以及手機驗證器 App 上的 6 位數驗證碼。</p>{{end}}
   </header>
   {{template "form-error" .}}
   {{if .Data.HasAdmin}}
   <form class="form" method="post" action="/login">
+    <input type="text" name="username" value="admin" autocomplete="username" hidden>
     <div class="field">
       <label class="label" for="password">密碼</label>
       <div class="secret">
@@ -16,13 +16,11 @@
         <button type="button" class="secret-toggle" data-reveal="password" aria-label="顯示密碼" aria-pressed="false">{{template "icon" "eye"}}</button>
       </div>
     </div>
-    {{if .Data.Bound}}
     <div class="field">
       <label class="label" for="code">驗證碼</label>
-      <input class="otp-input" id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required aria-describedby="code-hint" data-otp data-autosubmit>
-      <p class="hint" id="code-hint">驗證碼每 30 秒更新；輸入完 6 位數會自動送出。</p>
+      <input class="otp-input" id="code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" aria-describedby="code-hint" data-otp data-autosubmit>
+      <p class="hint" id="code-hint">驗證碼每 30 秒更新，輸入完 6 位數會自動送出。第一次登入、還沒綁定兩步驟驗證時留空即可。</p>
     </div>
-    {{end}}
     <button type="submit" class="btn btn-primary btn-lg btn-block" data-busy-text="登入中…">登入</button>
   </form>
   {{else}}

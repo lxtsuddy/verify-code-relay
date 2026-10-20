@@ -131,18 +131,53 @@ func TestSessionAbsoluteLifetime(t *testing.T) {
 	t.Fatal("session outlived 12 hours")
 }
 
-func TestLoginPageShowsCodeOnlyWhenBound(t *testing.T) {
+// TestLoginPageHidesBindingState: the login form looks the same whether or not TOTP is
+// bound, so a visitor cannot tell.
+func TestLoginPageHidesBindingState(t *testing.T) {
 	e := newEnv(t, nil)
-	if _, body := e.get("/login"); !strings.Contains(body, `name="code"`) {
-		t.Error("bound admin: login form must ask for the code")
-	}
 	n := newEnvNoTOTP(t)
-	if _, body := n.get("/login"); strings.Contains(body, `name="code"`) || !strings.Contains(body, "第一次登入") {
-		t.Error("unbound admin: login form must not ask for a code")
+	_, bound := e.get("/login")
+	_, unbound := n.get("/login")
+	if !strings.Contains(bound, `name="code"`) || bound != unbound {
+		t.Error("login page differs between bound and unbound TOTP")
 	}
 	e.login()
 	if resp, _ := e.get("/login"); resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/" {
 		t.Errorf("signed-in GET /login = %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+}
+
+func TestFirstLoginNotifiesAndBindingEndsOtherSessions(t *testing.T) {
+	e := newEnvNoTOTP(t)
+	other := e.clone()
+	// a password-only session elsewhere (the code field is sent but ignored while unbound)
+	if resp, _ := other.postForm("/login", url.Values{"password": {testPassword}, "code": {""}}); resp.StatusCode != 303 {
+		t.Fatalf("other first login = %d", resp.StatusCode)
+	}
+	if !e.notified("兩步驟驗證尚未綁定") {
+		t.Error("first (password-only) login must notify")
+	}
+	e.postForm("/login", url.Values{"password": {testPassword}})
+	_, page := e.get("/setup/totp")
+	e.csrf = extractCSRF(page)
+	a, _, _ := e.st.GetAdmin(context.Background())
+	code, _ := websec.TOTPCode(a.TOTPPending, websec.TOTPStep(e.now))
+	if resp, _ := e.postForm("/setup/totp", url.Values{"code": {code}}); resp.StatusCode != 303 {
+		t.Fatalf("bind = %d", resp.StatusCode)
+	}
+	if resp, _ := other.get("/"); resp.StatusCode != 303 || resp.Header.Get("Location") != "/login" {
+		t.Fatalf("pending session elsewhere survived binding: %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	if resp, _ := e.get("/"); resp.StatusCode != 200 {
+		t.Fatalf("binding session lost: %d", resp.StatusCode)
+	}
+}
+
+func TestNormalizeCode(t *testing.T) {
+	for in, want := range map[string]string{"123456": "123456", " 123 456 ": "123456", "123-456": "123456", "123\u00a0456": "123456"} {
+		if got := normalizeCode(in); got != want {
+			t.Errorf("normalizeCode(%q) = %q", in, got)
+		}
 	}
 }
 

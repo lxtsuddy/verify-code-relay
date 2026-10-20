@@ -6,7 +6,6 @@ import (
 	"net/url"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestSecurityHeaders(t *testing.T) {
@@ -14,7 +13,7 @@ func TestSecurityHeaders(t *testing.T) {
 	resp, _ := e.get("/login")
 	h := resp.Header
 	if !strings.Contains(h.Get("Content-Security-Policy"), "script-src 'self'") || h.Get("X-Frame-Options") != "DENY" ||
-		h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Referrer-Policy") != "no-referrer" || h.Get("Cache-Control") != "no-store" {
+		h.Get("X-Content-Type-Options") != "nosniff" || h.Get("Referrer-Policy") != "same-origin" || h.Get("Cache-Control") != "no-store" {
 		t.Errorf("headers = %v", h)
 	}
 }
@@ -103,24 +102,50 @@ func TestOriginRules(t *testing.T) {
 	if c := post(func(h http.Header) { h.Set("Origin", "https://evil.example"); h.Set("Sec-Fetch-Site", "same-origin") }); c != 403 {
 		t.Errorf("foreign Origin with Sec-Fetch-Site same-origin = %d", c)
 	}
+	if c := post(func(h http.Header) { h.Set("Origin", "null"); h.Set("Sec-Fetch-Site", "same-origin") }); c != 403 {
+		t.Errorf("Origin null with Sec-Fetch-Site same-origin = %d", c)
+	}
 	if c := post(func(h http.Header) { h.Set("Referer", e.ts.URL+"/settings") }); c != 303 {
 		t.Errorf("same-origin Referer = %d", c)
 	}
 }
 
-// TestSameOriginFormPostWithNullOrigin: with Referrer-Policy no-referrer, browsers send
-// "Origin: null" and no Referer on same-origin form posts, plus Sec-Fetch-Site.
-func TestSameOriginFormPostWithNullOrigin(t *testing.T) {
+// TestOriginScheme: https origins only, except plain http on a loopback host
+// (kubectl port-forward).
+func TestOriginScheme(t *testing.T) {
 	e := newEnv(t, nil)
-	e.root().now = e.now.Add(30 * time.Second)
-	form := url.Values{"password": {testPassword}, "code": {e.code()}}
-	req, _ := http.NewRequest("POST", e.ts.URL+"/login", strings.NewReader(form.Encode()))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("Origin", "null")
-	req.Header.Set("Sec-Fetch-Site", "same-origin")
-	resp, _ := e.do(req)
-	if resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/" {
-		t.Fatalf("browser form login = %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	post := func(host, origin string) int {
+		e.login()
+		req, _ := http.NewRequest("POST", e.ts.URL+"/logout", strings.NewReader("csrf="+url.QueryEscape(e.csrf)))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Host = host
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		// the cookie jar keys on req.Host, so send the session cookie by hand
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: e.sessionCookie()})
+		resp, err := (&http.Client{Transport: e.c.Transport, CheckRedirect: e.c.CheckRedirect}).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	for _, c := range []struct {
+		host, origin string
+		want         int
+	}{
+		{"relay.example.com", "https://relay.example.com", 303},
+		{"relay.example.com", "https://RELAY.example.com", 303},
+		{"relay.example.com", "http://relay.example.com", 403},
+		{"relay.example.com", "https://relay.example.com:8443", 403},
+		{"localhost:8080", "http://localhost:8080", 303},
+		{"127.0.0.1:8080", "http://127.0.0.1:8080", 303},
+		{"[::1]:8080", "http://[::1]:8080", 303},
+		{"localhost:8080", "ftp://localhost:8080", 403},
+	} {
+		if got := post(c.host, c.origin); got != c.want {
+			t.Errorf("Host %s, Origin %s = %d, want %d", c.host, c.origin, got, c.want)
+		}
 	}
 }
 
@@ -135,6 +160,9 @@ func TestStaticFiles(t *testing.T) {
 	}
 	if resp, _ := e.get("/static/"); resp.StatusCode != 404 {
 		t.Errorf("directory listing = %d", resp.StatusCode)
+	}
+	if resp, _ := e.get("/static/nope.css"); resp.StatusCode != 404 || resp.Header.Get("Cache-Control") != "no-store" {
+		t.Errorf("missing static file = %d cache %q", resp.StatusCode, resp.Header.Get("Cache-Control"))
 	}
 	_, page := e.get("/login")
 	if !strings.Contains(page, `href="/static/app.css?v=`) || !strings.Contains(page, `src="/static/app.js?v=`) {

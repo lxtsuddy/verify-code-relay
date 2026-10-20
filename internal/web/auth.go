@@ -8,9 +8,10 @@ import (
 	"verify-code-relay/internal/websec"
 )
 
+// loginData never says whether TOTP is bound: the form is the same either way, so a
+// visitor cannot learn the binding state.
 type loginData struct {
 	HasAdmin bool
-	Bound    bool // TOTP bound: the form asks for a code
 }
 
 func (s *Server) getLogin(w http.ResponseWriter, r *http.Request) {
@@ -26,12 +27,12 @@ func (s *Server) getLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) renderLogin(w http.ResponseWriter, r *http.Request, status int, msg string) {
-	admin, ok, err := s.o.Store.GetAdmin(r.Context())
+	_, ok, err := s.o.Store.GetAdmin(r.Context())
 	if err != nil {
 		s.serverError(w, r, err)
 		return
 	}
-	p := Page{Title: "登入", Data: loginData{HasAdmin: ok, Bound: ok && admin.TOTPSecret != ""}}
+	p := Page{Title: "登入", Data: loginData{HasAdmin: ok}}
 	if msg != "" {
 		p.Errors = FieldErrors{"": msg}
 	}
@@ -60,11 +61,12 @@ func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	if admin.TOTPSecret == "" { // first login: password only, then forced TOTP binding
 		if pwOK {
-			if err := s.startSession(w, r, ip); err != nil {
+			if _, err := s.startSession(w, r, ip); err != nil {
 				s.serverError(w, r, err)
 				return
 			}
 			s.o.Log.Info("Web 首次登入，等待綁定兩步驟驗證", "ip", ip)
+			s.notifyLogin(ip, r.UserAgent(), true)
 			http.Redirect(w, r, "/setup/totp", http.StatusSeeOther)
 			return
 		}
@@ -77,12 +79,12 @@ func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if used {
-				if err := s.startSession(w, r, ip); err != nil {
+				if _, err := s.startSession(w, r, ip); err != nil {
 					s.serverError(w, r, err)
 					return
 				}
 				s.o.Log.Info("Web 登入成功", "ip", ip)
-				s.notifyLogin(ip, r.UserAgent())
+				s.notifyLogin(ip, r.UserAgent(), false)
 				http.Redirect(w, r, "/", http.StatusSeeOther)
 				return
 			}
@@ -98,7 +100,7 @@ func (s *Server) postLogin(w http.ResponseWriter, r *http.Request) {
 
 // normalizeCode drops the spaces and dashes people type or paste inside a code.
 func normalizeCode(c string) string {
-	return strings.NewReplacer(" ", "", "-", "", " ", "").Replace(strings.TrimSpace(c))
+	return strings.NewReplacer(" ", "", "-", "", "\u00a0", "").Replace(strings.TrimSpace(c))
 }
 
 func (s *Server) postLogout(w http.ResponseWriter, r *http.Request) {
@@ -170,17 +172,33 @@ func (s *Server) postTOTPSetup(w http.ResponseWriter, r *http.Request) {
 		s.renderTOTPSetup(w, r, http.StatusUnprocessableEntity, admin.TOTPPending, admin.TOTPSecret != "", "驗證碼不正確，請確認手機時間")
 		return
 	}
-	if err := s.o.Store.ConfirmTOTP(r.Context(), admin.TOTPPending, step); err != nil {
+	first := admin.TOTPSecret == ""
+	ctx := r.Context()
+	// Every session is "pending" until the first binding and becomes fully privileged the
+	// moment it happens, so on first binding only this session may survive: drop the others
+	// before binding, and again afterwards in case one was created meanwhile.
+	if first {
+		if err := s.o.Store.DeleteOtherSessions(ctx, sessionFrom(ctx).TokenHash); err != nil {
+			s.serverError(w, r, err)
+			return
+		}
+	}
+	if err := s.o.Store.ConfirmTOTP(ctx, admin.TOTPPending, step); err != nil {
 		s.serverError(w, r, err)
 		return
 	}
 	ip := websec.ClientIP(r, s.o.TrustedProxies)
 	// the session just gained full access: give it a new token
-	if err := s.startSession(w, r, ip); err != nil {
+	newHash, err := s.startSession(w, r, ip)
+	if err != nil {
 		s.serverError(w, r, err)
 		return
 	}
-	if admin.TOTPSecret == "" {
+	if first {
+		if err := s.o.Store.DeleteOtherSessions(ctx, newHash); err != nil {
+			s.serverError(w, r, err)
+			return
+		}
 		s.o.Log.Info("Web 後台已完成 TOTP 綁定", "ip", ip)
 		s.o.Runtime.Notify("Web 後台已完成 TOTP 綁定")
 	} else {

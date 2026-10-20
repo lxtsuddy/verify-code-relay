@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 
@@ -19,7 +20,7 @@ func (s *Server) securityHeaders(next http.Handler) http.Handler {
 		h.Set("Content-Security-Policy", csp)
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("Referrer-Policy", "same-origin") // no-referrer would make browsers send "Origin: null" on our own form posts
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
 		h.Set("Cache-Control", "no-store") // the static handler overrides this
 		next.ServeHTTP(w, r)
@@ -31,13 +32,13 @@ func safeMethod(r *http.Request) bool {
 }
 
 // checkOrigin rejects every non-GET/HEAD request that a browser did not send from this
-// site. The Origin header (or, without one, Referer) must name this host.
+// site:
+//   - Sec-Fetch-Site, when present, must be "same-origin";
+//   - Origin (or, without one, Referer) must name this host with scheme https — or http
+//     when the host is loopback (kubectl port-forward). "Origin: null", a foreign origin or
+//     neither header is rejected.
 //
-// Exception: our Referrer-Policy (no-referrer) makes browsers send "Origin: null" — and no
-// Referer — on same-origin form posts. Such a request is accepted only when the browser
-// itself vouches for it with "Sec-Fetch-Site: same-origin" (a header pages cannot set).
-// Any other Sec-Fetch-Site value is rejected outright, and so is a request with no usable
-// Origin, Referer or Sec-Fetch-Site.
+// Referrer-Policy same-origin makes browsers send a real Origin on our own form posts.
 func (s *Server) checkOrigin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if safeMethod(r) {
@@ -45,20 +46,12 @@ func (s *Server) checkOrigin(next http.Handler) http.Handler {
 			return
 		}
 		site := r.Header.Get("Sec-Fetch-Site")
-		origin := r.Header.Get("Origin")
-		var ok bool
-		switch {
-		case site != "" && site != "same-origin":
-			ok = false
-		case origin != "" && origin != "null":
-			ok = sameHost(origin, r.Host)
-		case site == "same-origin":
-			ok = true
-		default:
-			ok = sameHost(r.Header.Get("Referer"), r.Host)
+		src := r.Header.Get("Origin")
+		if src == "" {
+			src = r.Header.Get("Referer")
 		}
-		if !ok {
-			s.o.Log.Warn("拒絕跨來源請求", "method", r.Method, "path", r.URL.Path, "origin", truncate(origin, 100),
+		if (site != "" && site != "same-origin") || !sameOrigin(src, r.Host) {
+			s.o.Log.Warn("拒絕跨來源請求", "method", r.Method, "path", r.URL.Path, "origin", truncate(src, 100),
 				"sec_fetch_site", truncate(site, 30), "ip", websec.ClientIP(r, s.o.TrustedProxies))
 			s.fail(w, r, http.StatusForbidden, "請求來源不符。請從管理介面本身操作；若持續發生，請重新整理頁面。")
 			return
@@ -68,13 +61,31 @@ func (s *Server) checkOrigin(next http.Handler) http.Handler {
 	})
 }
 
-// sameHost reports whether the URL src names host (compared case-insensitively).
-func sameHost(src, host string) bool {
+// sameOrigin reports whether the URL src is this site: its host equals host (compared
+// case-insensitively) and its scheme is https, or http for a loopback host.
+func sameOrigin(src, host string) bool {
 	if src == "" {
 		return false
 	}
 	u, err := url.Parse(src)
-	return err == nil && u.Host != "" && strings.EqualFold(u.Host, host)
+	if err != nil || u.Host == "" || !strings.EqualFold(u.Host, host) {
+		return false
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return true
+	case "http":
+		return isLoopback(u.Hostname())
+	}
+	return false
+}
+
+func isLoopback(h string) bool {
+	if strings.EqualFold(h, "localhost") {
+		return true
+	}
+	a, err := netip.ParseAddr(h)
+	return err == nil && a.IsLoopback()
 }
 
 // public routes need nothing.

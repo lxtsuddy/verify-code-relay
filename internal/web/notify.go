@@ -10,8 +10,13 @@ const (
 	failThreshold = 10 // more failures than this within failWindow trigger a summary
 )
 
-// notifyLogin tells the admin about a successful sign-in. Never include secrets.
-func (s *Server) notifyLogin(ip, ua string) {
+// notifyLogin tells the admin about a successful sign-in; pending marks a password-only
+// first login whose TOTP is not bound yet. Never include secrets.
+func (s *Server) notifyLogin(ip, ua string, pending bool) {
+	if pending {
+		s.o.Runtime.Notify(fmt.Sprintf("Web 後台登入成功（IP %s，%s），兩步驟驗證尚未綁定。若不是你本人，請立即執行 relay admin reset。", ip, truncate(ua, 120)))
+		return
+	}
 	s.o.Runtime.Notify(fmt.Sprintf("Web 後台登入成功（IP %s，%s）", ip, truncate(ua, 120)))
 }
 
