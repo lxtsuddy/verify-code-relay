@@ -19,11 +19,12 @@ var authedPosts = []string{
 	"/telegram/targets", "/telegram/targets/me", "/telegram/targets/me/delete", "/telegram/targets/me/test",
 	"/api/telegram/getme", "/api/telegram/chats",
 	"/mailboxes/new", "/mailboxes/gmail", "/mailboxes/gmail/delete", "/api/mailboxes/probe",
+	"/api/mailboxes/gmail/oauth/start",
 }
 
 func TestRoutesRequireLogin(t *testing.T) {
 	e := newEnv(t, nil)
-	for _, path := range []string{"/", "/mailboxes", "/mailboxes/new", "/mailboxes/gmail", "/telegram", "/rules", "/templates", "/logs", "/settings", "/settings/versions", "/api/status"} {
+	for _, path := range []string{"/", "/mailboxes", "/mailboxes/new", "/mailboxes/gmail", "/telegram", "/rules", "/templates", "/logs", "/settings", "/settings/versions", "/api/status", "/api/mailboxes/gmail/oauth/status"} {
 		resp, _ := e.get(path)
 		if resp.StatusCode != http.StatusSeeOther && resp.StatusCode != http.StatusUnauthorized && resp.StatusCode != http.StatusNotFound {
 			t.Errorf("GET %s without login = %d", path, resp.StatusCode)

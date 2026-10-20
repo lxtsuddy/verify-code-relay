@@ -230,7 +230,8 @@ type folderRow struct {
 type mailboxRow struct {
 	Name, DisplayName, Username, Host, Glyph string
 	Port                                     int
-	Microsoft, NeedsAuth                     bool
+	Microsoft, NeedsAuth                     bool // NeedsAuth: no token stored
+	NeedsLogin                               bool // a folder's watcher reports needs_login
 	Folders                                  []folderRow
 	Targets                                  []string
 }
@@ -308,6 +309,7 @@ func (s *Server) getMailboxes(w http.ResponseWriter, r *http.Request) {
 				fr.Label, fr.Class, fr.Live = statusBadge("")
 			}
 			row.Folders = append(row.Folders, fr)
+			row.NeedsLogin = row.NeedsLogin || (ok && st == watcher.StatusNeedsLogin)
 		}
 		d.Mailboxes = append(d.Mailboxes, row)
 	}
@@ -332,6 +334,7 @@ type mailboxFormData struct {
 	PasswordDropped bool // a typed password is never sent back: say so
 	StoredMicrosoft bool // the stored mailbox uses Microsoft (authorisation applies)
 	Authorized      bool // an OAuth token is stored
+	NeedsLogin      bool // authorised, but a watcher reports the grant no longer works
 	Defaults        struct{ MaxAge, TTL, PollInterval string }
 	AdvancedOpen    bool
 	AdvancedSet     int // advanced fields with a value
@@ -391,6 +394,11 @@ func (s *Server) renderMailboxForm(w http.ResponseWriter, r *http.Request, statu
 				return
 			}
 			d.Authorized = ok
+			for _, ws := range s.o.Runtime.Snapshot().Watchers {
+				if ws.Mailbox == name && ws.Status == watcher.StatusNeedsLogin {
+					d.NeedsLogin = ok
+				}
+			}
 		}
 	}
 	def := raw.Defaulted().Defaults
@@ -529,6 +537,7 @@ func (s *Server) saveMailbox(w http.ResponseWriter, r *http.Request, name string
 	}
 	done := "已儲存信箱 " + key + " 並套用"
 	if dropToken {
+		s.cancelFlow(key) // before deleting: a flow for the old account must not save its token
 		// after the save, as on delete: a failed save must not lose the token
 		if err := s.o.Store.DeleteOAuthToken(r.Context(), key); err != nil {
 			s.o.Log.Warn("刪除信箱的 OAuth token 失敗", "mailbox", key, "err", err)
@@ -605,6 +614,7 @@ func (s *Server) postMailboxDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// after the change is stored: a failed save must not lose the token
+	s.cancelFlow(name)
 	if err := s.o.Store.DeleteOAuthToken(r.Context(), name); err != nil {
 		s.o.Log.Warn("刪除信箱的 OAuth token 失敗", "mailbox", name, "err", err)
 		s.redirect(w, r, "/mailboxes", &Flash{Kind: "info", Text: "已刪除信箱 " + name + "，但它的 Microsoft 授權沒有清除成功，詳情請看服務日誌"})

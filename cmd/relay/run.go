@@ -89,6 +89,7 @@ func cmdRun(args []string, stdout, stderr io.Writer) int {
 	<-ctx.Done()
 	stop() // restore default signal handling: a second signal kills a hung shutdown
 	log.Info("收到停止訊號，正在關閉")
+	admin.Close() // ends Microsoft authorisation flows, which could otherwise reload the runtime
 	rt.Stop()
 	shutdownHTTP(webSrv, 5*time.Second, log)
 	if healthSrv != nil {

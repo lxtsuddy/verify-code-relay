@@ -241,6 +241,7 @@ func startEnv(t *testing.T, bindTOTP bool, cfg func(c *config.Config), opts ...f
 		f(&o)
 	}
 	e.srv = New(o)
+	t.Cleanup(e.srv.Close) // runs before rt.Stop and st.Close
 	e.ts = httptest.NewTLSServer(e.srv.Handler())
 	t.Cleanup(e.ts.Close)
 	e.c = e.newClient()

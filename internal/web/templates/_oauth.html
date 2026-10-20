@@ -1,0 +1,55 @@
+{{/*
+oauth-dialog: the Microsoft authorisation dialog. Include it once on any page that has
+data-oauth-start="信箱名稱" buttons (optional data-oauth-user="帳號" for the subtitle); app.js
+does the rest. Every text from the server is written with textContent.
+*/}}
+{{define "oauth-dialog"}}
+<dialog class="modal modal-oauth" id="dlg-oauth" aria-labelledby="oauth-title" data-oauth-dialog data-state="loading">
+  <div class="modal-head">
+    <div>
+      <h2 class="modal-title" id="oauth-title">Microsoft 授權</h2>
+      <p class="modal-sub" data-oauth-sub></p>
+    </div>
+    <button type="button" class="icon-btn" data-modal-close aria-label="關閉">{{template "icon" "x"}}</button>
+  </div>
+  <div class="modal-body">
+    <div class="oauth-loading" data-oauth-only="loading">
+      <span class="spinner" aria-hidden="true"></span>
+      <p>正在向 Microsoft 取得登入代碼…</p>
+    </div>
+    <ol class="oauth-steps" data-oauth-only="code">
+      <li class="oauth-step">
+        <p class="oauth-step-title">複製這組代碼</p>
+        <div class="oauth-ticket">
+          <button type="button" class="oauth-code" data-oauth-copy aria-describedby="oauth-left">
+            <span class="sr-only">複製代碼 </span>
+            <span class="postcode postcode-lg" data-oauth-code></span>
+          </button>
+          <span class="oauth-postmark" aria-hidden="true"><span>已授權</span></span>
+          <button type="button" class="btn btn-sm oauth-copy" data-oauth-copy>{{template "icon" "copy"}}<span>複製</span></button>
+        </div>
+        <div class="oauth-timer">
+          <span class="oauth-meter" aria-hidden="true"><span data-oauth-meter></span></span>
+          <span class="oauth-left" id="oauth-left" data-oauth-left></span>
+        </div>
+      </li>
+      <li class="oauth-step">
+        <p class="oauth-step-title">開啟 Microsoft 登入頁，貼上代碼並登入</p>
+        <p class="oauth-step-hint" data-oauth-user-line>登入帳號 <span class="mono" data-oauth-user></span></p>
+        <a class="btn btn-primary oauth-link" data-oauth-link target="_blank" rel="noopener noreferrer">{{template "icon" "external"}}<span>開啟 Microsoft 登入頁</span></a>
+        <p class="oauth-uri mono" data-oauth-uri></p>
+      </li>
+    </ol>
+    <div class="oauth-status" data-oauth-status role="status" aria-live="polite">
+      <span class="oauth-status-icon" data-oauth-status-icon></span>
+      <p class="oauth-status-text"><b data-oauth-status-title></b><span data-oauth-status-text></span></p>
+    </div>
+  </div>
+  <div class="modal-foot">
+    <p class="oauth-note" data-oauth-only="pending">關閉視窗不會取消授權，代碼過期前完成登入即可。</p>
+    <button type="button" class="btn btn-ghost" data-modal-close data-oauth-only="pending error loading">關閉</button>
+    <button type="button" class="btn btn-primary" data-oauth-retry data-oauth-only="error">{{template "icon" "refresh"}}<span>重試</span></button>
+    <button type="button" class="btn btn-primary" data-modal-close data-oauth-only="done">{{template "icon" "check"}}<span>完成</span></button>
+  </div>
+</dialog>
+{{end}}

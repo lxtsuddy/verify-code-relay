@@ -35,6 +35,8 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /mailboxes/{name}", s.authed(s.postMailboxEdit))
 	m.HandleFunc("POST /mailboxes/{name}/delete", s.authed(s.postMailboxDelete))
 	m.HandleFunc("POST /api/mailboxes/probe", s.authed(s.postAPIProbe))
+	m.HandleFunc("POST /api/mailboxes/{name}/oauth/start", s.authed(s.postOAuthStart))
+	m.HandleFunc("GET /api/mailboxes/{name}/oauth/status", s.authed(s.getOAuthStatus))
 
 	m.HandleFunc("GET /telegram", s.authed(s.getTelegram))
 	m.HandleFunc("POST /telegram/bots", s.authed(s.postBotAdd))

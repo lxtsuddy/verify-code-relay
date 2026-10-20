@@ -141,15 +141,19 @@
           {{template "mb-input" (dict "ID" "f-client" "Name" "client_id" "Label" "應用程式（用戶端）識別碼" "Value" $f.ClientID "Err" (fieldErr $e "client_id") "Mono" true "Placeholder" "00000000-0000-0000-0000-000000000000" "Hint" "Azure 應用程式註冊的「概觀」頁。")}}
           {{template "mb-input" (dict "ID" "f-tenant" "Name" "tenant" "Label" "Tenant" "Opt" "選填" "Value" $f.Tenant "Err" (fieldErr $e "tenant") "Mono" true "Placeholder" "common" "Hint" "個人帳號（Outlook.com、Hotmail）填 consumers；公司帳號填組織的 tenant；留空為 common。")}}
         </div>
-        <div class="oauth-state">
-          {{if and $d.StoredMicrosoft $d.Authorized}}
+        <div class="oauth-state"{{if $d.StoredMicrosoft}} data-oauth-state="{{$d.Name}}"{{end}}>
+          {{if and $d.StoredMicrosoft $d.NeedsLogin}}
+          <span class="oauth-icon is-warn">{{template "icon" "alert"}}</span>
+          <div class="oauth-text"><p class="oauth-title">授權已失效</p><p class="hint">Microsoft 不再接受儲存的授權（例如改了密碼或撤銷了存取權），重新授權後才能繼續收信。</p></div>
+          <button type="button" class="btn btn-primary btn-sm" data-oauth-start="{{$d.Name}}" data-oauth-form>{{template "icon" "refresh"}}<span>重新授權</span></button>
+          {{else if and $d.StoredMicrosoft $d.Authorized}}
           <span class="oauth-icon is-ok">{{template "icon" "check"}}</span>
           <div class="oauth-text"><p class="oauth-title">已授權</p><p class="hint">token 會自動更新。換了 Microsoft 帳號或授權失效時再重新授權。</p></div>
-          <button type="button" class="btn btn-sm" data-oauth-start="{{$d.Name}}">{{template "icon" "refresh"}}<span>重新授權</span></button>
+          <button type="button" class="btn btn-sm" data-oauth-start="{{$d.Name}}" data-oauth-form>{{template "icon" "refresh"}}<span>重新授權</span></button>
           {{else if $d.StoredMicrosoft}}
           <span class="oauth-icon is-warn">{{template "icon" "alert"}}</span>
           <div class="oauth-text"><p class="oauth-title">尚未授權</p><p class="hint">這個信箱沒有 Microsoft 授權（例如剛新增，或還原了已刪除信箱的舊設定），授權前無法收信。</p></div>
-          <button type="button" class="btn btn-primary btn-sm" data-oauth-start="{{$d.Name}}">{{template "icon" "lock"}}<span>授權</span></button>
+          <button type="button" class="btn btn-primary btn-sm" data-oauth-start="{{$d.Name}}" data-oauth-form>{{template "icon" "lock"}}<span>授權</span></button>
           {{else}}
           <span class="oauth-icon">{{template "icon" "info"}}</span>
           <div class="oauth-text"><p class="oauth-title">儲存後授權</p><p class="hint">先儲存信箱，回到這一頁按「授權」，在瀏覽器輸入顯示的代碼登入 Microsoft 帳號。</p></div>
@@ -250,6 +254,7 @@
   </div>
 </form>
 
+{{if $d.StoredMicrosoft}}{{template "oauth-dialog"}}{{end}}
 {{if not $d.New}}
 <section class="card danger-zone" aria-labelledby="danger-title">
   <div class="danger-body">

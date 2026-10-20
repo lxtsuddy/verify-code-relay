@@ -31,6 +31,8 @@
     路徑    <p class="route"><span class="route-bot">bot</span><span class="route-line"></span><span class="route-chat">chat_id</span></p>
     表單彈出 <dialog class="modal modal-form" data-open?><form>modal-head／modal-body／modal-foot</form></dialog>；
             伺服器退回表單時在 dialog 加 data-open，載入後自動開啟。
+    授權    頁面放一份 {{template "oauth-dialog"}}（_oauth.html），按鈕加 data-oauth-start="信箱"；
+            清單上的授權按鈕用 .btn-auth（琥珀色，表示需要處理）。
 */
 
 :root {
@@ -1045,6 +1047,102 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .danger-body { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 16px 20px; }
 .danger-body .card-title { color: var(--red-700); }
 
+/* ---------- Microsoft authorisation dialog ----------
+   The user code is the hero, in red postcode boxes; once the sign-in is done a postmark
+   cancels it like a used stamp, and an expired code turns grey. The time left drains
+   along a thin meter (scaled through --left, set from script). */
+.modal-oauth { width: min(540px, calc(100vw - 24px)); }
+.modal-oauth [hidden] { display: none !important; }
+.modal-oauth .modal-body { padding-top: 6px; }
+.modal-oauth .modal-foot { align-items: center; }
+.modal-sub .mono { color: var(--ink-2); }
+
+.oauth-loading { display: grid; justify-items: center; gap: 12px; padding: 36px 0 30px; color: var(--muted); }
+
+.oauth-steps { display: grid; gap: 18px; margin: 4px 0 0; padding: 0; list-style: none; counter-reset: os; }
+.oauth-step { position: relative; padding-left: 38px; counter-increment: os; }
+.oauth-step::before {
+  content: counter(os); position: absolute; left: 0; top: 0;
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--green-700); color: #fff; font-family: var(--mono); font-size: 13px; font-weight: 700;
+}
+.oauth-step-title { min-height: 26px; padding-top: 1px; font-weight: 700; color: var(--ink); }
+.oauth-step-hint { margin-top: 2px; font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
+.oauth-step-hint .mono { color: var(--green-800); font-weight: 600; }
+/* once finished, only the (cancelled or void) code remains of the steps */
+.modal-oauth:not([data-state="pending"]) .oauth-step { padding-left: 0; }
+.modal-oauth:not([data-state="pending"]) .oauth-step::before,
+.modal-oauth:not([data-state="pending"]) .oauth-step-title,
+.modal-oauth:not([data-state="pending"]) .oauth-step + .oauth-step { display: none; }
+
+.oauth-ticket { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin-top: 10px; }
+.oauth-code {
+  display: block; padding: 6px; margin: -6px; border: 0; border-radius: var(--radius-sm);
+  background: transparent; cursor: copy; font: inherit; color: inherit;
+}
+.oauth-code:hover .postcode span { background: var(--red-50); }
+.postcode-lg { gap: 4px; font-size: clamp(19px, 5.6vw, 26px); font-weight: 700; letter-spacing: 0; }
+.postcode-lg span { width: 1.3em; height: 1.7em; border-width: 2px; }
+.postcode-lg .postcode-sep { width: 0.55em; border: 0; background: none; color: var(--faint); }
+.oauth-code.is-copied .postcode span:not(.postcode-sep) { border-color: var(--green-600); }
+
+/* the cancelling postmark (done) */
+.oauth-postmark {
+  position: absolute; left: clamp(120px, 42%, 200px); top: 50%; display: none;
+  place-items: center; width: 92px; height: 92px; margin-top: -46px;
+  border: 2.5px solid var(--green-700); border-radius: 50%;
+  box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 0.85), inset 0 0 0 6px var(--green-700);
+  background:
+    repeating-linear-gradient(0deg, transparent 0 7px, rgba(19, 98, 70, 0.5) 7px 9px) center / 100% 46% no-repeat,
+    rgba(255, 255, 255, 0.55);
+  color: var(--green-800); font-weight: 800; font-size: 15px; letter-spacing: 0.18em;
+  transform: rotate(-14deg); pointer-events: none;
+}
+.oauth-postmark span { padding: 1px 4px 1px 7px; background: #fff; }
+.modal-oauth[data-state="done"] .oauth-postmark { display: grid; animation: stamp 0.4s var(--ease) backwards; }
+.modal-oauth[data-state="done"] .postcode-lg span,
+.modal-oauth[data-state="error"] .postcode-lg span { border-color: var(--line-2); color: var(--faint); }
+.modal-oauth[data-state="error"] .postcode-lg span:not(.postcode-sep) { border-style: dashed; background: var(--surface-2); }
+.modal-oauth:not([data-state="pending"]) .oauth-code { cursor: default; pointer-events: none; }
+.modal-oauth:not([data-state="pending"]) .oauth-copy,
+.modal-oauth:not([data-state="pending"]) .oauth-link { display: none; }
+
+.oauth-timer { display: flex; align-items: center; gap: 10px; max-width: 360px; margin-top: 12px; }
+.oauth-meter { position: relative; flex: 1; height: 4px; border-radius: 2px; background: var(--sunken); overflow: hidden; }
+.oauth-meter > span {
+  position: absolute; inset: 0; border-radius: inherit; background: var(--green-600);
+  transform: scaleX(var(--left, 1)); transform-origin: left; transition: transform 1s linear;
+}
+.oauth-left { font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.oauth-timer.is-low .oauth-meter > span { background: var(--amber); }
+.oauth-timer.is-low .oauth-left { color: var(--amber-ink); font-weight: 700; }
+.modal-oauth:not([data-state="pending"]) .oauth-timer { display: none; }
+
+.oauth-link { margin-top: 10px; }
+.oauth-uri { margin-top: 6px; font-size: 12.5px; color: var(--faint); overflow-wrap: anywhere; }
+.modal-oauth:not([data-state="pending"]) .oauth-uri { display: none; }
+
+.oauth-status {
+  display: flex; align-items: flex-start; gap: 10px; margin-top: 20px;
+  padding: 11px 14px; border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background: var(--surface-2); font-size: 14px; color: var(--ink-2);
+}
+.oauth-status-icon { display: grid; place-items: center; width: 18px; height: 22px; flex: none; }
+.oauth-status-text { min-width: 0; overflow-wrap: anywhere; }
+.oauth-status-text b { margin-right: 6px; color: var(--ink); }
+.oauth-status-text b:empty { display: none; }
+.oauth-status .pulse-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--blue); animation: pulse 1.6s ease-in-out infinite; }
+.oauth-status.is-ok { background: var(--green-50); border-color: var(--green-100); color: var(--green-800); }
+.oauth-status.is-ok b { color: var(--green-800); }
+.oauth-status.is-err { background: var(--red-50); border-color: var(--red-100); color: var(--red-700); }
+.oauth-status.is-err b { color: var(--red-700); }
+.modal-oauth[data-state="loading"] .oauth-status { display: none; }
+
+.oauth-note { margin-right: auto; font-size: 13px; color: var(--muted); }
+.btn-auth { color: var(--amber-ink); border-color: var(--amber-100); background: var(--amber-50); }
+.btn-auth:hover { color: var(--amber-ink); border-color: var(--amber); background: #fbeccc; }
+.mb-actions { gap: 8px; flex-wrap: wrap; }
+
 /* the list's five columns need room: below that, folders and route go under the account */
 @media (max-width: 1080px) {
   .mb-item { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px 16px; }
@@ -1162,6 +1260,14 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .stamp-pick input:checked + .stamp .stamp-face::after { width: 38px; height: 38px; right: 2px; bottom: 24px; }
   .save-bar .btn { flex: 1; }
   .danger-body { padding: 14px 16px; }
+  .modal-oauth .modal-body { padding-left: 16px; padding-right: 16px; }
+  .modal-oauth .modal-foot { padding-left: 16px; padding-right: 16px; }
+  .oauth-step { padding-left: 34px; }
+  .oauth-note { flex-basis: 100%; }
+  .modal-oauth .modal-foot .btn { flex: 1; }
+  .oauth-link { width: 100%; }
+  /* with an authorise button the actions need a row of their own */
+  .mb-item:has(.btn-auth) .mb-actions { grid-column: 2 / 4; grid-row: auto; justify-content: flex-start; }
 }
 
 @keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } }

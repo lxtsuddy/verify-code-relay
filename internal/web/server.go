@@ -25,6 +25,7 @@ type Options struct {
 	TrustedProxies []netip.Prefix
 	Dial           runtime.DialFactory
 	MSAuthority    string           // "" = the real Microsoft endpoint
+	MSPollInterval time.Duration    // wait between device-code polls; 0 = Microsoft's interval (at least 5 s)
 	Now            func() time.Time // nil = time.Now
 }
 
@@ -36,6 +37,13 @@ type Server struct {
 	mux     *http.ServeMux
 
 	saveMu sync.Mutex // serialises config changes (see mutate)
+
+	// Microsoft authorisation flows (msauth.go)
+	flowMu      sync.Mutex
+	flows       map[string]*deviceFlow // by mailbox
+	closed      bool                   // Close was called: no new flows
+	flowStartMu sync.Mutex             // serialises devicecode requests
+	flowWG      sync.WaitGroup         // running flow goroutines
 
 	failMu      sync.Mutex
 	failures    []time.Time // failed logins within the last hour
@@ -62,7 +70,7 @@ func New(o Options) *Server {
 	if o.Telegram == nil {
 		o.Telegram = telegram.New()
 	}
-	s := &Server{o: o, mux: http.NewServeMux()}
+	s := &Server{o: o, mux: http.NewServeMux(), flows: map[string]*deviceFlow{}}
 	s.limiter = websec.NewLimiter(1, 5, s.now)
 	s.assetV = assetVersion()
 	s.pages = s.parsePages()

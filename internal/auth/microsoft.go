@@ -27,6 +27,13 @@ const refreshMargin = 5 * time.Minute
 // missing or zero interval in the response does not turn into a busy loop.
 const minPollInterval = 5 * time.Second
 
+var (
+	// ErrDeviceCodeExpired: the device code expired before the sign-in was finished.
+	ErrDeviceCodeExpired = errors.New("授權逾時")
+	// ErrLoginDeclined: the user declined the sign-in on Microsoft's page.
+	ErrLoginDeclined = errors.New("授權被拒絕")
+)
+
 type TokenStore interface {
 	GetOAuthToken(ctx context.Context, mailbox string) (store.OAuthToken, bool, error)
 	SaveOAuthToken(ctx context.Context, mailbox string, t store.OAuthToken) error
@@ -43,6 +50,9 @@ type Microsoft struct {
 	Now       func() time.Time
 	// Log receives failures that are retried or worked around; nil means slog.Default().
 	Log *slog.Logger
+	// PollInterval is the wait between device-code polls; 0 means the server's interval,
+	// at least minPollInterval. Tests set it to poll quickly.
+	PollInterval time.Duration
 
 	// sleep waits between device-code polls; tests replace it to skip the wait.
 	sleep func(ctx context.Context, d time.Duration) error
@@ -305,6 +315,9 @@ func describe(status int, tr tokenResponse) string {
 // code expires; the timeout error then includes the last failure.
 func (m *Microsoft) PollDeviceLogin(ctx context.Context, dc *DeviceCode) error {
 	interval := max(time.Duration(dc.Interval)*time.Second, minPollInterval)
+	if m.PollInterval > 0 {
+		interval = m.PollInterval
+	}
 	deadline := m.now().Add(time.Duration(dc.ExpiresIn) * time.Second)
 	var lastErr error
 	for {
@@ -329,6 +342,10 @@ func (m *Microsoft) PollDeviceLogin(ctx context.Context, dc *DeviceCode) error {
 		case tr.Error == "slow_down":
 			lastErr = nil
 			interval += 5 * time.Second
+		case tr.Error == "expired_token":
+			return fmt.Errorf("%w：%s", ErrDeviceCodeExpired, describe(status, tr))
+		case tr.Error == "authorization_declined":
+			return fmt.Errorf("%w：%s", ErrLoginDeclined, describe(status, tr))
 		case status >= http.StatusInternalServerError || status == http.StatusTooManyRequests:
 			lastErr = errors.New(describe(status, tr))
 		default:
@@ -339,9 +356,9 @@ func (m *Microsoft) PollDeviceLogin(ctx context.Context, dc *DeviceCode) error {
 		}
 		if m.now().After(deadline) {
 			if lastErr != nil {
-				return fmt.Errorf("授權逾時，請重新執行 relay login（最後一次錯誤：%w）", lastErr)
+				return fmt.Errorf("%w，請重新執行 relay login（最後一次錯誤：%w）", ErrDeviceCodeExpired, lastErr)
 			}
-			return fmt.Errorf("授權逾時，請重新執行 relay login")
+			return fmt.Errorf("%w，請重新執行 relay login", ErrDeviceCodeExpired)
 		}
 		if err := m.wait(ctx, interval); err != nil {
 			return err

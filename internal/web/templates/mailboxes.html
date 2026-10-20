@@ -27,11 +27,13 @@
       {{range .Targets}}<span class="route-chat mono">{{.}}</span>{{end}}
     </p>
     <div class="mb-actions">
+      {{if and .Microsoft (or .NeedsAuth .NeedsLogin)}}<button type="button" class="btn btn-sm btn-auth" data-oauth-start="{{.Name}}" data-oauth-user="{{.Username}}" aria-label="{{if .NeedsAuth}}授權{{else}}重新授權{{end}}信箱 {{.Name}}">{{template "icon" "lock"}}<span>{{if .NeedsAuth}}授權{{else}}重新授權{{end}}</span></button>{{end}}
       <a class="btn btn-sm" href="/mailboxes/{{.Name}}" aria-label="編輯信箱 {{.Name}}">{{template "icon" "edit"}}<span class="tg-btn-text">編輯</span></a>
     </div>
   </li>
   {{end}}
 </ul>
+{{template "oauth-dialog"}}
 {{if not .Data.HasTargets}}<div class="callout callout-warn mb-after">{{template "icon" "alert"}}<p>目前沒有任何 Telegram 目標，新增信箱前請先到 <a href="/telegram">Telegram</a> 新增。</p></div>{{end}}
 {{else}}
 <section class="empty">

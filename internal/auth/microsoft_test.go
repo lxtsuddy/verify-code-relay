@@ -611,3 +611,43 @@ func TestAuthenticateRejectedCachedTokenIsRefreshedNextTime(t *testing.T) {
 		t.Fatalf("calls = %d, want one refresh_token request", ts.calls())
 	}
 }
+
+// PollInterval overrides the server's interval and the 5-second floor (web tests use it).
+func TestDeviceLoginPollIntervalOverride(t *testing.T) {
+	ts := newTokenServer(t, pollReplies(pending, slowDown, granted))
+	m := newMS(ts, &memTokens{m: map[string]store.OAuthToken{}})
+	clk := useFakeClock(m)
+	m.PollInterval = 10 * time.Millisecond
+	if err := m.PollDeviceLogin(context.Background(), newSecretDC(900)); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := clk.waits(), []time.Duration{10 * time.Millisecond, 5*time.Second + 10*time.Millisecond}; !slices.Equal(got, want) {
+		t.Errorf("waits = %v, want %v", got, want)
+	}
+}
+
+// Expiry and a declined sign-in are recognisable, so the web page can explain them.
+func TestDeviceLoginErrorKinds(t *testing.T) {
+	for _, tc := range []struct {
+		reply string
+		want  error
+	}{
+		{`{"error":"expired_token","error_description":"code expired"}`, ErrDeviceCodeExpired},
+		{`{"error":"authorization_declined"}`, ErrLoginDeclined},
+	} {
+		ts := newTokenServer(t, pollReplies(tc.reply))
+		m := newMS(ts, &memTokens{m: map[string]store.OAuthToken{}})
+		useFakeClock(m)
+		err := m.PollDeviceLogin(context.Background(), newSecretDC(900))
+		if !errors.Is(err, tc.want) {
+			t.Errorf("%s: err = %v, want %v", tc.reply, err, tc.want)
+		}
+		assertNoSecrets(t, err)
+	}
+	ts := newTokenServer(t, pollReplies(pending))
+	m := newMS(ts, &memTokens{m: map[string]store.OAuthToken{}})
+	useFakeClock(m)
+	if err := m.PollDeviceLogin(context.Background(), newSecretDC(12)); !errors.Is(err, ErrDeviceCodeExpired) || !strings.Contains(err.Error(), "relay login") {
+		t.Errorf("timeout err = %v", err)
+	}
+}

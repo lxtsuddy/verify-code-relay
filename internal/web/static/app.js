@@ -792,6 +792,231 @@
     if (add) addFolder(mailboxForm(add));
   });
 
+  /* ---------- Microsoft authorisation ----------
+
+    [data-oauth-start="名稱"]  開啟 #dlg-oauth（範本 "oauth-dialog"，頁面要放一份）：
+                              POST /api/mailboxes/{名稱}/oauth/start，顯示 user code（點一下複製）、
+                              Microsoft 登入頁按鈕與倒數，之後每 3 秒 GET …/oauth/status。
+      data-oauth-user="帳號"   顯示在標題下與步驟 2。
+      data-oauth-form          信箱編輯頁的按鈕：帳號、client_id、tenant 或認證方式有未儲存的修改時，
+                              先要求儲存（授權一律使用已儲存的設定）。
+    完成後：頁面上有 [data-oauth-state="名稱"] 就原地改成「已授權」；沒有則在關閉視窗時重新整理頁面。
+    伺服器上同一信箱只有一個流程：關閉視窗只停止輪詢，再按一次會接回同一組代碼。
+    伺服器給的文字（代碼、網址、錯誤）一律以 textContent 寫入；網址不是 https 時不做成連結。
+  */
+
+  var OAUTH_POLL = 3000;
+  var oauth = { name: "", user: "", gen: 0, poll: 0, tick: 0, deadline: 0, life: 0, hasCode: false, done: false };
+
+  function oq(sel) { var d = byId("dlg-oauth"); return d ? d.querySelector(sel) : null; }
+
+  function oauthView(state) {
+    var d = byId("dlg-oauth");
+    d.dataset.state = state;
+    d.querySelectorAll("[data-oauth-only]").forEach(function (n) {
+      var want = n.dataset.oauthOnly.split(" ");
+      n.hidden = !(want.indexOf(state) >= 0 || (oauth.hasCode && want.indexOf("code") >= 0));
+    });
+  }
+
+  // oauthStatus fills the status line: kind wait | ok | err.
+  function oauthStatus(kind, title, text) {
+    var box = oq("[data-oauth-status]");
+    box.className = "oauth-status" + (kind === "ok" ? " is-ok" : kind === "err" ? " is-err" : "");
+    var ic = oq("[data-oauth-status-icon]");
+    ic.textContent = "";
+    ic.appendChild(kind === "wait" ? el("span", "pulse-dot") : icon(kind === "ok" ? "check" : "alert"));
+    oq("[data-oauth-status-title]").textContent = title || "";
+    oq("[data-oauth-status-text]").textContent = text || "";
+  }
+
+  function oauthStop() {
+    oauth.gen++;
+    clearTimeout(oauth.poll);
+    clearInterval(oauth.tick);
+  }
+
+  function oauthURL(what) { return "/api/mailboxes/" + encodeURIComponent(oauth.name) + "/oauth/" + what; }
+
+  function showCode(d) {
+    var code = String(d.user_code || "");
+    var box = oq("[data-oauth-code]");
+    box.textContent = "";
+    for (var i = 0; i < code.length; i++) {
+      var ch = code.charAt(i);
+      box.appendChild(el("span", ch === "-" || ch === " " ? "postcode-sep" : null, ch === " " ? "-" : ch));
+    }
+    oq("[data-oauth-copy]").dataset.code = code;
+    var uri = String(d.verification_uri || "");
+    var link = oq("[data-oauth-link]");
+    if (/^https:\/\//i.test(uri)) link.href = uri;
+    else link.removeAttribute("href");
+    link.hidden = !link.hasAttribute("href");
+    oq("[data-oauth-uri]").textContent = uri.replace(/^https:\/\//i, "");
+    oauth.hasCode = true;
+    oauth.life = Math.max(Number(d.lifetime) || 0, Number(d.expires_in) || 0, 1);
+    oauth.deadline = Date.now() + (Number(d.expires_in) || 0) * 1000;
+  }
+
+  function countdown() {
+    var left = Math.max(0, Math.round((oauth.deadline - Date.now()) / 1000));
+    var timer = oq(".oauth-timer");
+    var text = oq("[data-oauth-left]");
+    if (left > 0) text.textContent = "剩 " + Math.floor(left / 60) + ":" + pad(left % 60);
+    else text.textContent = "代碼已過期";
+    timer.classList.toggle("is-low", left < 60);
+    oq("[data-oauth-meter]").style.setProperty("--left", String(left / oauth.life));
+  }
+
+  function oauthFail(msg) {
+    oauthStop();
+    oauthView("error");
+    oauthStatus("err", "授權沒有完成", msg);
+    var retry = oq("[data-oauth-retry]");
+    if (retry) retry.focus();
+  }
+
+  function oauthDone() {
+    oauthStop();
+    oauth.done = true;
+    oauthView("done");
+    oauthStatus("ok", "授權完成", "信箱正在用新的授權重新連線。");
+    var ok = oq('[data-oauth-only="done"]');
+    if (ok) ok.focus();
+  }
+
+  function oauthPoll(gen, delay) {
+    clearTimeout(oauth.poll);
+    oauth.poll = setTimeout(function () {
+      fetchJSON(oauthURL("status")).then(
+        function (d) {
+          if (gen !== oauth.gen) return;
+          if (d.ok === false) oauthFail(d.error || "無法取得授權進度");
+          else if (d.state === "pending") {
+            oauthStatus("wait", "等待你在 Microsoft 完成登入", "這裡每 3 秒自動檢查一次。");
+            oauthPoll(gen, OAUTH_POLL);
+          } else if (d.state === "done") oauthDone();
+          else if (d.state === "error") oauthFail(d.error || "授權失敗");
+          else oauthFail("這組代碼已失效：信箱設定可能已變更，或服務已重新啟動。請按「重試」取得新的代碼。");
+        },
+        function (err) {
+          if (gen !== oauth.gen) return;
+          oauthStatus("wait", "暫時無法確認進度", err.message + "，稍後自動再試。");
+          oauthPoll(gen, OAUTH_POLL);
+        }
+      );
+    }, delay);
+  }
+
+  function oauthStart(name, user) {
+    oauthStop();
+    var gen = oauth.gen;
+    oauth.name = name;
+    oauth.user = user || "";
+    oauth.hasCode = false;
+    oauth.done = false;
+    oq("[data-oauth-sub]").textContent = "信箱 " + name + (oauth.user ? " · " + oauth.user : "");
+    oq("[data-oauth-user]").textContent = oauth.user;
+    oq("[data-oauth-user-line]").hidden = !oauth.user;
+    oauthView("loading");
+    openModal("dlg-oauth");
+    fetchJSON(oauthURL("start"), {}).then(
+      function (d) {
+        if (gen !== oauth.gen) return;
+        if (!d.ok) { oauthFail(d.error || "無法開始授權"); return; }
+        showCode(d);
+        countdown();
+        oauth.tick = setInterval(countdown, 1000);
+        oauthView("pending");
+        oauthStatus("wait", "等待你在 Microsoft 完成登入", "這裡每 3 秒自動檢查一次。");
+        var first = oq(".oauth-copy");
+        if (first) first.focus();
+        if (d.state === "done") oauthDone();
+        else oauthPoll(gen, OAUTH_POLL);
+      },
+      function (err) { if (gen === oauth.gen) oauthFail(err.message); }
+    );
+  }
+
+  // formDirty reports unsaved changes to the settings an authorisation is for.
+  function formDirty(form) {
+    var dirty = false;
+    ["username", "client_id", "tenant"].forEach(function (n) {
+      var f = field(form, n);
+      if (f && f.value.trim() !== f.defaultValue.trim()) dirty = true;
+    });
+    var ms = form.querySelector('input[name="auth_type"][value="microsoft_oauth"]');
+    if (ms && ms.checked !== ms.defaultChecked) dirty = true;
+    return dirty;
+  }
+
+  // markAuthorized turns the edit page's authorisation box into "已授權" without a reload
+  // (the form may hold unsaved edits).
+  function markAuthorized(box) {
+    var ic = box.querySelector(".oauth-icon");
+    if (ic) { ic.className = "oauth-icon is-ok"; ic.textContent = ""; ic.appendChild(icon("check")); }
+    var title = box.querySelector(".oauth-title");
+    if (title) title.textContent = "已授權";
+    var hint = box.querySelector(".oauth-text .hint");
+    if (hint) hint.textContent = "token 會自動更新。換了 Microsoft 帳號或授權失效時再重新授權。";
+    var btn = box.querySelector("[data-oauth-start]");
+    if (btn) {
+      btn.classList.remove("btn-primary");
+      var label = btn.querySelector("span");
+      if (label) label.textContent = "重新授權";
+    }
+  }
+
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!(t instanceof Element)) return;
+    var start = t.closest("[data-oauth-start]");
+    if (start) {
+      if (!byId("dlg-oauth")) return;
+      var form = start.hasAttribute("data-oauth-form") ? mailboxForm(start) : null;
+      if (form && formDirty(form)) {
+        toast("帳號、應用程式識別碼或 tenant 有修改還沒儲存：授權會使用已儲存的設定，請先按「儲存並套用」。", "error");
+        return;
+      }
+      var user = start.dataset.oauthUser || "";
+      if (form && field(form, "username")) user = field(form, "username").defaultValue;
+      oauthStart(start.dataset.oauthStart, user);
+      return;
+    }
+    var copy = t.closest("[data-oauth-copy]");
+    if (copy) {
+      var code = (oq(".oauth-code") || copy).dataset.code || "";
+      copyText(code).then(function (ok) {
+        if (!ok) { toast("無法自動複製，請手動輸入代碼", "error"); return; }
+        toast("已複製代碼 " + code);
+        var c = oq(".oauth-code");
+        c.classList.add("is-copied");
+        setTimeout(function () { c.classList.remove("is-copied"); }, 1600);
+      });
+      return;
+    }
+    if (t.closest("[data-oauth-retry]")) oauthStart(oauth.name, oauth.user);
+  });
+
+  ready(function () {
+    var d = byId("dlg-oauth");
+    if (!d) return;
+    d.addEventListener("close", function () {
+      oauthStop();
+      if (!oauth.done) return;
+      oauth.done = false;
+      var box = document.querySelector('[data-oauth-state="' + oauth.name.replace(/["\\]/g, "\\$&") + '"]');
+      if (box) markAuthorized(box);
+      else window.location.reload();
+    });
+  });
+
+  // a tab coming back from Microsoft's sign-in page checks at once
+  document.addEventListener("visibilitychange", function () {
+    var d = byId("dlg-oauth");
+    if (document.visibilityState === "visible" && d && d.open && d.dataset.state === "pending") oauthPoll(oauth.gen, 0);
+  });
+
   window.relay = {
     localTimes: localTimes,
     fetchJSON: fetchJSON,
