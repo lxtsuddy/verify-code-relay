@@ -28,6 +28,17 @@ func (s *Server) routes() {
 	m.HandleFunc("GET /settings/versions", s.authed(s.getVersions))
 	m.HandleFunc("POST /settings/versions/{id}/restore", s.authed(s.postRestore))
 
+	m.HandleFunc("GET /telegram", s.authed(s.getTelegram))
+	m.HandleFunc("POST /telegram/bots", s.authed(s.postBotAdd))
+	m.HandleFunc("POST /telegram/bots/{name}", s.authed(s.postBotRotate))
+	m.HandleFunc("POST /telegram/bots/{name}/delete", s.authed(s.postBotDelete))
+	m.HandleFunc("POST /telegram/targets", s.authed(s.postTargetAdd))
+	m.HandleFunc("POST /telegram/targets/{name}", s.authed(s.postTargetEdit))
+	m.HandleFunc("POST /telegram/targets/{name}/delete", s.authed(s.postTargetDelete))
+	m.HandleFunc("POST /telegram/targets/{name}/test", s.authed(s.postTargetTest))
+	m.HandleFunc("POST /api/telegram/getme", s.authed(s.postAPIGetMe))
+	m.HandleFunc("POST /api/telegram/chats", s.authed(s.postAPIChats))
+
 	m.HandleFunc("/", s.public(s.notFound))
 }
 

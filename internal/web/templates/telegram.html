@@ -1,0 +1,265 @@
+{{template "app" .}}
+{{define "content"}}
+<header class="page-head">
+  <div>
+    <h1 class="page-title">Telegram</h1>
+    <p class="page-desc">Bot 負責送出訊息；目標指定由哪個 Bot 送到哪個聊天室。信箱的轉發路由與系統通知都選擇目標。</p>
+  </div>
+</header>
+
+{{/* ---------- bots ---------- */}}
+<section aria-labelledby="bots-title">
+  <div class="section-head">
+    <div>
+      <h2 class="section-title" id="bots-title">Bot</h2>
+      <p class="section-desc">token 只能寫入：儲存後不會再顯示，更換時直接貼上新的。</p>
+    </div>
+    {{if .Data.Bots}}<button type="button" class="btn" data-modal-open="dlg-bot-add">{{template "icon" "plus"}}<span>新增 Bot</span></button>{{end}}
+  </div>
+  {{if .Data.Bots}}
+  <ul class="tg-list" aria-label="Bot 列表">
+    {{range .Data.Bots}}
+    <li class="tg-item tg-bot">
+      <span class="tg-avatar" aria-hidden="true">{{template "icon" "send"}}</span>
+      <div class="tg-main">
+        <p class="tg-name mono">{{.Name}}</p>
+        <p class="tg-handle" data-getme-bot="{{.Name}}"><span class="muted">正在向 Telegram 查詢…</span></p>
+      </div>
+      <p class="tg-uses">{{if .Targets}}目標 {{range $i, $t := .Targets}}{{if $i}}、{{end}}<span class="mono">{{$t}}</span>{{end}} 使用{{else}}<span class="muted">沒有目標使用</span>{{end}}</p>
+      <div class="tg-actions">
+        <button type="button" class="btn btn-sm" data-modal-open="dlg-bot-{{.Name}}">{{template "icon" "lock"}}<span>更換 token</span></button>
+        <form method="post" action="/telegram/bots/{{.Name}}/delete" data-confirm="刪除 Bot {{.Name}}？{{if .Targets}}&#10;它仍被目標 {{range $i, $t := .Targets}}{{if $i}}、{{end}}{{$t}}{{end}} 使用，必須先改用其他 Bot 或刪除這些目標。{{end}}" data-confirm-ok="刪除">
+          {{template "csrf" $}}
+          <button type="submit" class="btn btn-sm btn-danger" aria-label="刪除 Bot {{.Name}}">{{template "icon" "trash"}}<span class="tg-btn-text">刪除</span></button>
+        </form>
+      </div>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <div class="empty">
+    <span class="empty-icon">{{template "icon" "send"}}</span>
+    <h3 class="empty-title">還沒有 Bot</h3>
+    <p class="empty-text">在 Telegram 找 <b>@BotFather</b>，傳送 <code>/newbot</code> 建立 Bot，再把它給你的 token 貼到這裡。</p>
+    <button type="button" class="btn btn-primary" data-modal-open="dlg-bot-add">{{template "icon" "plus"}}<span>新增 Bot</span></button>
+  </div>
+  {{end}}
+</section>
+
+{{/* ---------- targets ---------- */}}
+<section aria-labelledby="targets-title">
+  <div class="section-head">
+    <div>
+      <h2 class="section-title" id="targets-title">目標</h2>
+      <p class="section-desc">驗證碼與通知送往的聊天室。新增後按「發送測試」確認收得到。</p>
+    </div>
+    {{if and .Data.Targets .Data.Bots}}<button type="button" class="btn" data-modal-open="dlg-target-add">{{template "icon" "plus"}}<span>新增目標</span></button>{{end}}
+  </div>
+  {{if .Data.Targets}}
+  <ul class="tg-list" aria-label="目標列表">
+    {{range .Data.Targets}}
+    <li class="tg-item tg-target">
+      <div class="tg-main">
+        <p class="tg-name mono">{{.Name}}{{if .Admin}} <span class="badge badge-info">通知對象</span>{{end}}</p>
+        <p class="route" aria-label="由 Bot {{.Bot}} 送到 chat {{.ChatID}}">
+          <span class="route-bot mono">{{.Bot}}</span>
+          <span class="route-line" aria-hidden="true"></span>
+          <span class="route-chat mono">{{.ChatID}}</span>
+        </p>
+      </div>
+      <p class="tg-uses">{{if .Mailboxes}}信箱 {{range $i, $m := .Mailboxes}}{{if $i}}、{{end}}<span class="mono">{{$m}}</span>{{end}}{{else if not .Admin}}<span class="muted">尚未被信箱或通知使用</span>{{end}}{{if and .Admin .Mailboxes}}；{{end}}{{if .Admin}}系統通知{{end}}</p>
+      <div class="tg-actions">
+        <form method="post" action="/telegram/targets/{{.Name}}/test">
+          {{template "csrf" $}}
+          <button type="submit" class="btn btn-sm" data-busy-text="發送中…">{{template "icon" "send"}}<span>發送測試</span></button>
+        </form>
+        <button type="button" class="btn btn-sm" data-modal-open="dlg-target-{{.Name}}" aria-label="編輯目標 {{.Name}}">{{template "icon" "edit"}}<span class="tg-btn-text">編輯</span></button>
+        <form method="post" action="/telegram/targets/{{.Name}}/delete" data-confirm="刪除目標 {{.Name}}？{{if or .Mailboxes .Admin}}&#10;它仍被{{if .Mailboxes}}信箱 {{range $i, $m := .Mailboxes}}{{if $i}}、{{end}}{{$m}}{{end}}{{end}}{{if and .Mailboxes .Admin}}及{{end}}{{if .Admin}}系統通知{{end}}使用，必須先改掉這些設定。{{end}}" data-confirm-ok="刪除">
+          {{template "csrf" $}}
+          <button type="submit" class="btn btn-sm btn-danger" aria-label="刪除目標 {{.Name}}">{{template "icon" "trash"}}<span class="tg-btn-text">刪除</span></button>
+        </form>
+      </div>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <div class="empty">
+    <span class="empty-icon">{{template "icon" "inbox"}}</span>
+    <h3 class="empty-title">還沒有目標</h3>
+    {{if .Data.Bots}}
+    <p class="empty-text">目標是「Bot ＋ 聊天室」。新增時可以直接從 Bot 最近的對話中挑選聊天室，不用自己查 chat_id。</p>
+    <button type="button" class="btn btn-primary" data-modal-open="dlg-target-add">{{template "icon" "plus"}}<span>新增目標</span></button>
+    {{else}}
+    <p class="empty-text">目標要指定由哪個 Bot 送出，請先在上方新增 Bot。</p>
+    {{end}}
+  </div>
+  {{end}}
+</section>
+
+{{/* ---------- dialogs ---------- */}}
+
+{{$e := .Errors}}
+<dialog class="modal modal-form" id="dlg-bot-add" aria-labelledby="dlg-bot-add-title"{{if eq .Data.Open "dlg-bot-add"}} data-open{{end}}>
+  <form method="post" action="/telegram/bots" novalidate>
+    {{template "csrf" .}}
+    <div class="modal-head">
+      <h2 class="modal-title" id="dlg-bot-add-title">新增 Bot</h2>
+      <button type="button" class="icon-btn" data-modal-close aria-label="關閉">{{template "icon" "x"}}</button>
+    </div>
+    <div class="modal-body form">
+      {{template "dialog-error" (fieldErr $e "bot")}}
+      <ol class="mini-steps">
+        <li>在 Telegram 找 <b>@BotFather</b>，傳送 <code>/newbot</code> 並依指示命名。</li>
+        <li>複製它回覆的 token（形如 <code>123456789:AAH…</code>），貼到下方。</li>
+      </ol>
+      {{template "name-field" (dict "ID" "bot-add-name" "Err" (fieldErr $e "bot.name") "Value" .Data.NewBot.Name "Example" "main")}}
+      {{$tokErr := fieldErr $e "bot.token"}}
+      <div class="field">
+        <label class="label" for="bot-add-token">Bot token</label>
+        <div class="token-row">
+          <div class="secret">
+            <input class="input input-mono" id="bot-add-token" name="token" type="password" autocomplete="new-password" spellcheck="false" required aria-describedby="bot-add-token-out{{if $tokErr}} bot-add-token-err{{end}}"{{if $tokErr}} aria-invalid="true"{{end}}>
+            <button type="button" class="secret-toggle" data-reveal="bot-add-token" aria-label="顯示 token" aria-pressed="false">{{template "icon" "eye"}}</button>
+          </div>
+          <button type="button" class="btn" data-getme-input="bot-add-token" data-getme-out="bot-add-token-out">{{template "icon" "check"}}<span>驗證</span></button>
+        </div>
+        <p class="getme-out" id="bot-add-token-out" aria-live="polite">{{if .Data.NewBot.TokenDropped}}基於安全，送出的 token 不會帶回表單，請重新貼上。{{end}}</p>
+        <div id="bot-add-token-err">{{template "field-error" $tokErr}}</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn btn-ghost" data-modal-close>取消</button>
+      <button type="submit" class="btn btn-primary" data-busy-text="驗證並儲存中…">{{template "icon" "plus"}}<span>新增 Bot</span></button>
+    </div>
+  </form>
+</dialog>
+
+{{range .Data.Bots}}{{$id := printf "dlg-bot-%s" .Name}}{{$tokErr := fieldErr $e (printf "rotate.%s.token" .Name)}}
+<dialog class="modal modal-form" id="{{$id}}" aria-labelledby="{{$id}}-title"{{if eq $.Data.Open $id}} data-open{{end}}>
+  <form method="post" action="/telegram/bots/{{.Name}}" novalidate>
+    {{template "csrf" $}}
+    <div class="modal-head">
+      <h2 class="modal-title" id="{{$id}}-title">更換 Bot <span class="mono">{{.Name}}</span> 的 token</h2>
+      <button type="button" class="icon-btn" data-modal-close aria-label="關閉">{{template "icon" "x"}}</button>
+    </div>
+    <div class="modal-body form">
+      {{template "dialog-error" (fieldErr $e (printf "rotate.%s" .Name))}}
+      <p class="hint">在 @BotFather 對這個 Bot 執行 <code>/revoke</code> 會產生新 token，舊的立即失效；把新的貼到這裡。名稱建立後不能修改。</p>
+      <div class="field">
+        <label class="label label-row" for="{{$id}}-token"><span>新的 token</span><span class="tag tag-set">{{template "icon" "lock"}}已設定</span></label>
+        <div class="token-row">
+          <div class="secret">
+            <input class="input input-mono" id="{{$id}}-token" name="token" type="password" autocomplete="new-password" spellcheck="false" placeholder="已設定，留空表示不變" aria-describedby="{{$id}}-out{{if $tokErr}} {{$id}}-err{{end}}"{{if $tokErr}} aria-invalid="true"{{end}}>
+            <button type="button" class="secret-toggle" data-reveal="{{$id}}-token" aria-label="顯示 token" aria-pressed="false">{{template "icon" "eye"}}</button>
+          </div>
+          <button type="button" class="btn" data-getme-input="{{$id}}-token" data-getme-out="{{$id}}-out">{{template "icon" "check"}}<span>驗證</span></button>
+        </div>
+        <p class="getme-out" id="{{$id}}-out" aria-live="polite"></p>
+        <div id="{{$id}}-err">{{template "field-error" $tokErr}}</div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn btn-ghost" data-modal-close>取消</button>
+      <button type="submit" class="btn btn-primary" data-busy-text="驗證並儲存中…">更換 token</button>
+    </div>
+  </form>
+</dialog>
+{{end}}
+
+{{if .Data.Bots}}
+<dialog class="modal modal-form" id="dlg-target-add" aria-labelledby="dlg-target-add-title"{{if eq .Data.Open "dlg-target-add"}} data-open{{end}}>
+  <form method="post" action="/telegram/targets" novalidate>
+    {{template "csrf" .}}
+    <div class="modal-head">
+      <h2 class="modal-title" id="dlg-target-add-title">新增目標</h2>
+      <button type="button" class="icon-btn" data-modal-close aria-label="關閉">{{template "icon" "x"}}</button>
+    </div>
+    <div class="modal-body form">
+      {{template "dialog-error" (fieldErr $e "target")}}
+      {{template "name-field" (dict "ID" "target-add-name" "Err" (fieldErr $e "target.name") "Value" .Data.NewTarget.Name "Example" "me、family")}}
+      {{template "target-fields" (dict "ID" "target-add" "Bots" .Data.BotNames "Bot" .Data.NewTarget.Bot "ChatID" .Data.NewTarget.ChatID "BotErr" (fieldErr $e "target.bot") "ChatErr" (fieldErr $e "target.chat_id"))}}
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn btn-ghost" data-modal-close>取消</button>
+      <button type="submit" class="btn btn-primary" data-busy-text="儲存中…">{{template "icon" "plus"}}<span>新增目標</span></button>
+    </div>
+  </form>
+</dialog>
+{{end}}
+
+{{range .Data.Targets}}{{$id := printf "dlg-target-%s" .Name}}
+<dialog class="modal modal-form" id="{{$id}}" aria-labelledby="{{$id}}-title"{{if eq $.Data.Open $id}} data-open{{end}}>
+  <form method="post" action="/telegram/targets/{{.Name}}" novalidate>
+    {{template "csrf" $}}
+    <div class="modal-head">
+      <h2 class="modal-title" id="{{$id}}-title">編輯目標 <span class="mono">{{.Name}}</span></h2>
+      <button type="button" class="icon-btn" data-modal-close aria-label="關閉">{{template "icon" "x"}}</button>
+    </div>
+    <div class="modal-body form">
+      {{template "dialog-error" (fieldErr $e (printf "edit.%s" .Name))}}
+      <p class="hint">名稱建立後不能修改；要換名稱請新增一個目標，再把信箱改過去。</p>
+      {{template "target-fields" (dict "ID" $id "Bots" $.Data.BotNames "Bot" .FormBot "ChatID" .FormChatID "BotErr" (fieldErr $e (printf "edit.%s.bot" .Name)) "ChatErr" (fieldErr $e (printf "edit.%s.chat_id" .Name)))}}
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="btn btn-ghost" data-modal-close>取消</button>
+      <button type="submit" class="btn btn-primary" data-busy-text="儲存中…">{{template "icon" "check"}}<span>儲存並套用</span></button>
+    </div>
+  </form>
+</dialog>
+{{end}}
+
+<dialog class="modal modal-chats" id="dlg-chats" aria-labelledby="dlg-chats-title">
+  <div class="modal-head">
+    <div>
+      <h2 class="modal-title" id="dlg-chats-title">選擇聊天室</h2>
+      <p class="modal-sub" data-chats-sub>Bot 最近收到訊息的聊天室</p>
+    </div>
+    <button type="button" class="icon-btn" data-modal-close aria-label="關閉">{{template "icon" "x"}}</button>
+  </div>
+  <div class="modal-body">
+    <p class="chats-hint">{{template "icon" "info"}}<span>先對 Bot 傳一則訊息，或把 Bot 加入群組後再讀取。Telegram 只保留最近 24 小時內的訊息。</span></p>
+    <div class="chats" data-chats-list aria-live="polite"></div>
+  </div>
+  <div class="modal-foot">
+    <button type="button" class="btn btn-ghost" data-modal-close>關閉</button>
+    <button type="button" class="btn" data-chats-reload>{{template "icon" "refresh"}}<span>重新讀取</span></button>
+  </div>
+</dialog>
+
+{{/* icons cloned by app.js for the chat list (no markup is built from Telegram data) */}}
+<template id="tpl-chat-private">{{template "icon" "user"}}</template>
+<template id="tpl-chat-group">{{template "icon" "users"}}</template>
+<template id="tpl-chat-channel">{{template "icon" "megaphone"}}</template>
+{{end}}
+
+{{define "dialog-error"}}{{with .}}<div class="callout callout-error" role="alert">{{template "icon" "alert"}}<p>{{.}}</p></div>{{end}}{{end}}
+
+{{/* name-field: dict ID Err Value Example */}}
+{{define "name-field"}}
+<div class="field">
+  <label class="label" for="{{.ID}}">名稱</label>
+  <input class="input input-mono" id="{{.ID}}" name="name" type="text" value="{{.Value}}" required pattern="[a-z0-9_\-]+" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="{{.ID}}-hint{{if .Err}} {{.ID}}-err{{end}}"{{if .Err}} aria-invalid="true"{{end}}>
+  <p class="hint" id="{{.ID}}-hint">小寫英文字母、數字、<code>_</code> 與 <code>-</code>，例如 {{.Example}}。建立後不能修改。</p>
+  <div id="{{.ID}}-err">{{template "field-error" .Err}}</div>
+</div>
+{{end}}
+
+{{/* target-fields: dict ID Bots Bot ChatID BotErr ChatErr */}}
+{{define "target-fields"}}
+<div class="field">
+  <label class="label" for="{{.ID}}-bot">由哪個 Bot 送出</label>
+  <select class="select" id="{{.ID}}-bot" name="bot"{{if .BotErr}} aria-invalid="true" aria-describedby="{{.ID}}-bot-err"{{end}}>
+    {{$cur := .Bot}}{{range .Bots}}<option value="{{.}}"{{if eq . $cur}} selected{{end}}>{{.}}</option>{{end}}
+  </select>
+  <div id="{{.ID}}-bot-err">{{template "field-error" .BotErr}}</div>
+</div>
+<div class="field">
+  <label class="label" for="{{.ID}}-chat">chat_id</label>
+  <div class="token-row">
+    <input class="input input-mono" id="{{.ID}}-chat" name="chat_id" type="text" inputmode="text" value="{{.ChatID}}" required pattern="-?[0-9]+" autocomplete="off" spellcheck="false" placeholder="例如 123456789 或 -1001234567890" aria-describedby="{{.ID}}-chat-hint{{if .ChatErr}} {{.ID}}-chat-err{{end}}"{{if .ChatErr}} aria-invalid="true"{{end}}>
+    <button type="button" class="btn" data-chats-bot="{{.ID}}-bot" data-chats-input="{{.ID}}-chat">{{template "icon" "inbox"}}<span>讀取最近對話</span></button>
+  </div>
+  <p class="hint" id="{{.ID}}-chat-hint">個人對話是正數，群組與頻道是負數。不知道的話按「讀取最近對話」挑選。</p>
+  <div id="{{.ID}}-chat-err">{{template "field-error" .ChatErr}}</div>
+</div>
+{{end}}

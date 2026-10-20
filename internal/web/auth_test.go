@@ -12,6 +12,14 @@ import (
 	"verify-code-relay/internal/websec"
 )
 
+// authedPosts are the POST routes that need a signed-in admin with TOTP bound.
+var authedPosts = []string{
+	"/settings/general", "/settings/password", "/settings/totp", "/settings/versions/1/restore",
+	"/telegram/bots", "/telegram/bots/main", "/telegram/bots/main/delete",
+	"/telegram/targets", "/telegram/targets/me", "/telegram/targets/me/delete", "/telegram/targets/me/test",
+	"/api/telegram/getme", "/api/telegram/chats",
+}
+
 func TestRoutesRequireLogin(t *testing.T) {
 	e := newEnv(t, nil)
 	for _, path := range []string{"/", "/mailboxes", "/telegram", "/rules", "/templates", "/logs", "/settings", "/settings/versions", "/api/status"} {
@@ -24,7 +32,7 @@ func TestRoutesRequireLogin(t *testing.T) {
 		}
 	}
 	// POST-only routes answer 401 without a session (and 403 without CSRF, see middleware_test)
-	for _, path := range []string{"/logout", "/setup/totp", "/settings/general", "/settings/password", "/settings/totp", "/settings/versions/1/restore"} {
+	for _, path := range append([]string{"/logout", "/setup/totp"}, authedPosts...) {
 		if resp, _ := e.postForm(path, nil); resp.StatusCode != http.StatusUnauthorized {
 			t.Errorf("POST %s without login = %d", path, resp.StatusCode)
 		}
@@ -34,12 +42,12 @@ func TestRoutesRequireLogin(t *testing.T) {
 	p.postForm("/login", url.Values{"password": {testPassword}})
 	_, page := p.get("/setup/totp")
 	p.csrf = extractCSRF(page)
-	for _, path := range []string{"/settings", "/settings/versions"} {
+	for _, path := range []string{"/settings", "/settings/versions", "/telegram"} {
 		if resp, _ := p.get(path); resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/setup/totp" {
 			t.Errorf("GET %s while pending = %d %s", path, resp.StatusCode, resp.Header.Get("Location"))
 		}
 	}
-	for _, path := range []string{"/settings/general", "/settings/password", "/settings/totp", "/settings/versions/1/restore"} {
+	for _, path := range authedPosts {
 		if resp, _ := p.postForm(path, nil); resp.StatusCode != http.StatusForbidden {
 			t.Errorf("POST %s while pending = %d", path, resp.StatusCode)
 		}

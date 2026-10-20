@@ -94,7 +94,8 @@ is bound in static/app.js through data-* attributes; appearance lives in static/
 {{define "field-error"}}{{with .}}<p class="field-error">{{template "icon" "alert"}}<span>{{.}}</span></p>{{end}}{{end}}
 
 {{/* Icons: 24×24 strokes in currentColor. Names: dashboard mail send rules logs settings
-logout check x alert info copy eye lock plus arrow-right arrow-left external refresh trash edit */}}
+logout check x alert info copy eye lock plus arrow-right arrow-left external refresh trash edit
+user users megaphone inbox */}}
 {{define "icon"}}<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
 {{- if eq . "dashboard"}}<rect x="3.5" y="3.5" width="7" height="8" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="5" rx="1.5"/><rect x="13.5" y="11.5" width="7" height="9" rx="1.5"/><rect x="3.5" y="14.5" width="7" height="6" rx="1.5"/>
 {{- else if eq . "mail"}}<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 6.5 8.5 6.5 8.5-6.5"/>
@@ -117,4 +118,8 @@ logout check x alert info copy eye lock plus arrow-right arrow-left external ref
 {{- else if eq . "refresh"}}<path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 3.5V8h4.5"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20.5V16h-4.5"/>
 {{- else if eq . "trash"}}<path d="M4 7h16M10 11v6M14 11v6"/><path d="M5.5 7l1 12a2 2 0 0 0 2 1.8h7a2 2 0 0 0 2-1.8l1-12"/><path d="M9 7V4.5h6V7"/>
 {{- else if eq . "edit"}}<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="m13.5 6.5 4 4"/>
+{{- else if eq . "user"}}<circle cx="12" cy="8" r="3.8"/><path d="M4.5 20.5c.8-3.9 3.8-6 7.5-6s6.7 2.1 7.5 6"/>
+{{- else if eq . "users"}}<circle cx="9" cy="8.5" r="3.3"/><path d="M2.8 19.5c.7-3.4 3.1-5.3 6.2-5.3s5.5 1.9 6.2 5.3"/><path d="M15.2 5.4a3.3 3.3 0 0 1 0 6.3M17.5 14.6c2 .6 3.3 2.3 3.7 4.9"/>
+{{- else if eq . "megaphone"}}<path d="M4 10v4a1 1 0 0 0 1 1h2.5L14 19V5L7.5 9H5a1 1 0 0 0-1 1z"/><path d="M17.5 9a4 4 0 0 1 0 6"/><path d="m8 15 1.2 4.5"/>
+{{- else if eq . "inbox"}}<path d="M3.5 13.5 6 5.5A1.5 1.5 0 0 1 7.4 4.5h9.2A1.5 1.5 0 0 1 18 5.5l2.5 8v5a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5v-5z"/><path d="M3.5 13.5h4.8l1.2 2.5h5l1.2-2.5h4.8"/>
 {{- end}}</svg>{{end}}

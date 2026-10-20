@@ -24,6 +24,10 @@
     彈出    <dialog class="modal" id="x"><div class="modal-head"><h2 class="modal-title">…</h2><button class="icon-btn" data-modal-close>…</button></div><div class="modal-body">…</div><div class="modal-foot">…</div></dialog>
             以 data-modal-open="x" 開啟。
     代碼    <p class="postcode"><span>8</span><span>3</span>…</p>
+    清單    <ul class="tg-list"><li class="tg-item">主要文字 | 使用情況 | .tg-actions</li></ul>（Telegram 頁；每列一筆可操作的項目）
+    路徑    <p class="route"><span class="route-bot">bot</span><span class="route-line"></span><span class="route-chat">chat_id</span></p>
+    表單彈出 <dialog class="modal modal-form" data-open?><form>modal-head／modal-body／modal-foot</form></dialog>；
+            伺服器退回表單時在 dialog 加 data-open，載入後自動開啟。
 */
 
 :root {
@@ -715,6 +719,114 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .tag-src-restore { background: var(--blue-50); color: var(--blue); }
 .tag-src-import, .tag-src-bootstrap { background: var(--amber-50); color: var(--amber-ink); }
 
+/* ---------- telegram page ---------- */
+
+/* a section title with its action on the right */
+.section-head {
+  display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 20px;
+  margin: 36px 0 14px;
+}
+.page-head + section > .section-head { margin-top: 0; }
+.section-head .section-title { margin: 0; }
+.section-desc { margin-top: 2px; font-size: 13.5px; color: var(--muted); }
+
+.tg-list {
+  margin: 0; padding: 0; list-style: none;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1);
+}
+.tg-item {
+  display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 6px 22px; align-items: center;
+  padding: 14px 20px; border-bottom: 1px solid var(--line);
+}
+.tg-item:last-child { border-bottom: 0; }
+.tg-item:hover { background: #fafcf9; }
+.tg-bot { grid-template-columns: 38px minmax(0, 1.2fr) minmax(0, 1fr) auto; }
+.tg-avatar {
+  display: grid; place-items: center; width: 38px; height: 38px;
+  border-radius: 50%; background: var(--green-50); color: var(--green-700);
+}
+.tg-main { min-width: 0; }
+.tg-name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 15.5px; font-weight: 700; overflow-wrap: anywhere; }
+.tg-handle { margin-top: 1px; font-size: 13.5px; color: var(--muted); overflow-wrap: anywhere; }
+.tg-handle.is-ok { color: var(--green-700); font-weight: 600; }
+.tg-handle.is-err { color: var(--red-700); font-weight: 600; }
+.tg-handle .icon { display: inline-block; width: 15px; height: 15px; margin-right: 4px; vertical-align: -2.5px; }
+.tg-uses { font-size: 13.5px; color: var(--ink-2); overflow-wrap: anywhere; }
+.tg-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; }
+.tg-actions form { display: contents; }
+
+/* bot → chat: the routing line of an address label; the chat id sits in a box like a postcode */
+.route { display: flex; align-items: center; gap: 0; margin-top: 6px; font-size: 13.5px; }
+.route-bot {
+  padding: 0 8px; border-radius: 999px; line-height: 22px;
+  background: var(--green-50); color: var(--green-800); font-weight: 600;
+}
+.route-line {
+  position: relative; width: 34px; height: 0; margin: 0 8px 0 6px; flex: none;
+  border-top: 1.5px dashed var(--line-2);
+}
+.route-line::after {
+  content: ""; position: absolute; right: -3px; top: -4.75px;
+  width: 7px; height: 7px; border-top: 1.5px solid var(--faint); border-right: 1.5px solid var(--faint);
+  transform: rotate(45deg);
+}
+.route-chat {
+  padding: 0 7px; line-height: 21px; font-weight: 600; font-variant-numeric: tabular-nums;
+  border: 1.5px solid var(--green-700); background: #fff; color: var(--ink);
+}
+
+/* forms in dialogs: the form is the dialog's column */
+.modal-form { width: min(560px, calc(100vw - 24px)); }
+.modal-form > form { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.modal-form .modal-body { padding-top: 14px; }
+.modal-form .modal-body .callout { margin-bottom: 0; }
+.modal-title .mono { font-size: 0.92em; }
+.modal-sub { margin-top: 2px; font-size: 13.5px; color: var(--muted); }
+
+.token-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+.token-row > .btn { min-height: 42px; }
+.getme-out { min-height: 0; font-size: 13.5px; color: var(--muted); }
+.getme-out:empty { display: none; }
+.getme-out.is-ok { color: var(--green-700); font-weight: 600; }
+.getme-out.is-err { color: var(--red-700); font-weight: 600; }
+.result-note { margin-left: 6px; font-weight: 400; color: var(--muted); }
+.getme-out .icon { display: inline-block; width: 15px; height: 15px; margin-right: 5px; vertical-align: -2.5px; }
+
+/* chat picker */
+.modal-chats { width: min(540px, calc(100vw - 24px)); }
+.modal-chats .modal-body { padding: 8px 0 0; }
+.chats-hint {
+  display: flex; align-items: flex-start; gap: 8px; margin: 0 22px 12px;
+  padding: 10px 12px; border-radius: var(--radius-sm);
+  background: var(--blue-50); color: #174f7c; font-size: 13.5px;
+}
+.chats-hint .icon { width: 16px; height: 16px; margin-top: 3px; }
+.chats { border-top: 1px solid var(--line); min-height: 132px; }
+.chat-row {
+  display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  width: 100%; padding: 11px 22px; border: 0; border-bottom: 1px solid var(--line);
+  background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+  transition: background-color 0.12s;
+}
+.chat-row:hover { background: var(--green-50); }
+.chat-row:focus-visible { outline-offset: -3px; }
+.chat-row:last-child { border-bottom: 0; }
+.chat-icon { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: var(--green-50); color: var(--green-700); }
+.chat-group .chat-icon { background: var(--blue-50); color: var(--blue); }
+.chat-channel .chat-icon { background: var(--amber-50); color: var(--amber-ink); }
+.chat-text { min-width: 0; }
+.chat-title { display: block; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-meta { display: block; font-size: 12.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-id { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 13.5px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.chat-pick { font-family: var(--font); font-size: 12.5px; font-weight: 700; color: var(--green-700); opacity: 0; transition: opacity 0.12s; }
+.chat-row:hover .chat-pick, .chat-row:focus-visible .chat-pick { opacity: 1; }
+.chats-state { display: grid; justify-items: center; gap: 6px; padding: 30px 22px; text-align: center; color: var(--muted); }
+.chats-state .icon { width: 26px; height: 26px; color: var(--faint); }
+.chats-state strong { color: var(--ink); }
+.chats-state.is-err strong { color: var(--red-700); }
+.chats-state.is-err .icon { color: var(--red); }
+.spinner { width: 22px; height: 22px; border: 2.5px solid var(--green-200); border-right-color: var(--green-700); border-radius: 50%; animation: spin 0.7s linear infinite; }
+
 .callout p, .flash-text { white-space: pre-line; }
 
 /* ---------- motion ---------- */
@@ -799,6 +911,18 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .ledger-item { grid-template-columns: 3.6em minmax(0, 1fr); gap: 4px 12px; padding: 14px 16px; }
   .ledger-action { grid-column: 2; justify-content: flex-start; margin-top: 6px; }
   .qr { width: 176px; height: 176px; }
+
+  .tg-item, .tg-bot { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 14px 16px; }
+  .tg-bot { grid-template-columns: 38px minmax(0, 1fr); column-gap: 12px; }
+  .tg-bot .tg-avatar { align-self: start; }
+  .tg-bot .tg-uses, .tg-bot .tg-actions { grid-column: 2; }
+  .tg-actions { justify-content: flex-start; }
+  .tg-btn-text { display: none; }
+  .token-row { grid-template-columns: minmax(0, 1fr); }
+  .token-row > .btn { justify-self: start; }
+  .chats-hint { margin: 0 16px 12px; }
+  .chat-row { padding: 11px 16px; }
+  .chat-pick { display: none; }
 }
 
 @keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } }

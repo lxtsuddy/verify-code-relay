@@ -395,6 +395,184 @@
   }
   ready(function () { localTimes(); });
 
+  /* ---------- Telegram page ----------
+
+    dialog.modal[data-open]                       伺服器退回表單時，載入後自動開啟該 dialog。
+    data-getme-bot="名稱"                         載入後以 getMe 填入該 Bot 的 @username（或錯誤）。
+    data-getme-input="輸入框 id" data-getme-out="結果 id"
+                                                  「驗證」按鈕：以輸入框裡的 token 呼叫 getMe，結果寫進結果元素。
+    data-chats-bot="select id" data-chats-input="輸入框 id"
+                                                  「讀取最近對話」：開啟 #dlg-chats 列出該 Bot 最近的聊天室，
+                                                  點選即把 chat_id 帶入輸入框。圖示取自 <template id="tpl-chat-*">。
+    聊天室名稱等 Telegram 資料一律以 textContent 寫入。
+  */
+
+  var CHAT_TYPES = { "private": "私人對話", group: "群組", supergroup: "超級群組", channel: "頻道" };
+
+  function byId(id) { return id ? document.getElementById(id) : null; }
+
+  // setResult shows text in node: ok true (check icon), false (alert icon) or null (neutral);
+  // note (optional) follows in a quieter span.
+  function setResult(node, ok, text, note) {
+    if (!node) return;
+    node.textContent = "";
+    node.classList.toggle("is-ok", ok === true);
+    node.classList.toggle("is-err", ok === false);
+    if (ok !== null) node.appendChild(icon(ok ? "check" : "alert"));
+    if (text) node.appendChild(document.createTextNode(text));
+    if (note) node.appendChild(el("span", "result-note", note));
+  }
+
+  // showBot puts getMe's answer d into node; prefix (optional) goes before the @username.
+  function showBot(node, d, prefix) {
+    if (d.ok) setResult(node, true, (prefix || "") + "@" + (d.username || "?"), d.first_name ? "· " + d.first_name : "");
+    else setResult(node, false, d.error || "無法驗證");
+  }
+
+  ready(function () {
+    document.querySelectorAll("dialog.modal[data-open]").forEach(function (d) { openModal(d); });
+    document.querySelectorAll("[data-getme-bot]").forEach(function (n) {
+      fetchJSON("/api/telegram/getme", { bot: n.dataset.getmeBot }).then(
+        function (d) { showBot(n, d); },
+        function (err) { setResult(n, false, err.message); }
+      );
+    });
+  });
+
+  var chats = { bot: "", input: null };
+
+  function chatState(kind, title, text) {
+    var box = el("div", "chats-state" + (kind === "error" ? " is-err" : ""));
+    if (kind === "loading") box.appendChild(el("span", "spinner"));
+    else {
+      var i = byId(kind === "error" ? "" : "tpl-chat-private");
+      box.appendChild(kind === "error" ? icon("alert") : (i ? i.content.cloneNode(true) : icon("info")));
+    }
+    box.appendChild(el("strong", null, title));
+    if (text) box.appendChild(el("span", null, text));
+    return box;
+  }
+
+  function chatRow(c) {
+    var kind = c.type === "channel" ? "channel" : (c.type === "group" || c.type === "supergroup") ? "group" : "private";
+    var b = el("button", "chat-row chat-" + kind);
+    b.type = "button";
+    b.dataset.chatId = String(c.id);
+    var ic = el("span", "chat-icon");
+    var tpl = byId("tpl-chat-" + kind);
+    if (tpl) ic.appendChild(tpl.content.cloneNode(true));
+    var text = el("span", "chat-text");
+    text.appendChild(el("span", "chat-title", c.title || "（沒有名稱）"));
+    text.appendChild(el("span", "chat-meta", (CHAT_TYPES[c.type] || c.type || "聊天室") + (c.username ? " · @" + c.username : "")));
+    var id = el("span", "chat-id");
+    id.appendChild(el("span", "chat-pick", "帶入"));
+    id.appendChild(el("span", null, String(c.id)));
+    b.appendChild(ic);
+    b.appendChild(text);
+    b.appendChild(id);
+    return b;
+  }
+
+  function loadChats() {
+    var d = byId("dlg-chats");
+    if (!d) return;
+    var list = d.querySelector("[data-chats-list]");
+    var reload = d.querySelector("[data-chats-reload]");
+    var sub = d.querySelector("[data-chats-sub]");
+    if (sub) sub.textContent = "Bot " + chats.bot + " 最近收到訊息的聊天室";
+    list.textContent = "";
+    list.appendChild(chatState("loading", "正在讀取最近對話…"));
+    list.setAttribute("aria-busy", "true");
+    if (reload) reload.disabled = true;
+    var bot = chats.bot;
+    fetchJSON("/api/telegram/chats", { bot: bot }).then(
+      function (res) {
+        if (bot !== chats.bot) return;
+        list.textContent = "";
+        if (!res.ok) {
+          list.appendChild(chatState("error", "讀取失敗", res.error || "未知的錯誤"));
+        } else if (!res.chats || !res.chats.length) {
+          list.appendChild(chatState("empty", "沒有找到最近的對話", "對 Bot 傳一則訊息（群組裡可以傳 /start），再按「重新讀取」。"));
+        } else {
+          res.chats.forEach(function (c) { list.appendChild(chatRow(c)); });
+        }
+      },
+      function (err) {
+        list.textContent = "";
+        list.appendChild(chatState("error", "讀取失敗", err.message));
+      }
+    ).then(function () {
+      list.removeAttribute("aria-busy");
+      if (reload) reload.disabled = false;
+      var first = list.querySelector(".chat-row");
+      if (first && d.open) first.focus();
+    });
+  }
+
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!(t instanceof Element)) return;
+
+    var check = t.closest("[data-getme-input]");
+    if (check) {
+      var input = byId(check.dataset.getmeInput);
+      var out = byId(check.dataset.getmeOut);
+      var token = input ? input.value.trim() : "";
+      if (!token) {
+        setResult(out, false, "請先貼上 token");
+        if (input) input.focus();
+        return;
+      }
+      check.setAttribute("aria-busy", "true");
+      check.disabled = true;
+      setResult(out, null, "正在向 Telegram 驗證…");
+      fetchJSON("/api/telegram/getme", { token: token }).then(
+        function (d) { showBot(out, d, "有效："); },
+        function (err) { setResult(out, false, err.message); }
+      ).then(function () {
+        check.removeAttribute("aria-busy");
+        check.disabled = false;
+      });
+      return;
+    }
+
+    var open = t.closest("[data-chats-bot]");
+    if (open) {
+      var sel = byId(open.dataset.chatsBot);
+      chats.bot = sel ? sel.value : "";
+      chats.input = byId(open.dataset.chatsInput);
+      if (!chats.bot) {
+        toast("請先選擇 Bot", "error");
+        return;
+      }
+      openModal("dlg-chats");
+      loadChats();
+      return;
+    }
+
+    if (t.closest("[data-chats-reload]")) {
+      loadChats();
+      return;
+    }
+
+    var row = t.closest(".chat-row");
+    if (row && chats.input) {
+      chats.input.value = row.dataset.chatId;
+      chats.input.removeAttribute("aria-invalid");
+      closeModal("dlg-chats");
+      chats.input.focus();
+      toast("已帶入 chat_id " + row.dataset.chatId);
+    }
+  });
+
+  // a new token makes the previous check result stale
+  document.addEventListener("input", function (e) {
+    var t = e.target;
+    if (!(t instanceof HTMLInputElement) || !t.id) return;
+    var btn = document.querySelector('[data-getme-input="' + t.id + '"]');
+    if (btn) setResult(byId(btn.dataset.getmeOut), null, "");
+  });
+
   window.relay = {
     localTimes: localTimes,
     fetchJSON: fetchJSON,
