@@ -81,12 +81,18 @@ func cmdRun(configPath string, args []string, stdout, stderr io.Writer) int {
 	log.Info("收到停止訊號，正在關閉")
 	wait()
 	if httpSrv != nil {
-		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		httpSrv.Shutdown(sctx)
-		cancel()
+		shutdownHTTP(httpSrv, 5*time.Second, log)
 	}
 	log.Info("已停止")
 	return 0
+}
+
+func shutdownHTTP(srv *http.Server, timeout time.Duration, log *slog.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Warn("關閉 HTTP 服務失敗", "err", err)
+	}
 }
 
 // dialFactory returns the IMAP dialer for a mailbox host.
@@ -99,7 +105,7 @@ func tlsDial(host string, port int) watcher.DialFunc {
 // service wires the store, recognizer, renderer, pipeline, dispatcher, alerter and
 // one watcher per mailbox folder. Process concerns (flags, signals, HTTP) stay in cmdRun.
 type service struct {
-	st       *store.Store
+	st       pruner
 	log      *slog.Logger
 	disp     *dispatcher.Dispatcher
 	watchers []*watcher.Watcher
@@ -154,20 +160,15 @@ func newService(a *app, st *store.Store, log *slog.Logger, sender dispatcher.Sen
 }
 
 // start runs the watchers, the dispatcher and the log pruner until ctx is
-// cancelled; wait blocks until the watchers and the dispatcher have stopped.
+// cancelled; wait blocks until all of them have stopped.
 func (s *service) start(ctx context.Context) (wait func()) {
 	var wg sync.WaitGroup
 	for _, w := range s.watchers {
-		wg.Add(1)
-		go func() { defer wg.Done(); w.Run(ctx) }()
+		wg.Go(func() { w.Run(ctx) })
 	}
-	dispDone := make(chan struct{})
-	go func() { s.disp.Run(ctx); close(dispDone) }()
-	go pruneLoop(ctx, s.st, s.log)
-	return func() {
-		wg.Wait()
-		<-dispDone
-	}
+	wg.Go(func() { s.disp.Run(ctx) })
+	wg.Go(func() { pruneLoop(ctx, s.st, s.log) })
+	return wg.Wait
 }
 
 type pruner interface {

@@ -106,6 +106,7 @@ func TestSendTestUsesTelegram(t *testing.T) {
 }
 
 func TestLoginRejectsPasswordMailbox(t *testing.T) {
+	keepUmask(t)
 	p := writeConfig(t, "")
 	code, _, stderr := run("--config", p, "login", "gmail")
 	if code != 1 || !strings.Contains(stderr, "microsoft_oauth") {
@@ -142,6 +143,7 @@ func TestGlobalConfigEqualsForm(t *testing.T) {
 
 // 參數放在位置參數之後也要能解析（relay login outlook --config x）。
 func TestFlagsAfterPositional(t *testing.T) {
+	keepUmask(t)
 	p := writeConfig(t, "")
 	code, _, stderr := run("login", "gmail", "--config", p)
 	if code != 1 || !strings.Contains(stderr, "microsoft_oauth") {
