@@ -11,9 +11,9 @@ RUN mkdir -m 0700 /out/data
 FROM gcr.io/distroless/static:nonroot
 COPY --from=build /out/relay /relay
 COPY --from=build --chown=65532:65532 /out/data /data
-ENV RELAY_CONFIG=/config.yaml
+ENV RELAY_DATA_DIR=/data
 VOLUME /data
-EXPOSE 8080
+EXPOSE 8080 8081
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD ["/relay", "healthcheck"]
 ENTRYPOINT ["/relay"]
 CMD ["run"]

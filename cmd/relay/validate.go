@@ -6,13 +6,13 @@ import (
 )
 
 func cmdValidate(configPath string, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("config validate", &configPath, stderr)
-	if err := fs.Parse(args); err != nil {
+	path, ok := configFile("config validate", configPath, args, stderr)
+	if !ok {
 		return 2
 	}
-	a, err := loadApp(configPath)
+	a, err := loadApp(path)
 	if err != nil {
-		fmt.Fprintf(stderr, "設定檔有誤（%s）：\n%v\n", configPath, err)
+		fmt.Fprintf(stderr, "設定檔有誤（%s）：\n%v\n", path, err)
 		return 1
 	}
 	folders := 0

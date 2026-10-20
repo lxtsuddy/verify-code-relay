@@ -23,6 +23,7 @@ import (
 	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
 
 	"verify-code-relay/internal/runtime"
+	"verify-code-relay/internal/store"
 	"verify-code-relay/internal/telegram"
 	"verify-code-relay/internal/watcher"
 )
@@ -98,8 +99,7 @@ func TestEndToEnd(t *testing.T) {
 
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "config.yaml")
-	cfgYAML := `data_dir: ` + filepath.Join(dir, "data") + `
-bots: { main: { token: "123:abc" } }
+	cfgYAML := `bots: { main: { token: "123:abc" } }
 targets:
   me: { bot: main, chat_id: 42 }
   family: { bot: main, chat_id: 43 }
@@ -118,7 +118,7 @@ mailboxes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	st, err := openStore(a.Config)
+	st, err := store.Open(filepath.Join(dir, "relay.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

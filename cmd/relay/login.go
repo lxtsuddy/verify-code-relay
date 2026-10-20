@@ -7,41 +7,30 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"path/filepath"
 
 	"verify-code-relay/internal/auth"
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/store"
 )
 
-func cmdLogin(configPath string, args []string, stdout, stderr io.Writer) int {
-	restrictUmask() // the db holds OAuth tokens
-	fs := newFlags("login", &configPath, stderr)
+func cmdLogin(args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("login", stderr)
 	pos, err := parseInterspersed(fs, args)
 	if err != nil || len(pos) != 1 {
 		fmt.Fprintln(stderr, "用法：relay login <信箱>")
 		return 2
 	}
 	name := pos[0]
-	cfg, err := config.Load(configPath)
-	if err != nil {
-		return fail(stderr, err)
-	}
-	if err := cfg.Validate(); err != nil {
-		return fail(stderr, err)
-	}
-	m, ok := cfg.Mailboxes[name]
-	if !ok {
-		return fail(stderr, fmt.Errorf("找不到信箱 %q", name))
-	}
-	if m.Auth.Type != "microsoft_oauth" {
-		return fail(stderr, fmt.Errorf("信箱 %s 的 auth.type 是 %q，只有 microsoft_oauth 需要 login", name, m.Auth.Type))
-	}
-	st, err := openStore(cfg)
+	st, b, err := loadFromDB(context.Background())
 	if err != nil {
 		return fail(stderr, err)
 	}
 	defer st.Close()
+	m, ok := b.Config.Mailboxes[name]
+	if !ok {
+		return fail(stderr, notFound("信箱", name))
+	}
+	if m.Auth.Type != "microsoft_oauth" {
+		return fail(stderr, fmt.Errorf("信箱 %s 的 auth.type 是 %q，只有 microsoft_oauth 需要 login", name, m.Auth.Type))
+	}
 	ms := &auth.Microsoft{Mailbox: name, Username: m.Username, ClientID: m.Auth.ClientID, Tenant: m.Auth.Tenant, Store: st,
 		Log: slog.New(slog.NewTextHandler(stderr, nil))}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -54,13 +43,6 @@ func cmdLogin(configPath string, args []string, stdout, stderr io.Writer) int {
 	if err := ms.PollDeviceLogin(ctx, dc); err != nil {
 		return fail(stderr, err)
 	}
-	fmt.Fprintf(stdout, "授權成功，信箱 %s 的 token 已儲存。若服務正在執行，請重新啟動以生效。\n", name)
+	fmt.Fprintf(stdout, "授權成功，信箱 %s 的 token 已儲存。若服務正在執行，請重新啟動 Pod 以套用（在 Web 上授權則會自動套用）。\n", name)
 	return 0
-}
-
-func openStore(cfg *config.Config) (*store.Store, error) {
-	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
-		return nil, fmt.Errorf("建立資料目錄：%w", err)
-	}
-	return store.Open(filepath.Join(cfg.DataDir, "relay.db"))
 }

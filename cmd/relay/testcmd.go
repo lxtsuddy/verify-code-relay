@@ -13,8 +13,8 @@ import (
 	"verify-code-relay/internal/telegram"
 )
 
-func cmdTest(configPath string, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("test", &configPath, stderr)
+func cmdTest(args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("test", stderr)
 	emlPath := fs.String("eml", "", ".eml 檔案路徑（必填）")
 	mailbox := fs.String("mailbox", "", "使用哪個信箱的範本與名稱")
 	sendTo := fs.String("send", "", "實際發送到這個目標")
@@ -22,10 +22,11 @@ func cmdTest(configPath string, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "用法：relay test --eml <檔案> [--mailbox <信箱>] [--send <目標>]")
 		return 2
 	}
-	a, err := loadApp(configPath)
+	st, a, err := loadFromDB(context.Background())
 	if err != nil {
 		return fail(stderr, err)
 	}
+	st.Close()
 	raw, err := os.ReadFile(*emlPath)
 	if err != nil {
 		return fail(stderr, err)
@@ -38,7 +39,7 @@ func cmdTest(configPath string, args []string, stdout, stderr io.Writer) int {
 	if *mailbox != "" {
 		m, ok := a.Config.Mailboxes[*mailbox]
 		if !ok {
-			return fail(stderr, fmt.Errorf("找不到信箱 %q", *mailbox))
+			return fail(stderr, notFound("信箱", *mailbox))
 		}
 		displayName, username = m.DisplayName, m.Username
 	}
@@ -83,7 +84,7 @@ func cmdTest(configPath string, args []string, stdout, stderr io.Writer) int {
 	if *sendTo != "" {
 		t, ok := a.Config.Targets[*sendTo]
 		if !ok {
-			return fail(stderr, fmt.Errorf("找不到目標 %q", *sendTo))
+			return fail(stderr, notFound("目標", *sendTo))
 		}
 		err := telegramClient().Send(context.Background(), telegram.SendRequest{Token: a.Config.Bots[t.Bot].Token,
 			ChatID: t.ChatID, Text: out.Text, HTML: true, ReplyMarkup: out.ReplyMarkup})

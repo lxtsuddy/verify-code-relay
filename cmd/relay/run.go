@@ -13,67 +13,105 @@ import (
 	"syscall"
 	"time"
 
+	"verify-code-relay/internal/config"
 	"verify-code-relay/internal/health"
 	"verify-code-relay/internal/runtime"
+	"verify-code-relay/internal/store"
 )
 
-func cmdRun(configPath string, args []string, stdout, stderr io.Writer) int {
-	fs := newFlags("run", &configPath, stderr)
+// webHandler is replaced by the real admin UI in Task 6.
+var webHandler = func(st *store.Store, rt *runtime.Runtime, log *slog.Logger) http.Handler {
+	return http.NotFoundHandler()
+}
+
+func cmdRun(args []string, stdout, stderr io.Writer) int {
+	fs := newFlags("run", stderr)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	restrictUmask()
-	b, err := loadApp(configPath)
-	if err != nil {
-		fmt.Fprintf(stderr, "設定檔有誤（%s）：\n%v\n", configPath, err)
-		return 1
+	if fs.NArg() > 0 {
+		fmt.Fprintln(stderr, "用法：relay run")
+		return 2
 	}
-	cfg := b.Config
+	restrictUmask()
 	level := new(slog.LevelVar) // runtime.Apply sets it from log_level
 	log := newLogger(level, stdout)
-	st, err := openStore(cfg)
+
+	st, err := openDB()
 	if err != nil {
 		return fail(stderr, err)
 	}
 	defer st.Close()
+	if err := ensureAdmin(context.Background(), st, log); err != nil {
+		return fail(stderr, err)
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	// Bind synchronously so a port conflict or bad address fails startup instead of
-	// silently running without /healthz.
-	var httpLn net.Listener
-	if cfg.HTTPListen != "" {
-		httpLn, err = net.Listen("tcp", cfg.HTTPListen)
+	// silently running without the web UI or health checks.
+	webAddr, hAddr := listenAddr(), healthAddr()
+	webLn, err := net.Listen("tcp", webAddr)
+	if err != nil {
+		return fail(stderr, fmt.Errorf("RELAY_LISTEN %q：%w", webAddr, err))
+	}
+	defer webLn.Close()
+	var healthLn net.Listener
+	if hAddr != "" {
+		healthLn, err = net.Listen("tcp", hAddr)
 		if err != nil {
-			return fail(stderr, fmt.Errorf("http_listen %q：%w", cfg.HTTPListen, err))
+			return fail(stderr, fmt.Errorf("RELAY_HEALTH_LISTEN %q：%w", hAddr, err))
 		}
-		defer httpLn.Close()
+		defer healthLn.Close()
 	}
 
 	rt := runtime.New(runtime.Options{Store: st, Log: log, Level: level, Sender: telegramClient(), Dial: runtime.TLSDial})
+	b, err := buildStored(ctx, st)
+	if err != nil {
+		log.Error("資料庫中的設定無效，改以空設定啟動，請到 Web 修正", "err", err)
+		if b, err = runtime.Build(config.Empty()); err != nil {
+			return fail(stderr, fmt.Errorf("空設定：%w", err)) // cannot happen: the empty config is valid
+		}
+	}
 	rt.Apply(b)
 
-	var httpSrv *http.Server
-	if httpLn != nil {
-		httpSrv = &http.Server{Handler: health.Handler(rt.Sources, st.Ping), ReadHeaderTimeout: 5 * time.Second}
-		go func() {
-			if err := httpSrv.Serve(httpLn); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Error("HTTP 服務失敗", "err", err)
-			}
-		}()
+	webSrv := serveHTTP(webLn, webHandler(st, rt, log), "Web 服務失敗", log)
+	var healthSrv *http.Server
+	if healthLn != nil {
+		healthSrv = serveHTTP(healthLn, health.Handler(rt.Sources, st.Ping), "健康檢查服務失敗", log)
 	}
-	log.Info("服務已啟動", "watchers", len(rt.Snapshot().Watchers), "http", cfg.HTTPListen)
+	log.Info("服務已啟動", "watchers", len(rt.Snapshot().Watchers), "web", webAddr, "health", hAddr)
 
 	<-ctx.Done()
 	stop() // restore default signal handling: a second signal kills a hung shutdown
 	log.Info("收到停止訊號，正在關閉")
 	rt.Stop()
-	if httpSrv != nil {
-		shutdownHTTP(httpSrv, 5*time.Second, log)
+	shutdownHTTP(webSrv, 5*time.Second, log)
+	if healthSrv != nil {
+		shutdownHTTP(healthSrv, 5*time.Second, log)
 	}
 	log.Info("已停止")
 	return 0
+}
+
+// buildStored loads and builds the latest stored config.
+func buildStored(ctx context.Context, st *store.Store) (*runtime.Built, error) {
+	raw, _, err := runtime.LoadConfig(ctx, st)
+	if err != nil {
+		return nil, err
+	}
+	return runtime.Build(raw)
+}
+
+func serveHTTP(ln net.Listener, h http.Handler, failMsg string, log *slog.Logger) *http.Server {
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error(failMsg, "err", err)
+		}
+	}()
+	return srv
 }
 
 func shutdownHTTP(srv *http.Server, timeout time.Duration, log *slog.Logger) {

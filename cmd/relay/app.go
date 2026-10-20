@@ -12,10 +12,16 @@ import (
 	"verify-code-relay/internal/telegram"
 )
 
-// newFlags returns a FlagSet that also accepts --config after the subcommand.
-func newFlags(name string, configPath *string, stderr io.Writer) *flag.FlagSet {
+// newFlags returns a FlagSet for a subcommand that writes its errors to stderr.
+func newFlags(name string, stderr io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	return fs
+}
+
+// newConfigFlags is newFlags plus --config (YAML file path) for config import/validate.
+func newConfigFlags(name string, configPath *string, stderr io.Writer) *flag.FlagSet {
+	fs := newFlags(name, stderr)
 	fs.StringVar(configPath, "config", *configPath, "設定檔路徑")
 	return fs
 }
@@ -61,6 +67,11 @@ func telegramClient() *telegram.Client {
 		c.BaseURL = u
 	}
 	return c
+}
+
+// notFound reports a missing mailbox or target in the stored config.
+func notFound(kind, name string) error {
+	return fmt.Errorf("找不到%s %q（設定存在資料庫中：請在 Web 上新增，或用 relay config import 匯入）", kind, name)
 }
 
 func fail(stderr io.Writer, err error) int {
