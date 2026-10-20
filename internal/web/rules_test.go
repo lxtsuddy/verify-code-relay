@@ -46,6 +46,11 @@ func TestTemplatePreview(t *testing.T) {
 	if !strings.Contains(body, `"ok":true`) || !strings.Contains(body, "834291") || strings.Contains(body, "<script>") {
 		t.Fatalf("preview = %s", body)
 	}
+	// encoding/json escapes "<", so the check above cannot see tags: look at the decoded HTML
+	var a previewAnswer
+	if err := json.Unmarshal([]byte(body), &a); err != nil || a.HTML != "<b>GitHub</b> <code>834291</code>x" || strings.Contains(a.HTML, "script") {
+		t.Fatalf("html = %q (%v)", a.HTML, err)
+	}
 	_, body = e.postJSON("/api/templates/preview", map[string]string{"kind": "code", "template": "{{.Nope}}"})
 	if !strings.Contains(body, `"ok":false`) {
 		t.Fatalf("bad template = %s", body)
@@ -167,6 +172,30 @@ func TestRulesForm(t *testing.T) {
 // invalidField reports whether the element with id is marked aria-invalid.
 func invalidField(body, id string) bool {
 	return regexp.MustCompile(`id="` + regexp.QuoteMeta(id) + `"[^>]*aria-invalid="true"`).MatchString(body)
+}
+
+func TestImportedSpacingIsNoChange(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) {
+		c.Rules = []config.Rule{{Name: "a", From: "*@a.test ", CodeRegex: "(\\d+)\n"}}
+		c.Recognize.ExtraCodeKeywords = []string{" 認證碼"}
+		c.Templates.Code = "{{.Code}}\n"
+	})
+	e.login()
+	n := versionCount(t, e)
+	resp, _ := e.postForm("/rules", url.Values{
+		"rule_name": {"a"}, "rule_from": {"*@a.test"}, "rule_subject": {""}, "rule_code_regex": {`(\d+)`},
+		"rule_link_regex": {""}, "rule_ignore": {"0"}, "extra_code_keywords": {"認證碼"}, "extra_link_keywords": {""},
+	})
+	if resp.StatusCode != 303 || e.flash(resp) != "沒有變更" {
+		t.Errorf("rules = %d %q", resp.StatusCode, e.flash(resp))
+	}
+	resp, _ = e.postForm("/templates", url.Values{"tpl_code": {"{{.Code}}"}, "tpl_link": {""}, "tpl_both": {""}})
+	if resp.StatusCode != 303 || e.flash(resp) != "沒有變更" {
+		t.Errorf("templates = %d %q", resp.StatusCode, e.flash(resp))
+	}
+	if versionCount(t, e) != n {
+		t.Error("a version was stored")
+	}
 }
 
 func TestTemplatesForm(t *testing.T) {

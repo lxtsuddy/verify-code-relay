@@ -117,7 +117,7 @@ Microsoft 已停用 IMAP 的帳號密碼登入，必須使用 OAuth2：
 
 ## 範本
 
-使用 Go `html/template`（Telegram HTML 格式），郵件內容會自動跳脫。可用變數：`.Code` `.URL` `.Service` `.FromName` `.FromAddr` `.To` `.Subject` `.Mailbox` `.Date` `.Rule`。依結果使用 `code` / `link` / `both` 範本，查找順序：信箱 `templates` → 全域 `templates` → 內建。按鈕（複製驗證碼、開啟連結）自動產生。
+使用 Go `html/template`（Telegram HTML 格式），郵件內容會自動跳脫。可用變數：`.Code` `.URL` `.Service` `.FromName` `.FromAddr` `.To` `.Subject` `.Mailbox` `.Date` `.Rule`。依結果使用 `code` / `link` / `both` 範本，查找順序：信箱 `templates` → 全域 `templates` → 內建。按鈕（複製驗證碼、開啟連結）自動產生。範本只能依序輸出：不支援 `range`、`template`、`define`／`block`，`printf` 的寬度與精確度最多 3 位數。
 
 ## 健康檢查
 

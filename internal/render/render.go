@@ -53,16 +53,19 @@ var trialData = Data{Code: "123456", URL: "https://example.com/verify?token=abc"
 	Mailbox: "Mailbox", Rule: "builtin:code", Date: time.Unix(0, 0)}
 
 func compile(path, src string) (*template.Template, error) {
-	t, err := template.New(path).Option("missingkey=error").Parse(src)
+	t, err := template.New(path).Option("missingkey=error").Funcs(funcs).Parse(src)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	if err := t.Execute(&bytes.Buffer{}, trialData); err != nil {
+	if err := checkTree(t); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if _, err := execute(t, trialData); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	// Fields can be empty at run time (and Render empties the subject and URL to fit the
 	// limit), so branches taken only on empty values must be checked too.
-	if err := t.Execute(&bytes.Buffer{}, Data{}); err != nil {
+	if _, err := execute(t, Data{}); err != nil {
 		return nil, fmt.Errorf("%s: 欄位為空值時執行失敗：%w", path, err)
 	}
 	return t, nil
@@ -201,11 +204,11 @@ func fitSubject(t *template.Template, d Data) (string, error) {
 }
 
 func exec(t *template.Template, d Data) (string, error) {
-	var b bytes.Buffer
-	if err := t.Execute(&b, d); err != nil {
+	text, err := execute(t, d)
+	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(b.String()), nil
+	return strings.TrimSpace(text), nil
 }
 
 type button struct {

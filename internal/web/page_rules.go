@@ -164,10 +164,12 @@ func (s *Server) postRules(w http.ResponseWriter, r *http.Request) {
 		ExtraCodeKeywords: readKeywords(d.CodeKeywords),
 		ExtraLinkKeywords: readKeywords(d.LinkKeywords),
 	}
+	// stored values are compared as the form would read them back (an imported rule or
+	// keyword with outer spaces is not a change)
 	apply := func(raw *config.Config) bool {
-		changed := !reflect.DeepEqual(raw.Rules, d.Rules) && (len(raw.Rules) > 0 || len(d.Rules) > 0) ||
-			!reflect.DeepEqual(nilIfEmpty(raw.Recognize.ExtraCodeKeywords), opts.ExtraCodeKeywords) ||
-			!reflect.DeepEqual(nilIfEmpty(raw.Recognize.ExtraLinkKeywords), opts.ExtraLinkKeywords)
+		changed := !reflect.DeepEqual(normRules(raw.Rules), d.Rules) ||
+			!reflect.DeepEqual(readKeywords(strings.Join(raw.Recognize.ExtraCodeKeywords, "\n")), opts.ExtraCodeKeywords) ||
+			!reflect.DeepEqual(readKeywords(strings.Join(raw.Recognize.ExtraLinkKeywords, "\n")), opts.ExtraLinkKeywords)
 		raw.Rules, raw.Recognize = d.Rules, opts
 		return changed
 	}
@@ -208,11 +210,19 @@ func (s *Server) postRules(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func nilIfEmpty(v []string) []string {
-	if len(v) == 0 {
-		return nil
+// normRules is rules as readRules would read them back from the form (nil when none).
+func normRules(rules []config.Rule) []config.Rule {
+	var out []config.Rule
+	for _, r := range rules {
+		r = config.Rule{
+			Name: strings.TrimSpace(r.Name), From: strings.TrimSpace(r.From), Subject: strings.TrimSpace(r.Subject),
+			CodeRegex: strings.TrimSpace(r.CodeRegex), LinkRegex: strings.TrimSpace(r.LinkRegex), Ignore: r.Ignore,
+		}
+		if r != (config.Rule{}) {
+			out = append(out, r)
+		}
 	}
-	return v
+	return out
 }
 
 // ---------- templates ----------
@@ -280,9 +290,10 @@ func (s *Server) renderTemplates(w http.ResponseWriter, r *http.Request, status 
 }
 
 // readTemplate reads a template field: browser CRLF line ends back to LF, outer space trimmed.
-func readTemplate(r *http.Request, k string) string {
-	return strings.TrimSpace(strings.ReplaceAll(r.PostFormValue(k), "\r\n", "\n"))
-}
+func readTemplate(r *http.Request, k string) string { return normTemplate(r.PostFormValue(k)) }
+
+// normTemplate is a template as the form reads it back (also used to compare stored ones).
+func normTemplate(v string) string { return strings.TrimSpace(strings.ReplaceAll(v, "\r\n", "\n")) }
 
 func (s *Server) postTemplates(w http.ResponseWriter, r *http.Request) {
 	t := config.Templates{Code: readTemplate(r, "tpl_code"), Link: readTemplate(r, "tpl_link"), Both: readTemplate(r, "tpl_both")}
@@ -298,7 +309,7 @@ func (s *Server) postTemplates(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fe, err := s.mutate(r, "修改訊息範本", func(raw *config.Config) error {
-		if raw.Templates == t {
+		if normTemplate(raw.Templates.Code) == t.Code && normTemplate(raw.Templates.Link) == t.Link && normTemplate(raw.Templates.Both) == t.Both {
 			return errNoChange
 		}
 		raw.Templates = t

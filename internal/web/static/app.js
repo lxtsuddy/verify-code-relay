@@ -1084,7 +1084,8 @@
       [data-rules-compact]                    精簡檢視（aria-pressed）：只顯示列首，方便調整順序；有錯誤與新加的列保持展開。
       [data-rule-add]                         由 <template id="rule-new"> 加一列；其中的 "rule-new" id 前綴換成唯一值。
       [data-rule-live]                        螢幕閱讀器的移動／刪除提示。
-    [data-tags] .textarea[data-tags-source]   一行一個的關鍵字欄位，強化成可刪除的標籤；送出的仍是 textarea。
+    [data-tags] .textarea[data-tags-source]   一行一個的關鍵字欄位，強化成可刪除的標籤（Enter 加入，貼上多行時逐行加入；
+                                            關鍵字可以含逗號）；送出的仍是 textarea。
   */
 
   var ruleSeq = 0;
@@ -1290,7 +1291,7 @@
 
     function add(raw) {
       var added = false;
-      raw.split(/[\n,，、]+/).forEach(function (s) {
+      raw.split(/\r?\n/).forEach(function (s) {
         s = s.trim();
         if (!s) return;
         var dup = null;
@@ -1314,7 +1315,7 @@
     box.addEventListener("click", function (e) { if (e.target === box || e.target === list) input.focus(); });
     input.addEventListener("keydown", function (e) {
       if (e.isComposing) return;
-      if (e.key === "Enter" || e.key === ",") {
+      if (e.key === "Enter") {
         e.preventDefault();
         add(input.value);
         input.value = "";
@@ -1325,7 +1326,7 @@
     });
     input.addEventListener("paste", function (e) {
       var text = e.clipboardData ? e.clipboardData.getData("text") : "";
-      if (/[\n,，、]/.test(text)) {
+      if (/\n/.test(text)) {
         e.preventDefault();
         add(text);
       }
@@ -1422,9 +1423,9 @@
       done();
       if (!d.ok) { fail(d.error || "無法產生預覽"); return; }
       pq(fig, "[data-pv-error]").hidden = true;
-      var msg = pq(fig, "[data-pv-msg]");
-      msg.classList.remove("is-stale");
-      msg.hidden = false;
+      var bubble = pq(fig, "[data-pv-msg]");
+      bubble.classList.remove("is-stale");
+      bubble.hidden = false;
       fig.dataset.shown = "1";
       showSafeHTML(pq(fig, "[data-pv-text]"), d.html || "");
       pq(fig, "[data-pv-time]").textContent = nowHM();
@@ -1460,9 +1461,9 @@
     function fail(msg) {
       pq(fig, "[data-pv-error-text]").textContent = msg;
       pq(fig, "[data-pv-error]").hidden = false;
-      var msg = pq(fig, "[data-pv-msg]");
-      msg.classList.add("is-stale");
-      if (!fig.dataset.shown) msg.hidden = true; // nothing good to show yet
+      var bubble = pq(fig, "[data-pv-msg]");
+      bubble.classList.add("is-stale");
+      if (!fig.dataset.shown) bubble.hidden = true; // nothing good to show yet
       tabState(kind, "有錯誤", "err");
     }
   }
