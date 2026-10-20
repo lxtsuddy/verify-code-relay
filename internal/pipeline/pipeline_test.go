@@ -3,8 +3,10 @@ package pipeline
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -221,5 +223,161 @@ func TestProcessRedactsSplitCodeInSubject(t *testing.T) {
 	items, _ := st.DueOutbox(ctx, now, 10)
 	if len(items) == 0 || !strings.Contains(items[0].Text, subject) || !strings.Contains(items[0].Text, "<code>123456</code>") {
 		t.Errorf("outbox text must keep the real subject and code: %+v", items)
+	}
+}
+
+// Messages that are not forwarded must record why (kind) and that nothing was
+// sent (result), and still advance the mailbox state.
+func TestProcessNotForwardedKindAndResult(t *testing.T) {
+	cases := []struct {
+		name     string
+		env      Envelope
+		raw      []byte
+		wantKind string
+		wantRule string
+		wantFrom string
+	}{
+		{"ignored", Envelope{UID: 21}, eml("promo@news.example.com", "me@gmail.com", "Your code is SAVE2026", "promo code SAVE2026"),
+			"ignored", "custom:promo", "promo@news.example.com"},
+		{"none", Envelope{UID: 22}, eml("a@b.c", "me@gmail.com", "Hello", "Just saying hi"),
+			"none", "", "a@b.c"},
+		{"unparseable", Envelope{UID: 23, From: "x@y.z", Subject: "s"}, []byte("\x00\x01 not mail"),
+			"none", "", "x@y.z"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p, st, notified, now := newProc(t)
+			cs := &capturingStore{Store: st}
+			p.Store = cs
+			c.env.InternalDate = now
+			if err := p.Process(ctx, mb, "INBOX", 7, c.env, c.raw); err != nil {
+				t.Fatal(err)
+			}
+			if len(cs.entries) != 1 {
+				t.Fatalf("entries = %d, want 1", len(cs.entries))
+			}
+			e := cs.entries[0]
+			if e.Kind != c.wantKind || e.Result != "not_forwarded" || e.Rule != c.wantRule || e.FromAddr != c.wantFrom {
+				t.Errorf("entry = %+v, want kind=%q result=not_forwarded rule=%q from=%q", e, c.wantKind, c.wantRule, c.wantFrom)
+			}
+			if e.Mailbox != "gmail" || e.Folder != "INBOX" || e.UID != c.env.UID || !e.At.Equal(now) {
+				t.Errorf("entry identity = %+v", e)
+			}
+			items, _ := st.DueOutbox(ctx, now, 10)
+			s, _, _ := st.GetMailboxState(ctx, "gmail", "INBOX")
+			if len(items) != 0 || *notified != 0 || s != (store.MailboxState{UIDValidity: 7, LastUID: c.env.UID}) {
+				t.Errorf("items=%d notified=%d state=%+v", len(items), *notified, s)
+			}
+		})
+	}
+}
+
+func TestRecordSkippedKindAndResult(t *testing.T) {
+	for _, kind := range []string{"skipped_age", "skipped_size"} {
+		t.Run(kind, func(t *testing.T) {
+			p, st, notified, now := newProc(t)
+			cs := &capturingStore{Store: st}
+			p.Store = cs
+			env := Envelope{UID: 31, From: "a@b.c", Subject: "old"}
+			if err := p.RecordSkipped(ctx, mb, "INBOX", 7, env, kind); err != nil {
+				t.Fatal(err)
+			}
+			if len(cs.entries) != 1 {
+				t.Fatalf("entries = %d, want 1", len(cs.entries))
+			}
+			want := store.LogEntry{At: now, Mailbox: "gmail", Folder: "INBOX", UID: 31, FromAddr: "a@b.c",
+				Subject: "old", Kind: kind, Result: "not_forwarded"}
+			if e := cs.entries[0]; e != want {
+				t.Errorf("entry = %+v, want %+v", e, want)
+			}
+			items, _ := st.DueOutbox(ctx, now, 10)
+			s, _, _ := st.GetMailboxState(ctx, "gmail", "INBOX")
+			if len(items) != 0 || *notified != 0 || s != (store.MailboxState{UIDValidity: 7, LastUID: 31}) {
+				t.Errorf("items=%d notified=%d state=%+v", len(items), *notified, s)
+			}
+		})
+	}
+}
+
+// corpus reads a message from the shared recognition test corpus.
+func corpus(t *testing.T, name string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "eml", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func TestProcessForwardedKind(t *testing.T) {
+	cases := []struct {
+		name     string
+		raw      []byte
+		wantKind string
+	}{
+		{"code", eml("GitHub <noreply@github.com>", "me@gmail.com", "[GitHub] Please verify your device", "Verification code: 482913"), "code"},
+		{"link", corpus(t, "verify-email-link-en.eml"), "link"},
+		{"both", corpus(t, "code-and-link-en.eml"), "both"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			p, st, notified, now := newProc(t)
+			cs := &capturingStore{Store: st}
+			p.Store = cs
+			if err := p.Process(ctx, mb, "INBOX", 7, Envelope{UID: 41, InternalDate: now}, c.raw); err != nil {
+				t.Fatal(err)
+			}
+			if len(cs.entries) != 1 {
+				t.Fatalf("entries = %d, want 1", len(cs.entries))
+			}
+			e := cs.entries[0]
+			if e.Kind != c.wantKind || e.Result != "pending" || e.Rule == "" {
+				t.Errorf("entry = %+v, want kind=%q result=pending and a rule", e, c.wantKind)
+			}
+			items, _ := st.DueOutbox(ctx, now, 10)
+			if len(items) != len(mb.Targets) || *notified != 1 {
+				t.Errorf("items=%d notified=%d", len(items), *notified)
+			}
+		})
+	}
+}
+
+type failingRenderer struct{ err error }
+
+func (f failingRenderer) Render(string, render.Data) (render.Rendered, error) {
+	return render.Rendered{}, f.err
+}
+
+// A template failure records the message as failed, enqueues nothing, still
+// advances the state (so the message is not retried forever) and never logs the code.
+func TestProcessRenderFailure(t *testing.T) {
+	p, st, notified, now := newProc(t)
+	cs := &capturingStore{Store: st}
+	p.Store = cs
+	p.Renderer = failingRenderer{err: errors.New("template: code: boom")}
+	var buf bytes.Buffer
+	p.Log = slog.New(slog.NewTextHandler(&buf, nil))
+	raw := eml("GitHub <noreply@github.com>", "me@gmail.com", "482913 is your GitHub code", "Verification code: 482913")
+	if err := p.Process(ctx, mb, "INBOX", 7, Envelope{UID: 51, InternalDate: now}, raw); err != nil {
+		t.Fatal(err)
+	}
+	if len(cs.entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(cs.entries))
+	}
+	e := cs.entries[0]
+	if e.Kind != "code" || e.Result != "failed" || e.Rule == "" || e.Subject != "****** is your GitHub code" {
+		t.Errorf("entry = %+v", e)
+	}
+	items, _ := st.DueOutbox(ctx, now, 10)
+	s, _, _ := st.GetMailboxState(ctx, "gmail", "INBOX")
+	if len(items) != 0 || *notified != 0 || s != (store.MailboxState{UIDValidity: 7, LastUID: 51}) {
+		t.Errorf("items=%d notified=%d state=%+v", len(items), *notified, s)
+	}
+	logged := buf.String()
+	if !strings.Contains(logged, "套用範本失敗") || !strings.Contains(logged, "boom") {
+		t.Errorf("render failure not logged: %q", logged)
+	}
+	if strings.Contains(logged, "482913") {
+		t.Errorf("slog output leaked the code: %q", logged)
 	}
 }
