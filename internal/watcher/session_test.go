@@ -1,11 +1,16 @@
 package watcher
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/emersion/go-imap/v2"
+	"github.com/emersion/go-imap/v2/imapclient"
 
 	"verify-code-relay/internal/auth"
 	"verify-code-relay/internal/pipeline"
@@ -216,11 +221,156 @@ func TestBlackHoleConnectionIsDetected(t *testing.T) {
 	e.dialer.last().frozen.Store(true)
 	select {
 	case err := <-done:
-		if err == nil {
-			t.Fatal("want error")
+		// Detected by await's timeout, not by some unrelated connection error.
+		if !errors.Is(err, errDead) {
+			t.Fatalf("err = %v, want errDead", err)
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("dead connection not detected")
+	}
+}
+
+// dropLines makes a rewriter that drops server lines containing any of subs
+// and counts the dropped lines in dropped.
+func dropLines(dropped *atomic.Int32, subs ...string) func() func([]byte) []byte {
+	return func() func([]byte) []byte {
+		return func(line []byte) []byte {
+			for _, s := range subs {
+				if bytes.Contains(line, []byte(s)) {
+					dropped.Add(1)
+					return nil
+				}
+			}
+			return line
+		}
+	}
+}
+
+// threeMinusLast leaves uids 1 and 2 in the mailbox with UIDNEXT 4, so that
+// UIDNEXT-1 (3) and the highest UID (2) tell the two fallbacks apart.
+func threeMinusLast(t *testing.T, e *env) {
+	t.Helper()
+	for i := 0; i < 3; i++ {
+		e.srv.appendMsg(t, "backlog")
+	}
+	if err := e.srv.expunge(3); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// firstRunWatermark runs one session and returns the watermark it stored.
+func firstRunWatermark(t *testing.T, e *env) uint32 {
+	t.Helper()
+	stop, _, _ := runSession(t, e)
+	stop()
+	st, ok, err := e.st.GetMailboxState(context.Background(), "mb", "INBOX")
+	if err != nil || !ok {
+		t.Fatalf("state: ok=%v err=%v", ok, err)
+	}
+	if n := len(e.proc.got()); n != 0 {
+		t.Errorf("%d backlog messages processed", n)
+	}
+	return st.LastUID
+}
+
+// SELECT without UIDNEXT: the first-run watermark comes from STATUS.
+func TestUIDNextFromStatus(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	var dropped atomic.Int32
+	e.dialer.rewriter = dropLines(&dropped, "[UIDNEXT ")
+	threeMinusLast(t, e)
+	if got := firstRunWatermark(t, e); got != 3 {
+		t.Fatalf("last_uid = %d, want 3 (UIDNEXT 4 from STATUS)", got)
+	}
+	if dropped.Load() == 0 {
+		t.Fatal("SELECT response had no UIDNEXT to drop; the fallback was not exercised")
+	}
+}
+
+// Neither SELECT nor STATUS reports UIDNEXT: fall back to the highest UID.
+func TestUIDNextFromSearch(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	var dropped atomic.Int32
+	e.dialer.rewriter = dropLines(&dropped, "[UIDNEXT ", "* STATUS ")
+	threeMinusLast(t, e)
+	if got := firstRunWatermark(t, e); got != 2 {
+		t.Fatalf("last_uid = %d, want 2 (highest UID from SEARCH)", got)
+	}
+	if dropped.Load() < 2 {
+		t.Fatalf("dropped %d lines, want UIDNEXT from both SELECT and STATUS", dropped.Load())
+	}
+}
+
+func TestUIDNextFromSearchEmptyMailbox(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	var dropped atomic.Int32
+	e.dialer.rewriter = dropLines(&dropped, "[UIDNEXT ", "* STATUS ")
+	if got := firstRunWatermark(t, e); got != 0 {
+		t.Fatalf("last_uid = %d, want 0", got)
+	}
+	stop, _, _ := runSession(t, e)
+	defer stop()
+	waitIdle(t, e)
+	e.srv.appendMsg(t, "first")
+	eventually(t, "uid 1 processed", func() bool { return equalUIDs(e.proc.got(), 1) })
+}
+
+// A message expunged after its metadata FETCH but before its body FETCH is
+// passed over: the watermark moves past it and later mail still flows.
+func TestMessageExpungedBetweenFetches(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	var once sync.Once
+	e.proc.onDecide = func(env pipeline.Envelope) {
+		if env.UID == 1 {
+			once.Do(func() {
+				if err := e.srv.expunge(1); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+	}
+	stop, _, done := runSession(t, e)
+	defer stop()
+	waitIdle(t, e)
+	e.srv.appendMsg(t, "deleted right away")
+	waitIdles(t, e, 2) // handled uid 1, back in IDLE
+	st, _, _ := e.st.GetMailboxState(context.Background(), "mb", "INBOX")
+	if st.LastUID != 1 {
+		t.Fatalf("watermark = %+v, want last_uid 1", st)
+	}
+	if n := e.dialer.last().bodies.Load(); n != 1 {
+		t.Fatalf("%d body FETCHes, want 1", n)
+	}
+	e.srv.appendMsg(t, "next")
+	eventually(t, "uid 2 processed", func() bool { return equalUIDs(e.proc.got(), 2) })
+	select {
+	case err := <-done:
+		t.Fatalf("session ended: %v", err)
+	default:
+	}
+}
+
+func TestToEnvelope(t *testing.T) {
+	date := time.Date(2026, 10, 20, 8, 0, 0, 0, time.UTC)
+	full := toEnvelope(&imapclient.FetchMessageBuffer{
+		UID: 7, InternalDate: date, RFC822Size: 1234,
+		Envelope: &imap.Envelope{
+			Subject: "登入驗證碼",
+			From: []imap.Address{
+				{Name: "Bank", Mailbox: "noreply", Host: "bank.example"},
+				{Mailbox: "second", Host: "x.example"},
+			},
+		},
+	})
+	want := pipeline.Envelope{UID: 7, InternalDate: date, Size: 1234, Subject: "登入驗證碼", From: "noreply@bank.example"}
+	if full != want {
+		t.Errorf("full = %+v, want %+v", full, want)
+	}
+	if got := toEnvelope(&imapclient.FetchMessageBuffer{UID: 8, Envelope: &imap.Envelope{Subject: "s"}}); got != (pipeline.Envelope{UID: 8, Subject: "s"}) {
+		t.Errorf("no From = %+v", got)
+	}
+	if got := toEnvelope(&imapclient.FetchMessageBuffer{UID: 9, RFC822Size: 5}); got != (pipeline.Envelope{UID: 9, Size: 5}) {
+		t.Errorf("no ENVELOPE = %+v", got)
 	}
 }
 
