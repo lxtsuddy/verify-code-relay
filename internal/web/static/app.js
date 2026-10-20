@@ -14,6 +14,8 @@
     data-otp                       只保留數字、最多 6 位；加 data-autosubmit 則 6 位且表單有效時自動送出。
     data-busy-text="處理中…"       送出按鈕在表單送出期間顯示的文字（同時擋下重複送出）。
 
+  伺服器退回表單時（欄位有 aria-invalid="true"），頁面載入後焦點會移到第一個出錯的欄位。
+
   頁面程式請使用 window.relay：
     relay.fetchJSON(url, body?)    有 body 時以 JSON POST，否則 GET；自動帶 X-CSRF-Token。
                                    回傳解析後的 JSON（呼叫端檢查 ok／error）；網路失敗、非 JSON
@@ -366,6 +368,15 @@
       nav.scrollLeft = cur.offsetLeft - (nav.clientWidth - cur.offsetWidth) / 2;
     }
   });
+
+  // a form sent back with errors: put the cursor in the first field to fix. After "load",
+  // because scrolling to a #fragment in the URL would otherwise take the focus away again.
+  function focusFirstInvalid() {
+    var bad = document.querySelector('main [aria-invalid="true"]');
+    if (bad && typeof bad.focus === "function") bad.focus();
+  }
+  if (document.readyState === "complete") focusFirstInvalid();
+  else window.addEventListener("load", function () { setTimeout(focusFirstInvalid, 0); });
 
   window.relay = {
     fetchJSON: fetchJSON,

@@ -23,6 +23,27 @@ func TestRoutesRequireLogin(t *testing.T) {
 			t.Errorf("GET %s redirects to %s", path, resp.Header.Get("Location"))
 		}
 	}
+	// POST-only routes answer 401 without a session (and 403 without CSRF, see middleware_test)
+	for _, path := range []string{"/logout", "/setup/totp", "/settings/general", "/settings/password", "/settings/totp", "/settings/versions/1/restore"} {
+		if resp, _ := e.postForm(path, nil); resp.StatusCode != http.StatusUnauthorized {
+			t.Errorf("POST %s without login = %d", path, resp.StatusCode)
+		}
+	}
+	// and are refused to a session still waiting for TOTP binding
+	p := newEnvNoTOTP(t)
+	p.postForm("/login", url.Values{"password": {testPassword}})
+	_, page := p.get("/setup/totp")
+	p.csrf = extractCSRF(page)
+	for _, path := range []string{"/settings", "/settings/versions"} {
+		if resp, _ := p.get(path); resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/setup/totp" {
+			t.Errorf("GET %s while pending = %d %s", path, resp.StatusCode, resp.Header.Get("Location"))
+		}
+	}
+	for _, path := range []string{"/settings/general", "/settings/password", "/settings/totp", "/settings/versions/1/restore"} {
+		if resp, _ := p.postForm(path, nil); resp.StatusCode != http.StatusForbidden {
+			t.Errorf("POST %s while pending = %d", path, resp.StatusCode)
+		}
+	}
 }
 
 func TestLoginFlow(t *testing.T) {

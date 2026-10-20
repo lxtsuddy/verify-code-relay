@@ -1,0 +1,43 @@
+{{template "app" .}}
+{{define "content"}}
+<header class="page-head">
+  <div>
+    <a class="back-link" href="/settings">{{template "icon" "arrow-left"}}<span>系統設定</span></a>
+    <h1 class="page-title">設定版本歷史</h1>
+    <p class="page-desc">每次儲存設定都會留下一個版本，保留最近 {{.Data.Keep}} 個。還原會把舊版本的內容存成一個新版本並立即套用，原有紀錄都不會刪除。</p>
+  </div>
+</header>
+
+{{if .Data.Versions}}
+<ol class="ledger" aria-label="設定版本，由新到舊">
+  {{range .Data.Versions}}
+  <li class="ledger-item{{if .Current}} is-current{{end}}">
+    <span class="ledger-no mono" aria-hidden="true">#{{.ID}}</span>
+    <div class="ledger-main">
+      <p class="ledger-summary"><span class="sr-only">版本 {{.ID}}：</span>{{.Summary}}</p>
+      <p class="ledger-meta">
+        <time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}" title="{{datetime .At}}">{{datetime .At}}</time>
+        <span class="ledger-ago">{{.Ago}}</span>
+        <span class="tag tag-src-{{.Source}}">{{.SourceLabel}}</span>
+        {{with .IP}}<span class="ledger-ip mono">{{.}}</span>{{end}}
+      </p>
+    </div>
+    <div class="ledger-action">
+      {{if .Current}}<span class="badge badge-ok">目前</span>
+      {{else}}<form method="post" action="/settings/versions/{{.ID}}/restore" data-confirm="把設定還原成版本 #{{.ID}}「{{.Summary}}」？&#10;目前的設定會被取代並立即套用，但仍保留在歷史中，可以再還原回來。" data-confirm-ok="還原並套用">
+        {{template "csrf" $}}
+        <button type="submit" class="btn btn-sm" data-busy-text="還原中…">{{template "icon" "refresh"}}<span>還原此版本</span></button>
+      </form>{{end}}
+    </div>
+  </li>
+  {{end}}
+</ol>
+{{else}}
+<section class="empty">
+  <span class="empty-icon">{{template "icon" "logs"}}</span>
+  <h2 class="empty-title">還沒有任何設定版本</h2>
+  <p class="empty-text">在網頁上儲存設定，或用 <code>relay config import</code> 匯入 YAML 後，版本就會出現在這裡。</p>
+  <a class="btn btn-primary" href="/settings">前往系統設定{{template "icon" "arrow-right"}}</a>
+</section>
+{{end}}
+{{end}}

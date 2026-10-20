@@ -21,6 +21,13 @@ func (s *Server) routes() {
 
 	m.HandleFunc("GET /{$}", s.authed(s.getHome))
 
+	m.HandleFunc("GET /settings", s.authed(s.getSettings))
+	m.HandleFunc("POST /settings/general", s.authed(s.postSettingsGeneral))
+	m.HandleFunc("POST /settings/password", s.authed(s.postSettingsPassword))
+	m.HandleFunc("POST /settings/totp", s.authed(s.postSettingsTOTP))
+	m.HandleFunc("GET /settings/versions", s.authed(s.getVersions))
+	m.HandleFunc("POST /settings/versions/{id}/restore", s.authed(s.postRestore))
+
 	m.HandleFunc("/", s.public(s.notFound))
 }
 

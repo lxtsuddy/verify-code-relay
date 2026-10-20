@@ -585,6 +585,132 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .otp-form { margin-top: 12px; }
 .otp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 22px; margin-bottom: 8px; }
 
+/* ---------- settings page ---------- */
+
+.back-link {
+  display: inline-flex; align-items: center; gap: 6px; margin-bottom: 8px;
+  font-size: 13.5px; font-weight: 600; text-decoration: none; color: var(--muted);
+}
+.back-link:hover { color: var(--green-700); }
+.back-link .icon { width: 16px; height: 16px; }
+
+.btn .tag { margin-left: 2px; font-family: var(--mono); font-weight: 600; }
+
+/* label + explanation on the left, a compact control on the right */
+.setting-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 220px); gap: 8px 32px; align-items: start;
+  padding: 16px 20px; border-bottom: 1px solid var(--line);
+}
+.setting-text .hint { margin-top: 2px; max-width: 54ch; }
+.setting-control { display: grid; gap: 4px; }
+.setting-default { font-size: 12.5px; color: var(--faint); }
+.setting-note {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 12px 20px; border-bottom: 1px solid var(--line);
+  background: var(--surface-2); font-size: 13px; color: var(--muted);
+}
+.setting-note .icon { width: 16px; height: 16px; margin-top: 3px; }
+.card-section { padding: 20px; }
+.foot-note { margin-right: auto; align-self: center; font-size: 13px; color: var(--muted); }
+
+/* segmented radio group */
+.segmented {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 3px; padding: 3px;
+  border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--sunken);
+}
+.segment { position: relative; cursor: pointer; }
+.segment input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.segment-label {
+  display: flex; flex-direction: column; align-items: center;
+  padding: 5px 4px; border-radius: 5px;
+  font-size: 14px; font-weight: 600; line-height: 1.3; color: var(--ink-2);
+  transition: background-color 0.15s, color 0.15s, box-shadow 0.15s;
+}
+.segment-label small { font-size: 11px; font-weight: 500; color: var(--faint); }
+.segment:hover .segment-label { color: var(--ink); }
+.segment input:checked + .segment-label { background: #fff; color: var(--green-800); box-shadow: var(--shadow-1), inset 0 0 0 1px var(--green-200); }
+.segment input:checked + .segment-label small { color: var(--green-600); }
+.segment input:focus-visible + .segment-label { outline: 2.5px solid var(--green-600); outline-offset: 1px; }
+.segment-hints { margin: 8px 0 0; padding: 0; list-style: none; font-size: 13px; color: var(--muted); }
+.segment-hints li { display: none; }
+.fieldset:has(input[value="debug"]:checked) [data-for="debug"],
+.fieldset:has(input[value="info"]:checked) [data-for="info"],
+.fieldset:has(input[value="warn"]:checked) [data-for="warn"],
+.fieldset:has(input[value="error"]:checked) [data-for="error"] { display: block; }
+
+/* two cards side by side, equal height, footers aligned */
+.grid-cards { align-items: stretch; }
+.grid-cards > .card { display: flex; flex-direction: column; margin-top: 0; }
+.grid-cards > .card > .card-body { flex: 1; align-content: start; }
+.card-icon {
+  display: grid; place-items: center; width: 34px; height: 34px; flex: none;
+  border-radius: 50%; background: var(--green-50); color: var(--green-700);
+}
+
+/* a smaller row of code boxes for forms with other fields */
+.otp-sm { font-size: 22px; height: 44px; }
+
+.mini-steps { margin: 0; padding: 0; list-style: none; counter-reset: ms; display: grid; gap: 6px; }
+.mini-steps li { position: relative; padding-left: 28px; counter-increment: ms; font-size: 14px; color: var(--ink-2); }
+.mini-steps li::before {
+  content: counter(ms); position: absolute; left: 0; top: 2px;
+  display: grid; place-items: center; width: 20px; height: 20px;
+  border-radius: 50%; background: var(--green-50); color: var(--green-700);
+  font-family: var(--mono); font-size: 11.5px; font-weight: 700;
+}
+
+/* the detected IP, cancelled with a postmark */
+.ip-card {
+  display: grid; grid-template-columns: 172px minmax(0, 1fr); gap: 12px 28px; align-items: center;
+  padding: 24px 24px 22px;
+}
+.ip-stamp { display: grid; place-items: center; }
+.postmark {
+  width: 160px; height: 160px; overflow: visible;
+  color: var(--green-800); opacity: 0.82; transform: rotate(-9deg);
+  animation: stamp 0.45s 0.15s var(--ease) backwards;
+}
+.pm-ring { fill: none; stroke: currentColor; stroke-width: 2.6; }
+.pm-thin { stroke-width: 1.1; }
+.pm-band { fill: none; stroke: currentColor; stroke-width: 1.4; }
+.pm-arc { fill: currentColor; font-family: var(--font); font-size: 14px; font-weight: 700; letter-spacing: 0.32em; text-anchor: middle; }
+.pm-arc-time { font-family: var(--mono); font-size: 13px; letter-spacing: 0.14em; }
+.pm-date { fill: currentColor; font-family: var(--mono); font-size: 19px; font-weight: 700; letter-spacing: 0.04em; text-anchor: middle; }
+.ip-label { font-size: 13.5px; font-weight: 600; color: var(--muted); }
+.ip-value { margin: 2px 0 6px; font-size: 30px; font-weight: 700; line-height: 1.2; letter-spacing: 0.01em; overflow-wrap: anywhere; color: var(--ink); }
+.ip-facts { display: grid; gap: 0; margin-top: 14px; border-top: 1px solid var(--line); }
+.ip-facts > div { display: grid; grid-template-columns: 9.5em minmax(0, 1fr); gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.ip-facts dt { color: var(--muted); }
+.ip-facts dd { overflow-wrap: anywhere; }
+.ip-card .callout { margin: 14px 0 0; }
+
+/* ---------- version history ---------- */
+
+.ledger {
+  margin: 0; padding: 0; list-style: none;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1);
+}
+.ledger-item {
+  display: grid; grid-template-columns: 4.5em minmax(0, 1fr) auto; gap: 4px 18px; align-items: center;
+  padding: 14px 20px; border-bottom: 1px solid var(--line);
+}
+.ledger-item:last-child { border-bottom: 0; }
+.ledger-item:hover { background: #fafcf9; }
+.ledger-no { font-size: 14px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* the version in force wears the postcode box */
+.is-current { background: var(--green-50); border-radius: var(--radius) var(--radius) 0 0; }
+.is-current:hover { background: var(--green-50); }
+.is-current .ledger-no { justify-self: start; padding: 1px 6px; border: 1.5px solid var(--red); background: #fff; color: var(--ink); }
+.ledger-summary { font-weight: 600; overflow-wrap: anywhere; }
+.ledger-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; margin-top: 2px; font-size: 13px; color: var(--muted); }
+.ledger-ago { color: var(--faint); }
+.ledger-ip { font-size: 12.5px; }
+.ledger-action { display: flex; justify-content: flex-end; }
+.tag-src-restore { background: var(--blue-50); color: var(--blue); }
+.tag-src-import, .tag-src-bootstrap { background: var(--amber-50); color: var(--amber-ink); }
+
+.callout p, .flash-text { white-space: pre-line; }
+
 /* ---------- motion ---------- */
 
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -592,6 +718,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 @keyframes drop-in { from { opacity: 0; transform: translateY(-6px); } }
 @keyframes rise-in { from { opacity: 0; transform: translateY(8px); } }
 @keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
+@keyframes stamp { from { opacity: 0; transform: rotate(-2deg) scale(1.25); } }
 @keyframes shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
 
 @media (prefers-reduced-motion: reduce) {
@@ -654,6 +781,17 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .auth-card { padding: 26px 20px 24px; }
   .auth-foot { margin: 24px -20px -24px; padding: 10px 12px 10px 20px; }
   .step { padding-left: 44px; }
+
+  .setting-row { grid-template-columns: minmax(0, 1fr); padding: 14px 16px; }
+  .setting-note { padding-left: 16px; padding-right: 16px; }
+  .card-section { padding: 16px; }
+  .foot-note { flex-basis: 100%; }
+  .ip-card { grid-template-columns: minmax(0, 1fr); padding: 20px 16px; }
+  .postmark { width: 132px; height: 132px; }
+  .ip-value { font-size: 26px; }
+  .ip-facts > div { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .ledger-item { grid-template-columns: 3.6em minmax(0, 1fr); gap: 4px 12px; padding: 14px 16px; }
+  .ledger-action { grid-column: 2; justify-content: flex-start; margin-top: 6px; }
   .qr { width: 176px; height: 176px; }
 }
 

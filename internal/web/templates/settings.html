@@ -1,0 +1,177 @@
+{{template "app" .}}
+{{define "content"}}
+<header class="page-head">
+  <div>
+    <h1 class="page-title">系統設定</h1>
+    <p class="page-desc">轉發的預設值、通知對象與登入安全。每次儲存都會留下一個設定版本，隨時可以還原。</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="/settings/versions">{{template "icon" "logs"}}<span>版本歷史</span>{{with .Data.Version}}<span class="tag">#{{.}}</span>{{end}}</a>
+  </div>
+</header>
+
+<form class="card" method="post" action="/settings/general" aria-labelledby="general-title" novalidate>
+  {{template "csrf" .}}
+  <header class="card-head">
+    <div>
+      <h2 class="card-title" id="general-title">轉發預設值</h2>
+      <p class="card-desc">留空就使用內建值。</p>
+    </div>
+  </header>
+  <div class="setting-rows">
+    {{range .Data.Durations}}{{$err := fieldErr $.Errors .Path}}
+    <div class="setting-row">
+      <div class="setting-text">
+        <label class="label" for="f-{{.Name}}">{{.Label}}</label>
+        <p class="hint" id="f-{{.Name}}-hint">{{.Hint}}</p>
+      </div>
+      <div class="setting-control">
+        <input class="input input-mono input-dur" id="f-{{.Name}}" name="{{.Name}}" type="text" value="{{.Value}}" placeholder="{{.Default}}" inputmode="text" autocomplete="off" spellcheck="false" aria-describedby="f-{{.Name}}-hint{{if $err}} f-{{.Name}}-err{{end}}"{{if $err}} aria-invalid="true"{{end}}>
+        <p class="setting-default">{{if .Value}}已自訂{{else}}內建 <span class="mono">{{.Default}}</span>{{end}}</p>
+        <div id="f-{{.Name}}-err">{{template "field-error" $err}}</div>
+      </div>
+    </div>
+    {{end}}
+  </div>
+  <p class="setting-note">{{template "icon" "info"}}<span>時間格式：<code>30s</code> 秒、<code>10m</code> 分鐘、<code>1h30m</code> 小時加分鐘。信箱可在「進階」覆寫郵件時效、待發訊息保留與輪詢間隔。</span></p>
+
+  <div class="card-section">
+    <div class="grid-2">
+      <div class="field">
+        <label class="label" for="f-admin">通知對象</label>
+        {{$adminErr := fieldErr .Errors "admin"}}
+        <select class="select" id="f-admin" name="admin" aria-describedby="f-admin-hint{{if $adminErr}} f-admin-err{{end}}"{{if $adminErr}} aria-invalid="true"{{end}}>
+          <option value=""{{if not .Data.Admin}} selected{{end}}>不設定（只寫日誌）</option>
+          {{range .Data.Targets}}<option value="{{.Name}}"{{if eq .Name $.Data.Admin}} selected{{end}}>{{.Name}}（Bot {{.Bot}} · chat {{.ChatID}}）</option>
+          {{end}}
+        </select>
+        <p class="hint" id="f-admin-hint">登入通知、密碼修改與信箱告警會送到這個 Telegram 目標。{{if not .Data.Targets}}目前還沒有目標，請先到 <a href="/telegram">Telegram</a> 新增。{{end}}</p>
+        <div id="f-admin-err">{{template "field-error" $adminErr}}</div>
+      </div>
+      <fieldset class="fieldset">
+        <legend>日誌等級</legend>
+        {{$lvErr := fieldErr .Errors "log_level"}}
+        <div class="segmented">
+          {{range .Data.LogLevels}}<label class="segment">
+            <input type="radio" name="log_level" value="{{.Value}}"{{if eq .Value $.Data.LogLevel}} checked{{end}}>
+            <span class="segment-label">{{.Label}}<small class="mono">{{.Value}}</small></span>
+          </label>{{end}}
+        </div>
+        <ul class="segment-hints">{{range .Data.LogLevels}}<li data-for="{{.Value}}">{{.Hint}}</li>{{end}}</ul>
+        {{template "field-error" $lvErr}}
+      </fieldset>
+    </div>
+  </div>
+  <footer class="card-foot">
+    <span class="foot-note">儲存後立即套用，信箱連線會重新建立。</span>
+    <button type="submit" class="btn btn-primary" data-busy-text="套用中…">{{template "icon" "check"}}<span>儲存並套用</span></button>
+  </footer>
+</form>
+
+<h2 class="section-title" id="security">登入安全</h2>
+<div class="grid-2 grid-cards">
+  <form class="card" method="post" action="/settings/password#security" aria-labelledby="pw-title">
+    {{template "csrf" .}}
+    <input type="text" name="username" value="admin" autocomplete="username" hidden>
+    <header class="card-head">
+      <div>
+        <h3 class="card-title" id="pw-title">修改密碼</h3>
+        <p class="card-desc">修改後，其他裝置上的登入會全部登出。</p>
+      </div>
+      <span class="card-icon">{{template "icon" "lock"}}</span>
+    </header>
+    <div class="card-body form">
+      {{with fieldErr .Errors "password"}}<div class="callout callout-error" role="alert">{{template "icon" "alert"}}<p>{{.}}</p></div>{{end}}
+      <div class="field">
+        <label class="label" for="pw-current">目前密碼</label>
+        <div class="secret">
+          <input class="input" id="pw-current" name="current" type="password" autocomplete="current-password" required>
+          <button type="button" class="secret-toggle" data-reveal="pw-current" aria-label="顯示密碼" aria-pressed="false">{{template "icon" "eye"}}</button>
+        </div>
+      </div>
+      <div class="field">
+        <label class="label" for="pw-code">驗證碼</label>
+        <input class="otp-input otp-sm" id="pw-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required data-otp>
+      </div>
+      {{$newErr := fieldErr .Errors "password.new"}}
+      <div class="field">
+        <label class="label" for="pw-new">新密碼</label>
+        <div class="secret">
+          <input class="input" id="pw-new" name="new" type="password" autocomplete="new-password" minlength="{{.Data.MinPwLen}}" required aria-describedby="pw-new-hint"{{if $newErr}} aria-invalid="true"{{end}}>
+          <button type="button" class="secret-toggle" data-reveal="pw-new" aria-label="顯示密碼" aria-pressed="false">{{template "icon" "eye"}}</button>
+        </div>
+        <p class="hint" id="pw-new-hint">至少 {{.Data.MinPwLen}} 個字元。建議用密碼管理器產生。</p>
+        {{template "field-error" $newErr}}
+      </div>
+      {{$cfErr := fieldErr .Errors "password.confirm"}}
+      <div class="field">
+        <label class="label" for="pw-confirm">再次輸入新密碼</label>
+        <input class="input" id="pw-confirm" name="confirm" type="password" autocomplete="new-password" required{{if $cfErr}} aria-invalid="true"{{end}}>
+        {{template "field-error" $cfErr}}
+      </div>
+    </div>
+    <footer class="card-foot">
+      <button type="submit" class="btn btn-primary" data-busy-text="修改中…">修改密碼</button>
+    </footer>
+  </form>
+
+  <form class="card" method="post" action="/settings/totp#security" aria-labelledby="totp-title">
+    {{template "csrf" .}}
+    <header class="card-head">
+      <div>
+        <h3 class="card-title" id="totp-title">兩步驟驗證</h3>
+        <p class="card-desc">換手機或驗證器 App 時重新綁定。</p>
+      </div>
+      <span class="badge badge-ok">已啟用</span>
+    </header>
+    <div class="card-body form">
+      <ol class="mini-steps">
+        <li>輸入目前驗證器上的驗證碼，確認是你本人。</li>
+        <li>用新的驗證器掃描下一頁的 QR code，並輸入新驗證碼完成綁定。</li>
+        <li>完成前，舊的驗證器仍可登入；完成後立即失效。</li>
+      </ol>
+      {{$codeErr := fieldErr .Errors "totp.code"}}
+      <div class="field">
+        <label class="label" for="totp-code">目前的驗證碼</label>
+        <input class="otp-input otp-sm" id="totp-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" required data-otp{{if $codeErr}} aria-invalid="true"{{end}}>
+        {{template "field-error" $codeErr}}
+      </div>
+    </div>
+    <footer class="card-foot">
+      <button type="submit" class="btn" data-busy-text="確認中…">{{template "icon" "refresh"}}<span>開始重新綁定</span></button>
+    </footer>
+  </form>
+</div>
+
+<h2 class="section-title" id="ip">目前的連線</h2>
+<section class="card ip-card" aria-labelledby="ip-title">
+  <div class="ip-stamp" aria-hidden="true">
+    <svg class="postmark" viewBox="0 0 160 160" focusable="false">
+      <defs>
+        <path id="pm-top" d="M 28 80 A 52 52 0 0 1 132 80"/>
+        <path id="pm-bottom" d="M 26 80 A 54 54 0 0 0 134 80"/>
+      </defs>
+      <circle class="pm-ring" cx="80" cy="80" r="74"/>
+      <circle class="pm-ring pm-thin" cx="80" cy="80" r="69"/>
+      <text class="pm-arc"><textPath href="#pm-top" startOffset="50%">驗證碼轉發</textPath></text>
+      <text class="pm-arc pm-arc-time"><textPath href="#pm-bottom" startOffset="50%">{{.Data.IP.StampTime}}</textPath></text>
+      <path class="pm-band" d="M 7 64 H 153 M 7 96 H 153"/>
+      <text class="pm-date" x="80" y="87">{{.Data.IP.Stamp}}</text>
+    </svg>
+  </div>
+  <div class="ip-body">
+    <h3 class="sr-only" id="ip-title">目前被判定的 IP</h3>
+    <p class="ip-label">伺服器判定你的 IP 是</p>
+    <p class="ip-value mono">{{.Data.IP.Client}}</p>
+    <p class="hint">登入通知、告警與設定版本記錄的都是這個位址。它只用於記錄，不影響任何安全判斷。</p>
+    <dl class="ip-facts">
+      <div><dt>連線來源</dt><dd class="mono">{{.Data.IP.Peer}}{{if .Data.IP.PeerProxy}} <span class="tag">受信任的代理</span>{{end}}</dd></div>
+      <div><dt>X-Forwarded-For</dt><dd class="mono">{{with .Data.IP.Forwarded}}{{.}}{{else}}<span class="muted">（沒有）</span>{{end}}</dd></div>
+      <div><dt>受信任的代理</dt><dd>{{if .Data.IP.Trusted}}{{.Data.IP.Trusted}} 組網段（<code>RELAY_TRUSTED_PROXIES</code>）{{else}}未設定{{end}}</dd></div>
+    </dl>
+    {{if and .Data.IP.Forwarded (not .Data.IP.PeerProxy)}}
+    <div class="callout callout-warn">{{template "icon" "info"}}<p>請求經過代理（帶有 X-Forwarded-For），但連線來源 {{.Data.IP.Peer}} 不在 <code>RELAY_TRUSTED_PROXIES</code> 中，所以上面顯示的是代理的位址。若要記錄真實 IP，請把代理的網段加進這個環境變數後重新啟動。</p></div>
+    {{end}}
+  </div>
+</section>
+{{end}}

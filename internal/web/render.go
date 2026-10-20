@@ -11,6 +11,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // Page is the data every template receives.
@@ -80,6 +81,8 @@ func (s *Server) funcs() template.FuncMap {
 		},
 		// chars splits s into its characters, e.g. to draw a code in boxes.
 		"chars": func(s string) []string { return strings.Split(s, "") },
+		// datetime formats t for display, e.g. 2026-10-20 14:05.
+		"datetime": func(t time.Time) string { return t.Format("2006-01-02 15:04") },
 		// fieldErr returns the message for path ("" when there is none).
 		"fieldErr": func(fe FieldErrors, path string) string { return fe[path] },
 	}

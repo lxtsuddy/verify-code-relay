@@ -35,6 +35,8 @@ type Server struct {
 	limiter *websec.Limiter
 	mux     *http.ServeMux
 
+	saveMu sync.Mutex // serialises config changes (see mutate)
+
 	failMu      sync.Mutex
 	failures    []time.Time // failed logins within the last hour
 	lastSummary time.Time   // last failure summary notification
