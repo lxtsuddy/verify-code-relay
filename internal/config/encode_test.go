@@ -97,3 +97,57 @@ func TestEmptyConfigIsValid(t *testing.T) {
 		t.Fatalf("empty config must be valid: %v", err)
 	}
 }
+
+func TestCloneIsDeepForRawConfigs(t *testing.T) {
+	c := Empty()
+	c.Bots["main"] = Bot{Token: "t"}
+	c.Mailboxes["m"] = &Mailbox{
+		Host:      "h",
+		Folders:   []string{"INBOX"},
+		TTL:       Duration{Duration: time.Minute, Set: true},
+		Templates: Templates{Code: "code"},
+	}
+	d := c.Clone()
+	if d.Mailboxes["m"].Name != "m" {
+		t.Errorf("Name = %q, want m", d.Mailboxes["m"].Name)
+	}
+	if d.Mailboxes["m"].TTL != c.Mailboxes["m"].TTL || d.Mailboxes["m"].Templates.Code != "code" {
+		t.Errorf("clone differs: %+v", d.Mailboxes["m"])
+	}
+	d.Bots["other"] = Bot{Token: "x"}
+	d.Mailboxes["m"].Host = "changed"
+	d.Mailboxes["m"].Folders[0] = "Changed"
+	d.Mailboxes["new"] = &Mailbox{}
+	if len(c.Bots) != 1 || len(c.Mailboxes) != 1 {
+		t.Errorf("original maps changed: %d bots, %d mailboxes", len(c.Bots), len(c.Mailboxes))
+	}
+	if c.Mailboxes["m"].Host != "h" || c.Mailboxes["m"].Folders[0] != "INBOX" {
+		t.Errorf("original mailbox changed: %+v", c.Mailboxes["m"])
+	}
+}
+
+func TestExplicitZeroDurationSurvivesRoundTrip(t *testing.T) {
+	c := Empty()
+	c.Defaults.TTL = Duration{Set: true}
+	out, err := Encode(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := Decode(out)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	if !back.Defaults.TTL.Set || back.Defaults.TTL.Duration != 0 {
+		t.Errorf("explicit 0s lost: %+v\n%s", back.Defaults.TTL, out)
+	}
+}
+
+func TestDecodeEmptyDocument(t *testing.T) {
+	c, err := Decode([]byte(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Bots == nil || c.Targets == nil || c.Mailboxes == nil {
+		t.Errorf("maps not initialised: %+v", c)
+	}
+}

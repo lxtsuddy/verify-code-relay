@@ -41,7 +41,10 @@ func Encode(c *Config) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Clone returns a deep copy.
+// Clone returns a deep copy of a raw (non-defaulted) config.
+// It round-trips through Encode, which drops durations whose Set is false, so it is
+// not faithful for configs that already had defaults applied (Parse, Defaulted):
+// never clone those; call Defaulted on the raw config instead.
 func (c *Config) Clone() *Config {
 	data, err := Encode(c)
 	if err != nil {
