@@ -14,6 +14,9 @@
     data-otp                       只保留數字、最多 6 位；加 data-autosubmit 則 6 位且表單有效時自動送出。
     data-busy-text="處理中…"       送出按鈕在表單送出期間顯示的文字（同時擋下重複送出）。
 
+  <time datetime="RFC3339" data-localtime>  伺服器以 UTC 顯示（範本函式 localtime），載入後改寫成瀏覽器所在時區的
+                                 「2026-10-20 15:04」；原本的 UTC 文字移到 title。
+
   伺服器退回表單時（欄位有 aria-invalid="true"），頁面載入後焦點會移到第一個出錯的欄位。
 
   頁面程式請使用 window.relay：
@@ -24,6 +27,7 @@
     relay.confirm(message, {ok, danger, title}) → Promise<boolean>
     relay.openModal(idOrElement)、relay.closeModal(idOrElement)
     relay.ready(fn)                DOM 就緒後執行
+    relay.localTimes(root?)        動態加入 <time data-localtime> 後呼叫，改成本地時間
 */
 (function () {
   "use strict";
@@ -378,7 +382,21 @@
   if (document.readyState === "complete") focusFirstInvalid();
   else window.addEventListener("load", function () { setTimeout(focusFirstInvalid, 0); });
 
+  function pad(n) { return n < 10 ? "0" + n : String(n); }
+
+  // localTimes rewrites server-rendered UTC times in the browser's time zone.
+  function localTimes(root) {
+    (root || document).querySelectorAll("time[data-localtime]").forEach(function (t) {
+      var d = new Date(t.getAttribute("datetime"));
+      if (isNaN(d.getTime())) return;
+      if (!t.title) t.title = t.textContent;
+      t.textContent = d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) + " " + pad(d.getHours()) + ":" + pad(d.getMinutes());
+    });
+  }
+  ready(function () { localTimes(); });
+
   window.relay = {
+    localTimes: localTimes,
     fetchJSON: fetchJSON,
     toast: toast,
     confirm: confirmDialog,

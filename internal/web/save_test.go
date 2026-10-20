@@ -62,13 +62,13 @@ func TestParseDuration(t *testing.T) {
 	if d, err := parseDuration("0s"); err != nil || !d.Set || d.Duration != 0 {
 		t.Errorf("0s = %+v %v (Validate rejects it, not the parser)", d, err)
 	}
-	for _, bad := range []string{"10", "abc", "5 分鐘"} {
+	for _, bad := range []string{"10", "0", "+0", "0.5", "abc", "5 分鐘"} {
 		if _, err := parseDuration(bad); err == nil || !strings.Contains(err.Error(), "請輸入例如 10m、30s、1h") {
 			t.Errorf("parseDuration(%q) err = %v", bad, err)
 		}
 	}
-	if durationValue(config.Duration{}) != "" || durationValue(config.Duration{Duration: 5 * time.Minute, Set: true}) != "5m0s" {
-		t.Error("durationValue")
+	if durationValue(config.Duration{}) != "" {
+		t.Error("unset duration must be empty")
 	}
 }
 
@@ -133,10 +133,17 @@ func TestMutateSerialised(t *testing.T) {
 	}
 }
 
-func TestShortDuration(t *testing.T) {
-	for in, want := range map[string]string{"24h0m0s": "24h", "5m0s": "5m", "1h30m0s": "1h30m", "30s": "30s", "0s": "0s", "1h0m5s": "1h0m5s", "10m30s": "10m30s", "": ""} {
-		if got := shortDuration(in); got != want {
-			t.Errorf("shortDuration(%q) = %q, want %q", in, got, want)
+func TestDurationValue(t *testing.T) {
+	for d, want := range map[time.Duration]string{
+		24 * time.Hour: "24h", 5 * time.Minute: "5m", 90 * time.Minute: "1h30m", 30 * time.Second: "30s",
+		0: "0s", time.Hour + 5*time.Second: "1h0m5s", 10*time.Minute + 30*time.Second: "10m30s", 1500 * time.Millisecond: "1.5s",
+	} {
+		got := durationValue(config.Duration{Duration: d, Set: true})
+		if got != want {
+			t.Errorf("durationValue(%v) = %q, want %q", d, got, want)
+		}
+		if back, err := parseDuration(got); err != nil || back.Duration != d {
+			t.Errorf("%q does not parse back to %v: %v %v", got, d, back, err)
 		}
 	}
 }

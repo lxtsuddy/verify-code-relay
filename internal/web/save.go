@@ -127,12 +127,15 @@ func (fe FieldErrors) only(fields ...string) FieldErrors {
 	return out
 }
 
-// parseDuration reads an optional duration field: "" = unset, otherwise time.ParseDuration
-// (a bare number is rejected with "請輸入例如 10m、30s、1h").
+// parseDuration reads an optional duration field: "" = unset, otherwise time.ParseDuration.
+// A number without a unit (including "0") is rejected with "請輸入例如 10m、30s、1h".
 func parseDuration(v string) (config.Duration, error) {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return config.Duration{}, nil
+	}
+	if strings.Trim(strings.TrimLeft(v, "+-"), "0123456789.") == "" {
+		return config.Duration{}, fmt.Errorf("%q 缺少單位：請輸入例如 10m、30s、1h", v)
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil {
@@ -141,10 +144,24 @@ func parseDuration(v string) (config.Duration, error) {
 	return config.Duration{Duration: d, Set: true}, nil
 }
 
-// durationValue is the form value of d: "" when unset, else d.Duration.String().
+// durationValue is the form value of d: "" when unset, else the short form of
+// d.Duration.String() without trailing zero units ("5m", "24h", "1h30m", "1h0m5s"), which
+// parseDuration reads back to the same value. Every form showing a duration uses it.
 func durationValue(d config.Duration) string {
 	if !d.Set {
 		return ""
 	}
-	return d.Duration.String()
+	return shortDuration(d.Duration)
+}
+
+// shortDuration is d.String() without the zero units after the last non-zero one.
+func shortDuration(d time.Duration) string {
+	v := d.String()
+	if strings.HasSuffix(v, "m0s") {
+		v = strings.TrimSuffix(v, "0s")
+	}
+	if strings.HasSuffix(v, "h0m") {
+		v = strings.TrimSuffix(v, "0m")
+	}
+	return v
 }

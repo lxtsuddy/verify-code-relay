@@ -128,7 +128,7 @@
       <ol class="mini-steps">
         <li>輸入目前驗證器上的驗證碼，確認是你本人。</li>
         <li>用新的驗證器掃描下一頁的 QR code，並輸入新驗證碼完成綁定。</li>
-        <li>完成前，舊的驗證器仍可登入；完成後立即失效。</li>
+        <li>完成前，舊的驗證器仍可登入；完成後舊的立即失效，其他裝置的登入也會全部登出。</li>
       </ol>
       {{$codeErr := fieldErr .Errors "totp.code"}}
       <div class="field">
@@ -154,9 +154,9 @@
       <circle class="pm-ring" cx="80" cy="80" r="74"/>
       <circle class="pm-ring pm-thin" cx="80" cy="80" r="69"/>
       <text class="pm-arc"><textPath href="#pm-top" startOffset="50%">驗證碼轉發</textPath></text>
-      <text class="pm-arc pm-arc-time"><textPath href="#pm-bottom" startOffset="50%">{{.Data.IP.StampTime}}</textPath></text>
+      <text class="pm-arc"><textPath href="#pm-bottom" startOffset="50%">管理後台</textPath></text>
       <path class="pm-band" d="M 7 64 H 153 M 7 96 H 153"/>
-      <text class="pm-date" x="80" y="87">{{.Data.IP.Stamp}}</text>
+      <text class="pm-mid" x="80" y="86">已登記</text>
     </svg>
   </div>
   <div class="ip-body">

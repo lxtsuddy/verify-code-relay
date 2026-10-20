@@ -81,11 +81,17 @@ func (s *Server) funcs() template.FuncMap {
 		},
 		// chars splits s into its characters, e.g. to draw a code in boxes.
 		"chars": func(s string) []string { return strings.Split(s, "") },
-		// datetime formats t for display, e.g. 2026-10-20 14:05.
-		"datetime": func(t time.Time) string { return t.Format("2006-01-02 15:04") },
+		// localtime renders t as <time datetime="RFC3339" data-localtime>2026-10-20 14:05 UTC</time>;
+		// app.js rewrites the text in the browser's time zone, the UTC text is the fallback.
+		"localtime": localTime,
 		// fieldErr returns the message for path ("" when there is none).
 		"fieldErr": func(fe FieldErrors, path string) string { return fe[path] },
 	}
+}
+
+func localTime(t time.Time) template.HTML {
+	u := t.UTC()
+	return template.HTML(`<time datetime="` + u.Format(time.RFC3339) + `" data-localtime>` + u.Format("2006-01-02 15:04") + ` UTC</time>`)
 }
 
 // assetVersion hashes every static file so a new build never serves stale CSS or JS.

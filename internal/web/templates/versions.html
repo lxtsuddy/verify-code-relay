@@ -16,7 +16,7 @@
     <div class="ledger-main">
       <p class="ledger-summary"><span class="sr-only">版本 {{.ID}}：</span>{{.Summary}}</p>
       <p class="ledger-meta">
-        <time datetime="{{.At.Format "2006-01-02T15:04:05Z07:00"}}" title="{{datetime .At}}">{{datetime .At}}</time>
+        {{localtime .At}}
         <span class="ledger-ago">{{.Ago}}</span>
         <span class="tag tag-src-{{.Source}}">{{.SourceLabel}}</span>
         {{with .IP}}<span class="ledger-ip mono">{{.}}</span>{{end}}

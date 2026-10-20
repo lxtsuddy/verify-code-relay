@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,11 @@ import (
 	"verify-code-relay/internal/store"
 	"verify-code-relay/internal/websec"
 )
+
+// regexpStripTags returns the text content of an HTML/SVG fragment.
+func regexpStripTags(s string) string { return tagRe.ReplaceAllString(s, "") }
+
+var tagRe = regexp.MustCompile(`<[^>]*>`)
 
 // storeVersion is a config version written straight to the store (bypassing validation).
 func storeVersion(yaml string) store.ConfigVersion {
@@ -277,5 +283,79 @@ func TestRestoreInvalidVersionIsRejected(t *testing.T) {
 	}
 	if _, now, _ := runtime.LoadConfig(context.Background(), e.st); now != latest {
 		t.Error("invalid restore stored a version")
+	}
+}
+
+func TestRebindEndsOtherSessions(t *testing.T) {
+	e := newEnv(t, nil)
+	other := e.clone()
+	other.login()
+	e.login()
+	e.root().now = e.root().now.Add(30 * time.Second)
+	if resp, _ := e.postForm("/settings/totp", url.Values{"code": {e.code()}}); resp.StatusCode != 303 {
+		t.Fatalf("rebind start = %d", resp.StatusCode)
+	}
+	_, page := e.get("/setup/totp")
+	e.csrf = extractCSRF(page)
+	a, _, _ := e.st.GetAdmin(context.Background())
+	e.root().now = e.root().now.Add(30 * time.Second)
+	code, _ := websec.TOTPCode(a.TOTPPending, websec.TOTPStep(e.root().now))
+	if resp, _ := e.postForm("/setup/totp", url.Values{"code": {code}}); resp.StatusCode != 303 {
+		t.Fatalf("rebind confirm = %d", resp.StatusCode)
+	}
+	if resp, _ := other.get("/"); resp.StatusCode != 303 || resp.Header.Get("Location") != "/login" {
+		t.Errorf("other session survived the rebind: %d %s", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	if resp, _ := e.get("/"); resp.StatusCode != 200 {
+		t.Errorf("rebinding session lost: %d", resp.StatusCode)
+	}
+	if !e.notified("其他裝置的登入已全部登出") {
+		t.Error("rebind notification must say other sessions were ended")
+	}
+}
+
+func (s *Server) failureCount() int {
+	s.failMu.Lock()
+	defer s.failMu.Unlock()
+	return len(s.failures)
+}
+
+func TestSettingsCredentialFailuresCount(t *testing.T) {
+	e := newEnv(t, nil)
+	e.login()
+	before := e.srv.failureCount()
+	e.root().now = e.root().now.Add(30 * time.Second)
+	e.postForm("/settings/password", url.Values{"current": {"not-the-password"}, "code": {e.code()}, "new": {"another-long-password"}, "confirm": {"another-long-password"}})
+	e.postForm("/settings/totp", url.Values{"code": {"000000"}})
+	// typos in the new password are not credential failures
+	e.postForm("/settings/password", url.Values{"current": {testPassword}, "code": {e.code()}, "new": {"short"}, "confirm": {"short"}})
+	if n := e.srv.failureCount() - before; n != 2 {
+		t.Fatalf("recorded failures = %d, want 2", n)
+	}
+}
+
+func TestVersionTimesAreMachineReadable(t *testing.T) {
+	e := newEnv(t, nil)
+	e.login()
+	_, body := e.get("/settings/versions")
+	v, _, _ := e.st.LatestConfigVersion(context.Background())
+	want := fmt.Sprintf(`<time datetime="%s" data-localtime>%s UTC</time>`, v.CreatedAt.UTC().Format(time.RFC3339), v.CreatedAt.UTC().Format("2006-01-02 15:04"))
+	if !strings.Contains(body, want) {
+		t.Errorf("version time markup missing, want %s", want)
+	}
+}
+
+func TestPostmarkHasNoNumbers(t *testing.T) {
+	e := newEnv(t, nil)
+	e.login()
+	_, body := e.get("/settings")
+	i := strings.Index(body, `<svg class="postmark"`)
+	if i < 0 {
+		t.Fatal("postmark missing")
+	}
+	svg := body[i:]
+	svg = svg[:strings.Index(svg, "</svg>")]
+	if strings.ContainsAny(regexpStripTags(svg), "0123456789") {
+		t.Errorf("the postmark must not show numbers that could be read as an IP or time: %s", regexpStripTags(svg))
 	}
 }

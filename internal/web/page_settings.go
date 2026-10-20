@@ -40,8 +40,6 @@ type ipInfo struct {
 	PeerProxy bool   // Peer is in RELAY_TRUSTED_PROXIES
 	Forwarded string // X-Forwarded-For as received ("" if none)
 	Trusted   int    // number of RELAY_TRUSTED_PROXIES prefixes
-	Stamp     string // postmark date, ROC calendar (e.g. 115.10.20)
-	StampTime string // postmark hour, e.g. 14:05
 }
 
 type settingsData struct {
@@ -70,11 +68,11 @@ func (s *Server) newSettingsData(r *http.Request, raw *config.Config, version in
 	def := config.Empty().Defaulted().Defaults // built-in values (Set is false: they were not given)
 	d := settingsData{
 		Durations: []durationField{
-			{"max_age", "defaults.max_age", "郵件時效", "收到超過這段時間的信不轉發，避免服務重啟後補送過期的驗證碼。", shortDuration(def.MaxAge.String()), shortDuration(durationValue(raw.Defaults.MaxAge))},
-			{"ttl", "defaults.ttl", "待發訊息保留", "Telegram 暫時送不出去時，訊息最多等這麼久，逾時就丟棄。", shortDuration(def.TTL.String()), shortDuration(durationValue(raw.Defaults.TTL))},
-			{"alert_ttl", "defaults.alert_ttl", "告警保留", "告警送不出去時在佇列中保留的時間。", shortDuration(def.AlertTTL.String()), shortDuration(durationValue(raw.Defaults.AlertTTL))},
-			{"poll_interval", "defaults.poll_interval", "輪詢間隔", "信箱伺服器不支援 IDLE 即時通知時，每隔多久檢查一次新信。", shortDuration(def.PollInterval.String()), shortDuration(durationValue(raw.Defaults.PollInterval))},
-			{"alert_after", "defaults.alert_after", "斷線告警門檻", "信箱連續斷線超過這段時間才發告警，避免短暫斷線也通知。", shortDuration(def.AlertAfter.String()), shortDuration(durationValue(raw.Defaults.AlertAfter))},
+			{"max_age", "defaults.max_age", "郵件時效", "收到超過這段時間的信不轉發，避免服務重啟後補送過期的驗證碼。", shortDuration(def.MaxAge.Duration), durationValue(raw.Defaults.MaxAge)},
+			{"ttl", "defaults.ttl", "待發訊息保留", "Telegram 暫時送不出去時，訊息最多等這麼久，逾時就丟棄。", shortDuration(def.TTL.Duration), durationValue(raw.Defaults.TTL)},
+			{"alert_ttl", "defaults.alert_ttl", "告警保留", "告警送不出去時在佇列中保留的時間。", shortDuration(def.AlertTTL.Duration), durationValue(raw.Defaults.AlertTTL)},
+			{"poll_interval", "defaults.poll_interval", "輪詢間隔", "信箱伺服器不支援 IDLE 即時通知時，每隔多久檢查一次新信。", shortDuration(def.PollInterval.Duration), durationValue(raw.Defaults.PollInterval)},
+			{"alert_after", "defaults.alert_after", "斷線告警門檻", "信箱連續斷線超過這段時間才發告警，避免短暫斷線也通知。", shortDuration(def.AlertAfter.Duration), durationValue(raw.Defaults.AlertAfter)},
 		},
 		Admin:     raw.Admin,
 		LogLevel:  raw.LogLevel,
@@ -112,9 +110,6 @@ func (s *Server) ipInfo(r *http.Request) ipInfo {
 			}
 		}
 	}
-	now := s.now()
-	info.Stamp = fmt.Sprintf("%d.%02d.%02d", now.Year()-1911, now.Month(), now.Day())
-	info.StampTime = now.Format("15:04")
 	return info
 }
 
@@ -248,6 +243,7 @@ func (s *Server) postSettingsPassword(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		s.o.Log.Warn("修改密碼失敗：目前密碼或驗證碼不正確", "ip", ip)
+		s.recordFailure(ip)
 		fail(http.StatusUnprocessableEntity, "password", "目前密碼或驗證碼不正確（驗證碼每組只能用一次）")
 		return
 	}
@@ -284,6 +280,7 @@ func (s *Server) postSettingsTOTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if !ok {
 		s.o.Log.Warn("重新綁定 TOTP 失敗：驗證碼不正確", "ip", ip)
+		s.recordFailure(ip)
 		s.renderSettings(w, r, http.StatusUnprocessableEntity, FieldErrors{"totp.code": "驗證碼不正確或已用過，請輸入驗證器上目前的驗證碼"}, nil)
 		return
 	}
@@ -369,18 +366,6 @@ func (s *Server) postRestore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.redirect(w, r, "/settings/versions", &Flash{Kind: "success", Text: fmt.Sprintf("已還原版本 #%d 並套用", id)})
-}
-
-// shortDuration drops the zero units Go prints after the last non-zero one, so
-// "24h0m0s" reads "24h" and "5m0s" reads "5m"; "1h30m0s" becomes "1h30m".
-func shortDuration(v string) string {
-	if strings.HasSuffix(v, "m0s") {
-		v = strings.TrimSuffix(v, "0s")
-	}
-	if strings.HasSuffix(v, "h0m") {
-		v = strings.TrimSuffix(v, "0m")
-	}
-	return v
 }
 
 // ago describes how long before now t was, e.g. "3 分鐘前".

@@ -1,9 +1,10 @@
 /*
   verify-code-relay 管理介面 — 設計系統
 
-  方向：郵務。深郵筒綠撐起結構（導覽軌、主要按鈕、登入頁底色），信封上的紅色
-  郵遞區號格是唯一的招牌元素：驗證碼輸入框與任何「一格一字」的代碼顯示都畫成
-  紅框方格（.otp-input、.postcode）。其餘元件保持安靜：白卡、細線、系統字型。
+  方向：郵務。深郵筒綠撐起結構（導覽軌、主要按鈕、登入頁底色），信封上的郵遞區號格是
+  招牌元素：驗證碼輸入框畫成一格一字的方格（.otp-input，空白時為墨色細框，聚焦轉綠，
+  只有出錯時才轉紅），唯讀的代碼顯示（.postcode）用紅框。紅色只留給郵遞區號格與錯誤。
+  其餘元件保持安靜：白卡、細線、系統字型。
 
   版面：桌機為左側導覽軌（目前頁面的分頁「接」進內容區）；860px 以下改為頂部列與
   可橫向捲動的分頁列。
@@ -144,7 +145,12 @@ b, strong { font-weight: 700; }
 
 /* ---------- app shell ---------- */
 
-.shell { display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); min-height: 100vh; }
+/* the rail's green is painted by the shell so it runs the full page height, however long
+   the content; the rail itself stays in view while scrolling */
+.shell {
+  display: grid; grid-template-columns: var(--rail-w) minmax(0, 1fr); min-height: 100vh;
+  background: linear-gradient(90deg, var(--green-900) var(--rail-w), transparent var(--rail-w));
+}
 
 .rail {
   position: sticky; top: 0; height: 100vh;
@@ -372,13 +378,13 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; margin:
 
 /* ---------- the signature: postcode boxes ---------- */
 
-/* One real <input>; the six red boxes are its background, aligned to the monospace
+/* One real <input>; the six boxes are its background, aligned to the monospace
    advance (1ch + letter-spacing), so typing, pasting and autofill all just work. */
 .otp-input {
   --cell: 2.75ch;
   --box: calc(var(--cell) - 0.6ch);
   --bw: 1.5px;
-  --edge: var(--red);
+  --edge: var(--ink-2);
   --fill: #fff;
   display: block;
   width: calc(var(--cell) * 6 + (var(--box) - 1ch) / 2 + 2px);
@@ -396,7 +402,8 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; margin:
 }
 /* focus: the boxes themselves turn green and thicker instead of a ring around the field */
 .otp-input:focus { outline: none; --edge: var(--green-600); --bw: 2.5px; --fill: var(--green-50); }
-.otp-input[aria-invalid="true"] { --fill: var(--red-50); animation: shake 0.4s var(--ease); }
+.otp-input[aria-invalid="true"] { --edge: var(--red); --fill: var(--red-50); animation: shake 0.4s var(--ease); }
+.otp-input[aria-invalid="true"]:focus { --edge: var(--red); }
 
 /* read-only code / number in boxes */
 .postcode { display: inline-flex; gap: 6px; font-family: var(--mono); font-weight: 600; font-size: 22px; }
@@ -674,8 +681,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .pm-thin { stroke-width: 1.1; }
 .pm-band { fill: none; stroke: currentColor; stroke-width: 1.4; }
 .pm-arc { fill: currentColor; font-family: var(--font); font-size: 14px; font-weight: 700; letter-spacing: 0.32em; text-anchor: middle; }
-.pm-arc-time { font-family: var(--mono); font-size: 13px; letter-spacing: 0.14em; }
-.pm-date { fill: currentColor; font-family: var(--mono); font-size: 19px; font-weight: 700; letter-spacing: 0.04em; text-anchor: middle; }
+.pm-mid { fill: currentColor; font-family: var(--font); font-size: 19px; font-weight: 800; letter-spacing: 0.3em; text-anchor: middle; }
 .ip-label { font-size: 13.5px; font-weight: 600; color: var(--muted); }
 .ip-value { margin: 2px 0 6px; font-size: 30px; font-weight: 700; line-height: 1.2; letter-spacing: 0.01em; overflow-wrap: anywhere; color: var(--ink); }
 .ip-facts { display: grid; gap: 0; margin-top: 14px; border-top: 1px solid var(--line); }
@@ -700,7 +706,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 /* the version in force wears the postcode box */
 .is-current { background: var(--green-50); border-radius: var(--radius) var(--radius) 0 0; }
 .is-current:hover { background: var(--green-50); }
-.is-current .ledger-no { justify-self: start; padding: 1px 6px; border: 1.5px solid var(--red); background: #fff; color: var(--ink); }
+.is-current .ledger-no { justify-self: start; padding: 1px 6px; border: 1.5px solid var(--green-700); background: #fff; color: var(--green-800); }
 .ledger-summary { font-weight: 600; overflow-wrap: anywhere; }
 .ledger-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; margin-top: 2px; font-size: 13px; color: var(--muted); }
 .ledger-ago { color: var(--faint); }
@@ -728,7 +734,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 /* ---------- narrow screens ---------- */
 
 @media (max-width: 860px) {
-  .shell { grid-template-columns: minmax(0, 1fr); }
+  .shell { grid-template-columns: minmax(0, 1fr); background: none; }
   .rail {
     position: sticky; top: 0; z-index: 30; height: auto;
     grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto;

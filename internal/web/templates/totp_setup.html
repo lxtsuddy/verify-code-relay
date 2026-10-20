@@ -4,7 +4,7 @@
   <header class="auth-head">
     <p class="eyebrow">{{if .Data.Rebind}}重新綁定{{else}}登入前的最後一步{{end}}</p>
     <h1 id="totp-title" class="auth-title">綁定兩步驟驗證</h1>
-    {{if .Data.Rebind}}<p class="auth-sub">用新的驗證器完成下面三步。確認後舊的驗證器立即失效；確認前舊的仍可用來登入。</p>
+    {{if .Data.Rebind}}<p class="auth-sub">用新的驗證器完成下面三步。確認後舊的驗證器立即失效，其他裝置的登入也會登出；確認前舊的仍可用來登入。</p>
     {{else}}<p class="auth-sub">這個後台在公開網路上，登入時除了密碼還要輸入手機產生的驗證碼。完成綁定後才能使用其他頁面。</p>{{end}}
   </header>
   <ol class="steps">

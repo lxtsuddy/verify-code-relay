@@ -194,16 +194,18 @@ func (s *Server) postTOTPSetup(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
+	// The pending secret is not tied to a session, so any signed-in session could have
+	// confirmed it; only the one that did keeps going, after both first binding and rebind.
+	if err := s.o.Store.DeleteOtherSessions(ctx, newHash); err != nil {
+		s.serverError(w, r, err)
+		return
+	}
 	if first {
-		if err := s.o.Store.DeleteOtherSessions(ctx, newHash); err != nil {
-			s.serverError(w, r, err)
-			return
-		}
 		s.o.Log.Info("Web 後台已完成 TOTP 綁定", "ip", ip)
 		s.o.Runtime.Notify("Web 後台已完成 TOTP 綁定")
 	} else {
-		s.o.Log.Info("Web 後台已重新綁定 TOTP", "ip", ip)
-		s.o.Runtime.Notify(fmt.Sprintf("Web 後台已重新綁定 TOTP（IP %s）。舊的驗證器已失效。", ip))
+		s.o.Log.Info("Web 後台已重新綁定 TOTP，其他 session 已登出", "ip", ip)
+		s.o.Runtime.Notify(fmt.Sprintf("Web 後台已重新綁定 TOTP（IP %s）。舊的驗證器已失效，其他裝置的登入已全部登出。", ip))
 	}
 	s.redirect(w, r, "/", &Flash{Kind: "success", Text: "兩步驟驗證已啟用"})
 }
