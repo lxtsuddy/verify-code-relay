@@ -1,30 +1,42 @@
 package dispatcher
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 
 	"verify-code-relay/internal/store"
 	"verify-code-relay/internal/telegram"
 )
 
 type fakeSender struct {
+	mu     sync.Mutex
 	errs   []error // consumed in order; nil = success
 	reqs   []telegram.SendRequest
-	before func() // optional hook run at the start of each Send
+	before func()                    // optional hook run at the start of each Send
+	sent   chan telegram.SendRequest // optional; receives every request after it is recorded
 }
 
 func (f *fakeSender) Send(_ context.Context, r telegram.SendRequest) error {
 	if f.before != nil {
 		f.before()
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.reqs = append(f.reqs, r)
+	if f.sent != nil {
+		f.sent <- r
+	}
 	if len(f.errs) == 0 {
 		return nil
 	}
@@ -43,7 +55,15 @@ func (a *alerts) alert(key, _ string) { a.keys = append(a.keys, key) }
 
 func setup(t *testing.T, errs ...error) (*Dispatcher, *store.Store, *fakeSender, *clock, *alerts) {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "r.db"))
+	d, st, fs, ck, al, _ := setupDB(t, errs...)
+	return d, st, fs, ck, al
+}
+
+// setupDB is setup that also returns the database path, for tests that inspect forward_log directly.
+func setupDB(t *testing.T, errs ...error) (*Dispatcher, *store.Store, *fakeSender, *clock, *alerts, string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "r.db")
+	st, err := store.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,16 +73,21 @@ func setup(t *testing.T, errs ...error) (*Dispatcher, *store.Store, *fakeSender,
 	al := &alerts{}
 	d := New(Options{Store: st, Sender: fs, Tokens: map[string]string{"main": "TOKEN"}, Alert: al.alert,
 		Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Now: ck.now})
-	return d, st, fs, ck, al
+	return d, st, fs, ck, al, path
 }
 
 var ctx = context.Background()
 
 func record(t *testing.T, st *store.Store, now time.Time, chats ...int64) int64 {
 	t.Helper()
+	return recordAs(t, st, now, "main", "<b>hi</b>", chats...)
+}
+
+func recordAs(t *testing.T, st *store.Store, now time.Time, bot, text string, chats ...int64) int64 {
+	t.Helper()
 	var items []store.OutboxItem
 	for _, c := range chats {
-		items = append(items, store.OutboxItem{Target: "t", Bot: "main", ChatID: c, Text: "<b>hi</b>",
+		items = append(items, store.OutboxItem{Target: "t", Bot: bot, ChatID: c, Text: text,
 			ReplyMarkup: `{"inline_keyboard":[]}`, CreatedAt: now, ExpiresAt: now.Add(15 * time.Minute), NextAttemptAt: now})
 	}
 	id, err := st.RecordMessage(ctx, store.LogEntry{At: now, Mailbox: "g", Folder: "INBOX", UID: 1, Kind: "code", Result: "pending"},
@@ -240,6 +265,37 @@ func TestDeleteErrorAfterSendIsNotMarkedSent(t *testing.T) {
 	if len(pending(t, st, ck.t)) != 1 {
 		t.Error("item should remain in outbox after failed delete")
 	}
+	// Next cycle: the message already went out, so only the delete is retried.
+	ck.t = ck.t.Add(time.Second)
+	if err := d.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(fs.reqs) != 1 {
+		t.Errorf("re-sent after failed delete: sent %d, want 1", len(fs.reqs))
+	}
+	if len(fl.results) != 1 || fl.results[0] != "sent" {
+		t.Errorf("results = %v, want [sent]", fl.results)
+	}
+	if len(pending(t, st, ck.t)) != 0 {
+		t.Error("outbox not drained after delete retry")
+	}
+}
+
+func TestSentButUndeletedExpiresAsSent(t *testing.T) {
+	d, st, fs, ck, _ := setup(t)
+	record(t, st, ck.t, 1)
+	fl := &flakyStore{Store: st, failDelete: true}
+	d.o.Store = fl
+	d.RunOnce(ctx)
+	// The row expires before the delete is retried: it was delivered, so it must be recorded as sent.
+	ck.t = ck.t.Add(16 * time.Minute)
+	d.RunOnce(ctx)
+	if len(fs.reqs) != 1 || len(fl.results) != 1 || fl.results[0] != "sent" {
+		t.Errorf("reqs=%d results=%v, want 1 [sent]", len(fs.reqs), fl.results)
+	}
+	if len(d.sentUndeleted) != 0 {
+		t.Errorf("sentUndeleted = %v, want empty", d.sentUndeleted)
+	}
 }
 
 func TestRescheduleErrorSkipsFollowUps(t *testing.T) {
@@ -307,5 +363,220 @@ func TestPerChatGapMeasuredFromSendStart(t *testing.T) {
 	d.RunOnce(ctx) // clock is T+5: 5 s since the last send started, so it must go out now
 	if len(fs.reqs) != 2 {
 		t.Fatalf("sent %d, want 2", len(fs.reqs))
+	}
+}
+
+func TestRateLimitDoesNotCountAsAttempt(t *testing.T) {
+	d, st, fs, ck, _ := setup(t,
+		&telegram.SendError{Kind: telegram.RateLimited, RetryAfter: time.Second},
+		&telegram.SendError{Kind: telegram.Transient})
+	record(t, st, ck.t, 1)
+	d.RunOnce(ctx) // 429 -> retry in 1s
+	ck.t = ck.t.Add(time.Second)
+	d.RunOnce(ctx) // transient: first real failure, so the backoff starts at 2s
+	ck.t = ck.t.Add(2 * time.Second)
+	d.RunOnce(ctx)
+	if len(fs.reqs) != 3 {
+		t.Fatalf("reqs = %d, want 3 (backoff should not count the 429)", len(fs.reqs))
+	}
+}
+
+func TestPlainFallbackDoesNotCountAsAttempt(t *testing.T) {
+	d, st, fs, ck, _ := setup(t,
+		&telegram.SendError{Kind: telegram.BadRequest},
+		&telegram.SendError{Kind: telegram.Transient})
+	record(t, st, ck.t, 1)
+	d.RunOnce(ctx) // HTML rejected -> plain text retry right away
+	ck.t = ck.t.Add(time.Second)
+	d.RunOnce(ctx) // transient: first real failure, so the backoff starts at 2s
+	ck.t = ck.t.Add(2 * time.Second)
+	d.RunOnce(ctx)
+	if len(fs.reqs) != 3 {
+		t.Fatalf("reqs = %d, want 3 (backoff should not count the plain-text fallback)", len(fs.reqs))
+	}
+}
+
+func TestNonSendErrorRedactsToken(t *testing.T) {
+	d, st, fs, ck, _ := setup(t, errors.New(`Post "https://api.telegram.org/botTOKEN/sendMessage": boom`))
+	var buf bytes.Buffer
+	d.o.Log = slog.New(slog.NewTextHandler(&buf, nil))
+	record(t, st, ck.t, 1)
+	d.RunOnce(ctx)
+	if len(fs.reqs) != 1 || len(pending(t, st, ck.t)) != 1 {
+		t.Fatalf("reqs=%d pending=%d, want a scheduled retry", len(fs.reqs), len(pending(t, st, ck.t)))
+	}
+	if strings.Contains(buf.String(), "TOKEN") || !strings.Contains(buf.String(), "<token>") {
+		t.Errorf("log leaks or loses the error:\n%s", buf.String())
+	}
+}
+
+func TestUnknownBotAlertsForMessages(t *testing.T) {
+	d, st, fs, ck, al := setup(t)
+	recordAs(t, st, ck.t, "ghost", "x", 1)
+	d.RunOnce(ctx)
+	if len(fs.reqs) != 0 || len(pending(t, st, ck.t)) != 0 {
+		t.Fatalf("reqs=%d pending=%d", len(fs.reqs), len(pending(t, st, ck.t)))
+	}
+	if len(al.keys) != 1 || al.keys[0] != "send_failed:t" {
+		t.Errorf("alerts = %v, want [send_failed:t]", al.keys)
+	}
+}
+
+func TestLastSentPruned(t *testing.T) {
+	d, st, _, ck, _ := setup(t)
+	record(t, st, ck.t, 1, 2, 3)
+	d.RunOnce(ctx)
+	if len(d.lastSent) != 3 {
+		t.Fatalf("lastSent = %d, want 3", len(d.lastSent))
+	}
+	ck.t = ck.t.Add(perChatGap)
+	d.RunOnce(ctx)
+	if len(d.lastSent) != 0 {
+		t.Errorf("lastSent = %v, want stale entries removed", d.lastSent)
+	}
+}
+
+func logResults(t *testing.T, path string) map[int64]string {
+	t.Helper()
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(5000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, `SELECT id, result FROM forward_log`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	out := map[int64]string{}
+	for rows.Next() {
+		var id int64
+		var r string
+		if err := rows.Scan(&id, &r); err != nil {
+			t.Fatal(err)
+		}
+		out[id] = r
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func TestForwardLogResult(t *testing.T) {
+	d, st, _, ck, _, path := setupDB(t, nil, &telegram.SendError{Kind: telegram.Forbidden})
+	sent := record(t, st, ck.t, 1)
+	failed := record(t, st, ck.t, 2)
+	waiting := record(t, st, ck.t, 2) // queued behind the failed one, then expires
+	d.RunOnce(ctx)
+	got := logResults(t, path)
+	if got[sent] != "sent" || got[failed] != "failed" || got[waiting] != "pending" {
+		t.Fatalf("results = %v", got)
+	}
+	ck.t = ck.t.Add(16 * time.Minute)
+	d.RunOnce(ctx)
+	if got := logResults(t, path); got[waiting] != "expired" {
+		t.Errorf("results = %v, want %d expired", got, waiting)
+	}
+}
+
+func TestSameChatOrder(t *testing.T) {
+	d, st, fs, ck, _ := setup(t, &telegram.SendError{Kind: telegram.Transient})
+	recordAs(t, st, ck.t, "main", "first", 1)
+	recordAs(t, st, ck.t, "main", "second", 1)
+	d.RunOnce(ctx) // "first" fails -> retry in 2s
+	ck.t = ck.t.Add(time.Second)
+	d.RunOnce(ctx) // gap has passed, but "second" must wait behind "first"
+	if len(fs.reqs) != 1 {
+		t.Fatalf("sent %d, want 1 (second overtook first)", len(fs.reqs))
+	}
+	ck.t = ck.t.Add(time.Second)
+	d.RunOnce(ctx)
+	ck.t = ck.t.Add(time.Second)
+	d.RunOnce(ctx)
+	var texts []string
+	for _, r := range fs.reqs {
+		texts = append(texts, r.Text)
+	}
+	if strings.Join(texts, ",") != "first,first,second" {
+		t.Errorf("order = %v", texts)
+	}
+}
+
+// cycleStore signals every DueOutbox call so tests know a dispatch cycle has started.
+type cycleStore struct {
+	*store.Store
+	cycles chan struct{}
+}
+
+func (c *cycleStore) DueOutbox(ctx context.Context, now time.Time, limit int) ([]store.OutboxItem, error) {
+	items, err := c.Store.DueOutbox(ctx, now, limit)
+	select {
+	case c.cycles <- struct{}{}:
+	default:
+	}
+	return items, err
+}
+
+func TestRunWakeAndStop(t *testing.T) {
+	d, st, fs, ck, _ := setup(t)
+	d.tick = time.Hour // only Wake can start a new cycle
+	cs := &cycleStore{Store: st, cycles: make(chan struct{}, 1)}
+	d.o.Store = cs
+	fs.sent = make(chan telegram.SendRequest, 10)
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { d.Run(runCtx); close(done) }()
+
+	waitFor := func(ch <-chan struct{}, what string) {
+		t.Helper()
+		select {
+		case <-ch:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+	waitFor(cs.cycles, "the initial cycle") // the initial cycle ran with an empty outbox
+
+	record(t, st, ck.t, 1)
+	d.Wake()
+	select {
+	case r := <-fs.sent:
+		if r.ChatID != 1 {
+			t.Errorf("sent to chat %d", r.ChatID)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Wake did not trigger a send")
+	}
+
+	cancel()
+	waitFor(done, "Run to return after cancel")
+}
+
+func TestWakeDoesNotBlock(t *testing.T) {
+	d, _, _, _, _ := setup(t)
+	d.Wake()
+	d.Wake()
+	d.Wake()
+}
+
+func TestStopMidBatchRecordsSentItem(t *testing.T) {
+	d, st, fs, ck, _, path := setupDB(t)
+	first := record(t, st, ck.t, 1)
+	second := record(t, st, ck.t, 2)
+	runCtx, cancel := context.WithCancel(ctx)
+	fs.before = cancel // shutdown arrives while the first message is being sent
+	if err := d.RunOnce(runCtx); err != nil {
+		t.Fatal(err)
+	}
+	if len(fs.reqs) != 1 {
+		t.Fatalf("sent %d after cancel, want 1", len(fs.reqs))
+	}
+	got := logResults(t, path)
+	if got[first] != "sent" || got[second] != "pending" {
+		t.Errorf("results = %v", got)
+	}
+	if p := pending(t, st, ck.t); len(p) != 1 || p[0].ChatID != 2 {
+		t.Errorf("pending = %+v, want only chat 2", p)
 	}
 }
