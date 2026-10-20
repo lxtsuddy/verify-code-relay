@@ -37,3 +37,8 @@ func (s *Store) SaveOAuthToken(ctx context.Context, mailbox string, t OAuthToken
 		mailbox, t.RefreshToken, t.AccessToken, unix(t.ExpiresAt), time.Now().Unix())
 	return err
 }
+
+func (s *Store) DeleteOAuthToken(ctx context.Context, mailbox string) error {
+	_, err := s.db.ExecContext(ctx, `DELETE FROM oauth_tokens WHERE mailbox = ?`, mailbox)
+	return err
+}

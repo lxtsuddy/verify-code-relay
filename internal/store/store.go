@@ -60,6 +60,31 @@ var migrations = []string{
 		result     TEXT NOT NULL
 	);
 	CREATE INDEX forward_log_at ON forward_log (at);`,
+	`CREATE TABLE config_versions (
+		id         INTEGER PRIMARY KEY AUTOINCREMENT,
+		created_at INTEGER NOT NULL,
+		source     TEXT NOT NULL,
+		ip         TEXT,
+		summary    TEXT NOT NULL,
+		yaml       TEXT NOT NULL
+	);
+	CREATE TABLE admin (
+		id             INTEGER PRIMARY KEY CHECK (id = 1),
+		password_hash  TEXT NOT NULL,
+		totp_secret    TEXT,
+		totp_pending   TEXT,
+		totp_last_step INTEGER NOT NULL DEFAULT 0,
+		updated_at     INTEGER NOT NULL
+	);
+	CREATE TABLE sessions (
+		token_hash TEXT PRIMARY KEY,
+		csrf       TEXT NOT NULL,
+		created_at INTEGER NOT NULL,
+		last_seen  INTEGER NOT NULL,
+		ip         TEXT,
+		user_agent TEXT
+	);
+	CREATE INDEX forward_log_mailbox ON forward_log (mailbox, id);`,
 }
 
 // Open opens (creating if needed, mode 0600) the database at path and applies migrations.
