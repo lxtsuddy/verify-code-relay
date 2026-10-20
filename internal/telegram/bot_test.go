@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -134,5 +135,56 @@ func TestRecentChatsWebhook(t *testing.T) {
 	_, err = c.RecentChats(context.Background(), "123:SECRET")
 	if err == nil || strings.Contains(err.Error(), "webhook") || !strings.Contains(err.Error(), "getUpdates") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestBadTokenShapeIsRefusedWithoutRequest(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Write([]byte(`{"ok":true,"result":{}}`))
+	}))
+	defer srv.Close()
+	c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
+	// tokens that URL encoding would change, so redaction could miss them
+	for _, tok := range []string{"", "SECRET", "1:SE/CRET", "1:SE CRET", "1:SECRÉT", "1:SE%2FCRET", "1:SECRET?x=1", "1:SECRET#x"} {
+		_, err := c.GetMe(context.Background(), tok)
+		if err == nil || err.Error() != "Bot token 格式不正確" {
+			t.Errorf("GetMe %q: err = %v", tok, err)
+		}
+		if _, err := c.RecentChats(context.Background(), tok); err == nil || strings.Contains(err.Error(), "SE") {
+			t.Errorf("RecentChats %q: err = %v", tok, err)
+		}
+		err = c.Send(context.Background(), SendRequest{Token: tok, ChatID: 1, Text: "x"})
+		var se *SendError
+		if !errors.As(err, &se) || se.Kind != Forbidden || strings.Contains(err.Error(), "SE") || !strings.Contains(err.Error(), "Bot token 格式不正確") {
+			t.Errorf("Send %q: err = %v", tok, err)
+		}
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("%d requests sent with malformed tokens", n)
+	}
+	if !ValidToken("123456789:AAH4x_y-Z0") || ValidToken("1:a/b") {
+		t.Fatal("ValidToken")
+	}
+}
+
+func TestRecentChatsDropsChatsTheBotLeft(t *testing.T) {
+	c := fakeAPI(t, 200, `{"ok":true,"result":[
+		{"update_id":1,"message":{"chat":{"id":-1001,"type":"supergroup","title":"Left"}}},
+		{"update_id":2,"my_chat_member":{"chat":{"id":-1001,"type":"supergroup","title":"Left"},"new_chat_member":{"status":"left"}}},
+		{"update_id":3,"my_chat_member":{"chat":{"id":-1002,"type":"group","title":"Back"},"new_chat_member":{"status":"kicked"}}},
+		{"update_id":4,"my_chat_member":{"chat":{"id":-1002,"type":"group","title":"Back"},"new_chat_member":{"status":"member"}}},
+		{"update_id":5,"my_chat_member":{"chat":{"id":-1003,"type":"channel","title":"Kicked"},"new_chat_member":{"status":"administrator"}}},
+		{"update_id":6,"channel_post":{"chat":{"id":-1003,"type":"channel","title":"Kicked"}}},
+		{"update_id":7,"my_chat_member":{"chat":{"id":-1003,"type":"channel","title":"Kicked"},"new_chat_member":{"status":"kicked"}}},
+		{"update_id":8,"message":{"chat":{"id":42,"type":"private","first_name":"Amy"}}}
+	]}`, nil)
+	chats, err := c.RecentChats(context.Background(), "1:x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(chats) != 2 || chats[0].ID != 42 || chats[1].ID != -1002 {
+		t.Fatalf("chats = %+v, want 42 and -1002 (re-added) only", chats)
 	}
 }

@@ -10,6 +10,10 @@ import (
 
 var nameRe = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
+// tokenRe is the shape of a Bot API token ("<bot id>:<secret>"); telegram.ValidToken
+// checks the same, and the client refuses any other token.
+var tokenRe = regexp.MustCompile(`^[0-9]+:[A-Za-z0-9_-]+$`)
+
 type problems []string
 
 func (p *problems) add(path, format string, args ...any) {
@@ -41,8 +45,12 @@ func (c *Config) Validate() error {
 	}
 	for _, name := range sortedKeys(c.Bots) {
 		checkName("bots."+name, name)
-		if c.Bots[name].Token == "" {
+		switch tok := c.Bots[name].Token; {
+		case tok == "":
 			p.add("bots."+name+".token", "不可為空")
+		case !tokenRe.MatchString(tok):
+			// never quote the value: it is a secret
+			p.add("bots."+name+".token", "格式不正確（應為 數字:英數字）")
 		}
 	}
 	for _, name := range sortedKeys(c.Targets) {

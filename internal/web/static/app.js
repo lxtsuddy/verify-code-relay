@@ -485,6 +485,8 @@
     list.setAttribute("aria-busy", "true");
     if (reload) reload.disabled = true;
     var bot = chats.bot;
+    // getUpdates without an offset returns only the OLDEST pending updates (at most 100)
+    // from the last 24 hours, so a busy bot's newest chats may be missing; the hint says so.
     fetchJSON("/api/telegram/chats", { bot: bot }).then(
       function (res) {
         if (bot !== chats.bot) return;
@@ -498,10 +500,13 @@
         }
       },
       function (err) {
+        if (bot !== chats.bot) return;
         list.textContent = "";
         list.appendChild(chatState("error", "讀取失敗", err.message));
       }
     ).then(function () {
+      // an answer for another bot (the picker was reopened meanwhile) changes nothing
+      if (bot !== chats.bot) return;
       list.removeAttribute("aria-busy");
       if (reload) reload.disabled = false;
       var first = list.querySelector(".chat-row");

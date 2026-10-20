@@ -7,8 +7,20 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 )
+
+// tokenRe is the shape of a token from @BotFather: "<bot id>:<secret>". Only such tokens
+// are put into request URLs: they are the same escaped and unescaped, so the token can
+// always be redacted from errors (which may quote the URL).
+var tokenRe = regexp.MustCompile(`^[0-9]+:[A-Za-z0-9_-]+$`)
+
+// errTokenShape is the description of every call refused because of the token's shape.
+const errTokenShape = "Bot token 格式不正確"
+
+// ValidToken reports whether token has the shape of a Bot API token.
+func ValidToken(token string) bool { return tokenRe.MatchString(token) }
 
 // BotInfo is what getMe tells about a bot.
 type BotInfo struct {
@@ -75,15 +87,21 @@ type apiChat struct {
 }
 
 type chatHolder struct {
-	Chat *apiChat `json:"chat"`
+	Chat          *apiChat `json:"chat"`
+	NewChatMember *struct {
+		Status string `json:"status"`
+	} `json:"new_chat_member"` // my_chat_member only
 }
 
 // RecentChats calls getUpdates (timeout 0) and returns the distinct chats seen in
 // message, edited_message, channel_post and my_chat_member updates, newest first.
 // A bot with a webhook gets a 409 from Telegram; the error says to remove the webhook.
+// Chats whose latest my_chat_member update shows the bot "left" or "kicked" are left out.
 //
 // No offset is sent, so the updates stay unconfirmed, and no allowed_updates, which
-// Telegram would remember for the bot.
+// Telegram would remember for the bot. Without an offset Telegram answers with the OLDEST
+// pending updates, at most 100, and keeps updates for 24 hours only: a bot that received
+// more than 100 updates in a day may not show its newest chats.
 func (c *Client) RecentChats(ctx context.Context, token string) ([]Chat, error) {
 	var updates []struct {
 		Message           *chatHolder `json:"message"`
@@ -104,9 +122,15 @@ func (c *Client) RecentChats(ctx context.Context, token string) ([]Chat, error) 
 		return nil, err
 	}
 	seen := map[int64]bool{}
+	member := map[int64]string{} // the bot's status in the chat's latest my_chat_member update
 	var out []Chat
 	for i := len(updates) - 1; i >= 0; i-- {
 		u := updates[i]
+		if h := u.MyChatMember; h != nil && h.Chat != nil && h.NewChatMember != nil {
+			if _, ok := member[h.Chat.ID]; !ok {
+				member[h.Chat.ID] = h.NewChatMember.Status
+			}
+		}
 		for _, h := range []*chatHolder{u.Message, u.EditedMessage, u.ChannelPost, u.EditedChannelPost, u.MyChatMember} {
 			if h == nil || h.Chat == nil || h.Chat.ID == 0 || seen[h.Chat.ID] {
 				continue
@@ -119,12 +143,22 @@ func (c *Client) RecentChats(ctx context.Context, token string) ([]Chat, error) 
 			})
 		}
 	}
-	return out, nil
+	kept := out[:0]
+	for _, c := range out {
+		if st := member[c.ID]; st != "left" && st != "kicked" {
+			kept = append(kept, c)
+		}
+	}
+	return kept, nil
 }
 
 // call does GET BaseURL/bot<token>/<method>?params and decodes the "result" into result.
-// Every error is an *APIError without the token.
+// Every error is an *APIError without the token; a token that is not ValidToken is
+// refused before any request.
 func (c *Client) call(ctx context.Context, token, method string, params url.Values, result any) error {
+	if !ValidToken(token) {
+		return &APIError{Method: method, Description: errTokenShape, msg: errTokenShape}
+	}
 	redact := func(s string) string {
 		if token == "" {
 			return s

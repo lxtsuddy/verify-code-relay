@@ -9,7 +9,7 @@ import (
 
 func validConfig() *Config {
 	c, err := Parse([]byte(`
-bots: { main: { token: "t" } }
+bots: { main: { token: "1:t" } }
 targets: { me: { bot: main, chat_id: 1 } }
 admin: me
 mailboxes:
@@ -33,6 +33,28 @@ func TestValidateOK(t *testing.T) {
 	}
 }
 
+func TestValidateTokenShapeNeverEchoesToken(t *testing.T) {
+	for _, tok := range []string{"SECRET", "1:SE/CRET", "1:SE CRET", "1:SECRÉT", "1:SECRET?x", "x1:SECRET", "1:"} {
+		c := validConfig()
+		c.Bots["main"] = Bot{Token: tok}
+		err := c.Validate()
+		if err == nil || !strings.Contains(err.Error(), "bots.main.token: 格式不正確（應為 數字:英數字）") {
+			t.Errorf("token %q: err = %v", tok, err)
+			continue
+		}
+		if strings.Contains(err.Error(), "SE") {
+			t.Errorf("token %q echoed: %v", tok, err)
+		}
+	}
+	for _, tok := range []string{"123456789:AAH4x_y-Z0", "1:t"} {
+		c := validConfig()
+		c.Bots["main"] = Bot{Token: tok}
+		if err := c.Validate(); err != nil {
+			t.Errorf("token %q rejected: %v", tok, err)
+		}
+	}
+}
+
 func TestValidateErrors(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -45,7 +67,8 @@ func TestValidateErrors(t *testing.T) {
 		{"zero chat", func(c *Config) { c.Targets["me"] = Target{Bot: "main"} }, "targets.me.chat_id: 不可為 0"},
 		{"empty token", func(c *Config) { c.Bots["main"] = Bot{} }, "bots.main.token: 不可為空"},
 		{"bad admin", func(c *Config) { c.Admin = "x" }, `admin: 找不到目標 "x"`},
-		{"bad name", func(c *Config) { c.Bots["Main!"] = Bot{Token: "t"} }, `bots.Main!: 名稱只能包含`},
+		{"token without id", func(c *Config) { c.Bots["main"] = Bot{Token: "SECRET"} }, "bots.main.token: 格式不正確（應為 數字:英數字）"},
+		{"bad name", func(c *Config) { c.Bots["Main!"] = Bot{Token: "1:t"} }, `bots.Main!: 名稱只能包含`},
 		{"no host", func(c *Config) { c.Mailboxes["gmail"].Host = "" }, "mailboxes.gmail.host: 不可為空"},
 		{"no username", func(c *Config) { c.Mailboxes["gmail"].Username = "" }, "mailboxes.gmail.username: 不可為空"},
 		{"bad auth type", func(c *Config) { c.Mailboxes["gmail"].Auth.Type = "magic" }, `mailboxes.gmail.auth.type: 未知的認證類型 "magic"`},
@@ -93,7 +116,7 @@ func TestValidateNoMailboxes(t *testing.T) {
 func TestValidateNegativeDurationFromYAML(t *testing.T) {
 	c, err := Parse([]byte(`
 defaults: { ttl: -5m }
-bots: { main: { token: "t" } }
+bots: { main: { token: "1:t" } }
 targets: { me: { bot: main, chat_id: 1 } }
 mailboxes:
   gmail:
@@ -118,7 +141,7 @@ mailboxes:
 func TestValidateZeroDurationFromYAML(t *testing.T) {
 	c, err := Parse([]byte(`
 defaults: { alert_after: 0s }
-bots: { main: { token: "t" } }
+bots: { main: { token: "1:t" } }
 targets: { me: { bot: main, chat_id: 1 } }
 mailboxes:
   gmail:

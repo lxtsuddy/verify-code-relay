@@ -81,7 +81,12 @@ type apiResponse struct {
 	} `json:"parameters"`
 }
 
+// Send sends one message. A token that is not ValidToken is refused before any request
+// (Forbidden: retrying cannot help).
 func (c *Client) Send(ctx context.Context, req SendRequest) error {
+	if !ValidToken(req.Token) {
+		return &SendError{Kind: Forbidden, Description: errTokenShape}
+	}
 	p := payload{ChatID: req.ChatID, Text: req.Text, LinkPreviewOptions: map[string]bool{"is_disabled": true}}
 	if req.HTML {
 		p.ParseMode = "HTML"

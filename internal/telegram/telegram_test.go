@@ -51,7 +51,7 @@ func TestSendPlainOmitsParseModeAndMarkup(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
-	if err := c.Send(context.Background(), SendRequest{Token: "t", ChatID: 1, Text: "x"}); err != nil {
+	if err := c.Send(context.Background(), SendRequest{Token: "1:t", ChatID: 1, Text: "x"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := got["parse_mode"]; ok {
@@ -132,7 +132,7 @@ func TestSendNilHTTPUsesDefaultClient(t *testing.T) {
 	}))
 	defer srv.Close()
 	c := &Client{BaseURL: srv.URL}
-	if err := c.Send(context.Background(), SendRequest{Token: "t", ChatID: 1, Text: "x"}); err != nil {
+	if err := c.Send(context.Background(), SendRequest{Token: "1:t", ChatID: 1, Text: "x"}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -179,7 +179,7 @@ func TestSendOKStatusButNotOK(t *testing.T) {
 			w.Write([]byte(tc.body))
 		}))
 		c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
-		err := c.Send(context.Background(), SendRequest{Token: "t", ChatID: 1, Text: "x"})
+		err := c.Send(context.Background(), SendRequest{Token: "1:t", ChatID: 1, Text: "x"})
 		srv.Close()
 		var se *SendError
 		if !errors.As(err, &se) || se.Kind != tc.kind {
@@ -206,7 +206,7 @@ func TestSendMoreErrorKinds(t *testing.T) {
 			w.Write([]byte(tc.body))
 		}))
 		c := &Client{BaseURL: srv.URL, HTTP: srv.Client()}
-		err := c.Send(context.Background(), SendRequest{Token: "t", ChatID: 1, Text: "x"})
+		err := c.Send(context.Background(), SendRequest{Token: "1:t", ChatID: 1, Text: "x"})
 		srv.Close()
 		var se *SendError
 		if !errors.As(err, &se) || se.Kind != tc.kind || se.RetryAfter != tc.retry {

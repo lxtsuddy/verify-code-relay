@@ -29,10 +29,6 @@ import (
 // telegramTimeout bounds every Bot API call made for the page.
 const telegramTimeout = 15 * time.Second
 
-// tokenRe is the shape of a token from @BotFather: "<bot id>:<secret>". The check keeps
-// tokens that would break the request URL out of the config.
-var tokenRe = regexp.MustCompile(`^[0-9]+:[A-Za-z0-9_-]+$`)
-
 // nameRe repeats config's name rule, so the name field gets the message instead of the top.
 var nameRe = regexp.MustCompile(`^[a-z0-9_-]+$`)
 
@@ -177,7 +173,7 @@ func checkToken(token string) string {
 	switch {
 	case token == "":
 		return "請輸入 Bot token"
-	case !tokenRe.MatchString(token):
+	case !telegram.ValidToken(token):
 		return msgTokenShape
 	}
 	return ""
