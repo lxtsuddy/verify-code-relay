@@ -938,15 +938,19 @@
     );
   }
 
-  // formDirty reports unsaved changes to the settings an authorisation is for.
+  // formDirty reports unsaved changes to the settings an authorisation is for, compared
+  // with the stored ones on [data-oauth-state] (a form sent back with errors shows typed,
+  // unsaved values as its defaults).
   function formDirty(form) {
+    var box = form.querySelector("[data-oauth-state]");
+    if (!box) return false;
     var dirty = false;
     ["username", "client_id", "tenant"].forEach(function (n) {
       var f = field(form, n);
-      if (f && f.value.trim() !== f.defaultValue.trim()) dirty = true;
+      if (f && f.value.trim() !== (box.getAttribute("data-stored-" + n) || "").trim()) dirty = true;
     });
     var ms = form.querySelector('input[name="auth_type"][value="microsoft_oauth"]');
-    if (ms && ms.checked !== ms.defaultChecked) dirty = true;
+    if (ms && !ms.checked) dirty = true;
     return dirty;
   }
 
@@ -979,7 +983,8 @@
         return;
       }
       var user = start.dataset.oauthUser || "";
-      if (form && field(form, "username")) user = field(form, "username").defaultValue;
+      var stored = form ? form.querySelector("[data-oauth-state]") : null;
+      if (stored) user = stored.getAttribute("data-stored-username") || "";
       oauthStart(start.dataset.oauthStart, user);
       return;
     }

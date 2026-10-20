@@ -330,11 +330,12 @@ type mailboxFormData struct {
 	F               mailboxForm
 	Presets         []mailboxPreset
 	Targets         []routeOption
-	HasPassword     bool // a password is stored (edit, password auth)
-	PasswordDropped bool // a typed password is never sent back: say so
-	StoredMicrosoft bool // the stored mailbox uses Microsoft (authorisation applies)
-	Authorized      bool // an OAuth token is stored
-	NeedsLogin      bool // authorised, but a watcher reports the grant no longer works
+	HasPassword     bool                                        // a password is stored (edit, password auth)
+	PasswordDropped bool                                        // a typed password is never sent back: say so
+	StoredMicrosoft bool                                        // the stored mailbox uses Microsoft (authorisation applies)
+	Authorized      bool                                        // an OAuth token is stored
+	NeedsLogin      bool                                        // authorised, but a watcher reports the grant no longer works
+	Stored          struct{ Username, ClientID, Tenant string } // what an authorisation is for (Microsoft)
 	Defaults        struct{ MaxAge, TTL, PollInterval string }
 	AdvancedOpen    bool
 	AdvancedSet     int // advanced fields with a value
@@ -388,6 +389,7 @@ func (s *Server) renderMailboxForm(w http.ResponseWriter, r *http.Request, statu
 		d.HasPassword = old.Auth.Type == authPassword && old.Auth.Password != ""
 		d.StoredMicrosoft = old.Auth.Type == authMicrosoft
 		if d.StoredMicrosoft {
+			d.Stored.Username, d.Stored.ClientID, d.Stored.Tenant = old.Username, old.Auth.ClientID, old.Auth.Tenant
 			_, ok, err := s.o.Store.GetOAuthToken(r.Context(), name)
 			if err != nil {
 				s.serverError(w, r, err)

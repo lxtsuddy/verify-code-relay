@@ -442,3 +442,19 @@ func TestOAuthFlowLogsNoSecrets(t *testing.T) {
 		}
 	}
 }
+
+// A form sent back with errors keeps the stored account on the authorisation box, so the
+// page can tell unsaved account changes apart from the stored settings.
+func TestEditPageKeepsStoredAccountForAuthorisation(t *testing.T) {
+	e := newEnv(t, withOutlookMailbox)
+	e.login()
+	resp, page := e.postForm("/mailboxes/outlook", url.Values{"host": {"outlook.office365.com"}, "port": {"99999"}, "username": {"me@outlook.com"},
+		"auth_type": {"microsoft_oauth"}, "client_id": {"00000000-0000-0000-0000-000000000001"}, "tenant": {"organizations"},
+		"folders": {"INBOX"}, "targets": {"me"}})
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Fatalf("= %d", resp.StatusCode)
+	}
+	if !strings.Contains(page, `data-stored-tenant="consumers"`) || !strings.Contains(page, `value="organizations"`) {
+		t.Error("the sent-back form must keep the stored tenant on the authorisation box")
+	}
+}
