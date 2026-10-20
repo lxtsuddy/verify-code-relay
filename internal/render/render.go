@@ -89,7 +89,7 @@ func compileSet(prefix string, tp config.Templates, fallback tset) (tset, error)
 }
 
 func New(cfg *config.Config) (*Renderer, error) {
-	builtin, err := compileSet("builtin.", config.Templates{Code: defaultCode, Link: defaultLink, Both: defaultBoth}, nil)
+	builtin, err := compileSet("builtin.", Builtin(), nil)
 	if err != nil {
 		return nil, err // programming error
 	}

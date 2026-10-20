@@ -20,6 +20,7 @@ var authedPosts = []string{
 	"/api/telegram/getme", "/api/telegram/chats",
 	"/mailboxes/new", "/mailboxes/gmail", "/mailboxes/gmail/delete", "/api/mailboxes/probe",
 	"/api/mailboxes/gmail/oauth/start",
+	"/rules", "/templates", "/api/templates/preview",
 }
 
 func TestRoutesRequireLogin(t *testing.T) {
@@ -44,7 +45,7 @@ func TestRoutesRequireLogin(t *testing.T) {
 	p.postForm("/login", url.Values{"password": {testPassword}})
 	_, page := p.get("/setup/totp")
 	p.csrf = extractCSRF(page)
-	for _, path := range []string{"/settings", "/settings/versions", "/telegram", "/mailboxes", "/mailboxes/new"} {
+	for _, path := range []string{"/settings", "/settings/versions", "/telegram", "/mailboxes", "/mailboxes/new", "/rules", "/templates"} {
 		if resp, _ := p.get(path); resp.StatusCode != http.StatusSeeOther || resp.Header.Get("Location") != "/setup/totp" {
 			t.Errorf("GET %s while pending = %d %s", path, resp.StatusCode, resp.Header.Get("Location"))
 		}

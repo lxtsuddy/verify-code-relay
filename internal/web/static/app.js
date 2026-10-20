@@ -13,6 +13,7 @@
     data-reveal="input-id"         顯示／隱藏密碼欄位。
     data-otp                       只保留數字、最多 6 位；加 data-autosubmit 則 6 位且表單有效時自動送出。
     data-busy-text="處理中…"       送出按鈕在表單送出期間顯示的文字（同時擋下重複送出）。
+    form[data-dirty-watch]         有尚未儲存的變更時顯示表單內的 [data-dirty-note]（見「unsaved changes」）。
 
   <time datetime="RFC3339" data-localtime>  伺服器以 UTC 顯示（範本函式 localtime），載入後改寫成瀏覽器所在時區的
                                  「2026-10-20 15:04」；原本的 UTC 文字移到 title。
@@ -1029,6 +1030,538 @@
     var d = byId("dlg-oauth");
     if (document.visibilityState === "visible" && d && d.open && d.dataset.state === "pending") oauthPoll(oauth.gen, 0);
   });
+
+  /* ---------- unsaved changes ----------
+
+    form[data-dirty-watch]      有尚未儲存的變更時顯示表單內的 [data-dirty-note]。比較的是表單送出的內容，
+                                頁面程式改動表單（重新排序、標籤）後送出 "relay:changed" 事件即可。
+  */
+
+  function formSnapshot(form) {
+    var parts = [];
+    new FormData(form).forEach(function (v, k) { if (k !== "csrf") parts.push(k + "=" + v); });
+    return parts.join("\u0000");
+  }
+
+  function checkDirty(form) {
+    if (!form || !form.hasAttribute("data-dirty-watch")) return;
+    var note = form.querySelector("[data-dirty-note]");
+    if (note) note.hidden = formSnapshot(form) === form.dataset.snapshot;
+  }
+
+  function changed(form) {
+    if (form) form.dispatchEvent(new CustomEvent("relay:changed", { bubbles: true }));
+  }
+
+  ["input", "change", "relay:changed"].forEach(function (type) {
+    document.addEventListener(type, function (e) {
+      var form = e.target instanceof Element ? e.target.closest("form[data-dirty-watch]") : null;
+      if (form) checkDirty(form);
+    });
+  });
+
+  // after every page script has set up its form (ready handlers run in order)
+  // A form sent back with errors is unsaved as it stands, so its note shows from the start.
+  function snapshotForms() {
+    document.querySelectorAll("form[data-dirty-watch]").forEach(function (f) {
+      f.dataset.snapshot = f.querySelector('[aria-invalid="true"], .rule-error') ? "\u0001" : formSnapshot(f);
+      checkDirty(f);
+    });
+  }
+
+  function reducedMotion() {
+    return window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  /* ---------- rules page ----------
+
+    form[data-rules-form]
+      ol[data-rule-list] > li[data-rule]      一條規則一列；欄位以平行陣列送出，所以 DOM 順序就是比對順序。
+        [data-rule-move="up|down"]            上移／下移；列內按 Alt＋↑／↓ 也可以。
+        [data-rule-remove]                    刪除這一列（儲存後才生效）。
+        [data-rule-sum]                       寄件者／主旨摘要，精簡檢視時顯示在列首。
+        input[data-rule-name]                 名稱，同步顯示在列首 [data-rule-title]。
+      [data-rules-compact]                    精簡檢視（aria-pressed）：只顯示列首，方便調整順序；有錯誤與新加的列保持展開。
+      [data-rule-add]                         由 <template id="rule-new"> 加一列；其中的 "rule-new" id 前綴換成唯一值。
+      [data-rule-live]                        螢幕閱讀器的移動／刪除提示。
+    [data-tags] .textarea[data-tags-source]   一行一個的關鍵字欄位，強化成可刪除的標籤；送出的仍是 textarea。
+  */
+
+  var ruleSeq = 0;
+
+  function ruleList(node) { return node.closest("form[data-rules-form]").querySelector("[data-rule-list]"); }
+
+  function ruleName(li) {
+    var input = li.querySelector("[data-rule-name]");
+    return input && input.value.trim() ? "「" + input.value.trim() + "」" : "未命名規則";
+  }
+
+  function announce(form, text) {
+    var live = form.querySelector("[data-rule-live]");
+    if (!live) return;
+    live.textContent = "";
+    setTimeout(function () { live.textContent = text; }, 30);
+  }
+
+  function refreshRules(list) {
+    var rows = list.querySelectorAll(":scope > [data-rule]");
+    rows.forEach(function (li, i) {
+      li.querySelector('[data-rule-move="up"]').disabled = i === 0;
+      li.querySelector('[data-rule-move="down"]').disabled = i === rows.length - 1;
+    });
+  }
+
+  // flip animates nodes from their old positions (rects taken before the DOM change).
+  function flip(nodes, before) {
+    if (reducedMotion() || typeof Element.prototype.animate !== "function") return;
+    nodes.forEach(function (n, i) {
+      var dy = before[i].top - n.getBoundingClientRect().top;
+      if (dy) n.animate([{ transform: "translateY(" + dy + "px)" }, { transform: "none" }], { duration: 220, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" });
+    });
+  }
+
+  function moveRule(li, dir, keepFocus) {
+    var other = dir === "up" ? li.previousElementSibling : li.nextElementSibling;
+    if (!other || !other.hasAttribute("data-rule")) return;
+    var list = li.parentNode;
+    var before = [li.getBoundingClientRect(), other.getBoundingClientRect()];
+    if (dir === "up") list.insertBefore(li, other);
+    else list.insertBefore(other, li);
+    flip([li, other], before);
+    refreshRules(list);
+    li.classList.remove("is-moved");
+    void li.offsetWidth;
+    li.classList.add("is-moved");
+    var focus = keepFocus;
+    if (!focus || focus.disabled) {
+      var btn = li.querySelector('[data-rule-move="' + dir + '"]');
+      focus = btn.disabled ? li.querySelector('[data-rule-move="' + (dir === "up" ? "down" : "up") + '"]') : btn;
+    }
+    if (focus && !focus.disabled) focus.focus();
+    var pos = Array.prototype.indexOf.call(list.children, li) + 1;
+    var form = li.closest("form");
+    announce(form, "已將" + ruleName(li) + "移到第 " + pos + " 條");
+    changed(form);
+  }
+
+  function removeRule(li) {
+    var list = li.parentNode;
+    var form = li.closest("form");
+    var next = li.nextElementSibling || li.previousElementSibling;
+    var name = ruleName(li);
+    li.parentNode.removeChild(li);
+    refreshRules(list);
+    var focus = next ? next.querySelector("[data-rule-remove]") : form.querySelector("[data-rule-add]");
+    if (focus) focus.focus();
+    announce(form, "已刪除" + name + "，儲存後生效");
+    changed(form);
+  }
+
+  function addRule(btn) {
+    var form = btn.closest("form");
+    var tpl = byId("rule-new");
+    var list = ruleList(btn);
+    if (!tpl || !list) return;
+    var frag = tpl.content.cloneNode(true);
+    var prefix = "rule-n" + (++ruleSeq);
+    frag.querySelectorAll("[id], [for], [aria-describedby], [aria-labelledby]").forEach(function (n) {
+      ["id", "for", "aria-describedby", "aria-labelledby"].forEach(function (a) {
+        var v = n.getAttribute(a);
+        if (v) n.setAttribute(a, v.replace(/rule-new/g, prefix));
+      });
+    });
+    var li = frag.querySelector("[data-rule]");
+    li.classList.add("is-new");
+    list.appendChild(frag);
+    refreshRules(list);
+    var name = li.querySelector("[data-rule-name]");
+    li.scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
+    if (name) name.focus({ preventScroll: true });
+    changed(form);
+  }
+
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!(t instanceof Element)) return;
+    var mv = t.closest("[data-rule-move]");
+    if (mv) { moveRule(mv.closest("[data-rule]"), mv.dataset.ruleMove, mv); return; }
+    var rm = t.closest("[data-rule-remove]");
+    if (rm) { removeRule(rm.closest("[data-rule]")); return; }
+    var add = t.closest("[data-rule-add]");
+    if (add) addRule(add);
+  });
+
+  document.addEventListener("keydown", function (e) {
+    if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+    var li = e.target instanceof Element ? e.target.closest("form[data-rules-form] [data-rule]") : null;
+    if (!li) return;
+    e.preventDefault();
+    moveRule(li, e.key === "ArrowUp" ? "up" : "down", document.activeElement);
+  });
+
+  document.addEventListener("input", function (e) {
+    var t = e.target;
+    if (!(t instanceof HTMLInputElement)) return;
+    var li = t.closest("form[data-rules-form] [data-rule]");
+    if (!li) return;
+    if (t.hasAttribute("data-rule-name")) {
+      var title = li.querySelector("[data-rule-title]");
+      if (title) title.textContent = t.value.trim() || "未命名規則";
+    } else if (t.name === "rule_from" || t.name === "rule_subject") {
+      var from = li.querySelector('[name="rule_from"]').value.trim();
+      var subj = li.querySelector('[name="rule_subject"]').value.trim();
+      li.querySelector("[data-rule-sum]").textContent =
+        (from ? "寄件者 " + from : "") + (from && subj ? " · " : "") + (subj ? "主旨 " + subj : "");
+    }
+  });
+
+  document.addEventListener("click", function (e) {
+    var b = e.target instanceof Element ? e.target.closest("[data-rules-compact]") : null;
+    if (!b) return;
+    var on = b.getAttribute("aria-pressed") !== "true";
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+    ruleList(b).classList.toggle("is-compact", on);
+  });
+
+  /* keyword tags */
+
+  function tagValues(src) {
+    var seen = {};
+    return src.value.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(function (s) {
+      if (!s || seen[s]) return false;
+      seen[s] = true;
+      return true;
+    });
+  }
+
+  function enhanceTags(field) {
+    var src = field.querySelector("[data-tags-source]");
+    if (!src) return;
+    var box = el("div", "tags-box");
+    var list = el("ul", "tags-list");
+    list.setAttribute("aria-label", "已加入的關鍵字");
+    var input = el("input", "tags-input");
+    input.type = "text";
+    input.id = src.id + "-input";
+    input.autocomplete = "off";
+    input.spellcheck = false;
+    input.placeholder = src.dataset.tagsPlaceholder || "";
+    input.setAttribute("enterkeyhint", "done");
+    var desc = src.getAttribute("aria-describedby");
+    if (desc) input.setAttribute("aria-describedby", desc);
+    if (src.getAttribute("aria-invalid") === "true") input.setAttribute("aria-invalid", "true");
+    box.appendChild(list);
+    box.appendChild(input);
+    src.parentNode.insertBefore(box, src);
+    var label = field.querySelector('label[for="' + src.id + '"]');
+    if (label) label.htmlFor = input.id;
+    field.classList.add("is-enhanced");
+
+    function sync() {
+      var vals = [];
+      list.querySelectorAll("[data-tag]").forEach(function (c) { vals.push(c.dataset.tag); });
+      src.value = vals.join("\n");
+      list.hidden = vals.length === 0;
+      changed(field.closest("form"));
+    }
+
+    function chip(text) {
+      var li = el("li", "tag-chip");
+      li.dataset.tag = text;
+      li.appendChild(el("span", "tag-chip-text", text));
+      var x = el("button", "tag-chip-x");
+      x.type = "button";
+      x.setAttribute("aria-label", "移除關鍵字 " + text);
+      x.appendChild(icon("x"));
+      x.addEventListener("click", function () { remove(li, true); });
+      x.addEventListener("keydown", function (e) {
+        if (e.key === "Backspace" || e.key === "Delete") { e.preventDefault(); remove(li, true); }
+      });
+      li.appendChild(x);
+      return li;
+    }
+
+    function remove(li, focusNext) {
+      var next = li.nextElementSibling || li.previousElementSibling;
+      li.parentNode.removeChild(li);
+      sync();
+      if (focusNext) (next ? next.querySelector("button") : input).focus();
+    }
+
+    function add(raw) {
+      var added = false;
+      raw.split(/[\n,，、]+/).forEach(function (s) {
+        s = s.trim();
+        if (!s) return;
+        var dup = null;
+        list.querySelectorAll("[data-tag]").forEach(function (c) { if (c.dataset.tag === s) dup = c; });
+        if (dup) {
+          dup.classList.remove("is-dup");
+          void dup.offsetWidth;
+          dup.classList.add("is-dup");
+          return;
+        }
+        var c = chip(s);
+        c.classList.add("is-new");
+        list.appendChild(c);
+        added = true;
+      });
+      if (added) sync();
+    }
+
+    tagValues(src).forEach(function (v) { list.appendChild(chip(v)); });
+    list.hidden = !list.firstChild;
+    box.addEventListener("click", function (e) { if (e.target === box || e.target === list) input.focus(); });
+    input.addEventListener("keydown", function (e) {
+      if (e.isComposing) return;
+      if (e.key === "Enter" || e.key === ",") {
+        e.preventDefault();
+        add(input.value);
+        input.value = "";
+      } else if (e.key === "Backspace" && input.value === "") {
+        var last = list.lastElementChild;
+        if (last) { e.preventDefault(); last.querySelector("button").focus(); }
+      }
+    });
+    input.addEventListener("paste", function (e) {
+      var text = e.clipboardData ? e.clipboardData.getData("text") : "";
+      if (/[\n,，、]/.test(text)) {
+        e.preventDefault();
+        add(text);
+      }
+    });
+    input.addEventListener("blur", function () {
+      if (input.value.trim()) { add(input.value); input.value = ""; }
+    });
+    // pending text in the input counts as a keyword when the form is sent
+    var form = field.closest("form");
+    if (form) form.addEventListener("submit", function () {
+      if (input.value.trim()) { add(input.value); input.value = ""; }
+    }, true);
+  }
+
+  ready(function () {
+    document.querySelectorAll("[data-rule-list]").forEach(refreshRules);
+    document.querySelectorAll("[data-rules-compact]").forEach(function (b) { b.hidden = false; });
+    document.querySelectorAll("[data-tags]").forEach(enhanceTags);
+  });
+
+  /* ---------- templates page ----------
+
+    form[data-tpl-form]
+      [data-tpl-tab="kind"] ／ [data-tpl-panel="kind"]   三種範本的分頁（←→ Home End 切換）；沒有 JS 時三個面板依序顯示。
+                                                     隱藏的面板只加 hidden，textarea 仍會送出。
+      textarea[data-tpl-source="kind"]                 範本；停頓 400ms 後以 POST /api/templates/preview 更新預覽。
+      [data-tpl-insert="{{.Code}}" data-for="id"]      在游標位置插入變數。
+      [data-tpl-wrap="b" data-for="id"]                以 <b>…</b> 包住選取的文字。
+      [data-tpl-builtin="範本" data-for="id"]          填入內建範本；[data-tpl-clear] 清空（改用內建）。
+      figure[data-tpl-preview="kind" data-for="id"]    Telegram 訊息預覽。
+
+    預覽的 HTML 已由伺服器過濾成 Telegram 的標籤子集；這裡仍以 DOMParser 在不執行、不載入的文件中
+    解析，再只複製允許的元素（a 只留 http／https／tg 的 href）與文字到畫面上，不使用 innerHTML。
+  */
+
+  var TG_TAGS = { B: 1, STRONG: 1, I: 1, EM: 1, U: 1, INS: 1, S: 1, STRIKE: 1, DEL: 1, CODE: 1, PRE: 1, A: 1, BLOCKQUOTE: 1, BR: 1 };
+  var TG_HREF = /^\s*(https?|tg):/i;
+
+  function copyAllowed(from, to) {
+    Array.prototype.forEach.call(from.childNodes, function (n) {
+      if (n.nodeType === 3) {
+        to.appendChild(document.createTextNode(n.nodeValue));
+      } else if (n.nodeType === 1) {
+        if (!TG_TAGS[n.tagName]) { copyAllowed(n, to); return; }
+        var e = document.createElement(n.tagName.toLowerCase());
+        if (n.tagName === "A") {
+          var href = n.getAttribute("href");
+          if (href && TG_HREF.test(href)) {
+            e.setAttribute("href", href.trim());
+            e.setAttribute("target", "_blank");
+            e.setAttribute("rel", "noopener noreferrer");
+          }
+        }
+        copyAllowed(n, e);
+        to.appendChild(e);
+      }
+    });
+  }
+
+  function showSafeHTML(node, html) {
+    var doc = new DOMParser().parseFromString("<!doctype html><body>" + html, "text/html");
+    var frag = document.createDocumentFragment();
+    copyAllowed(doc.body, frag);
+    node.textContent = "";
+    node.appendChild(frag);
+  }
+
+  function nowHM() { var d = new Date(); return pad(d.getHours()) + ":" + pad(d.getMinutes()); }
+
+  var previews = {}; // kind -> { seq, timer, typing }
+
+  function pq(fig, sel) { return fig.querySelector(sel); }
+
+  function tabState(kind, text, cls) {
+    var tab = document.querySelector('[data-tpl-tab="' + kind + '"] [data-tpl-tab-state]');
+    if (!tab) return;
+    tab.textContent = text;
+    tab.classList.toggle("is-err", cls === "err");
+    tab.classList.toggle("is-custom", cls === "custom");
+  }
+
+  function runPreview(fig) {
+    var kind = fig.dataset.tplPreview;
+    var src = byId(fig.dataset.for);
+    var st = previews[kind] || (previews[kind] = { seq: 0 });
+    var seq = ++st.seq;
+    var sub = pq(fig, "[data-pv-sub]");
+    clearTimeout(st.typing);
+    st.typing = setTimeout(function () { sub.textContent = "正在輸入…"; sub.classList.add("is-typing"); }, 120);
+    var body = { kind: kind, template: src.value };
+    if (fig.dataset.mailbox) body.mailbox = fig.dataset.mailbox;
+    fetchJSON("/api/templates/preview", body).then(function (d) {
+      if (seq !== st.seq) return;
+      done();
+      if (!d.ok) { fail(d.error || "無法產生預覽"); return; }
+      pq(fig, "[data-pv-error]").hidden = true;
+      var msg = pq(fig, "[data-pv-msg]");
+      msg.classList.remove("is-stale");
+      msg.hidden = false;
+      fig.dataset.shown = "1";
+      showSafeHTML(pq(fig, "[data-pv-text]"), d.html || "");
+      pq(fig, "[data-pv-time]").textContent = nowHM();
+      var kb = pq(fig, "[data-pv-kb]");
+      kb.textContent = "";
+      (d.buttons || []).forEach(function (b) {
+        var k = el("span", "tg-key" + (b.url ? " tg-key-url" : " tg-key-copy"), b.text);
+        k.title = b.url ? "開啟 " + b.url : "複製「" + b.copy + "」";
+        kb.appendChild(k);
+      });
+      kb.hidden = !kb.firstChild;
+      var len = pq(fig, "[data-pv-len]");
+      len.textContent = "長度 " + d.length + " / " + d.max;
+      len.classList.toggle("is-near", d.length > d.max * 0.85);
+      pq(fig, "[data-pv-raw]").textContent = d.text || "";
+      var warn = pq(fig, "[data-pv-warn]");
+      var tags = d.unsupported || [];
+      warn.hidden = tags.length === 0;
+      pq(fig, "[data-pv-warn-tags]").textContent = tags.map(function (t) { return "<" + t + ">"; }).join("、");
+      if (src.value.trim()) tabState(kind, "已自訂", "custom");
+      else tabState(kind, "內建", "");
+    }, function (err) {
+      if (seq !== st.seq) return;
+      done();
+      fail(err.message);
+    });
+
+    function done() {
+      clearTimeout(st.typing);
+      sub.textContent = "bot";
+      sub.classList.remove("is-typing");
+    }
+    function fail(msg) {
+      pq(fig, "[data-pv-error-text]").textContent = msg;
+      pq(fig, "[data-pv-error]").hidden = false;
+      var msg = pq(fig, "[data-pv-msg]");
+      msg.classList.add("is-stale");
+      if (!fig.dataset.shown) msg.hidden = true; // nothing good to show yet
+      tabState(kind, "有錯誤", "err");
+    }
+  }
+
+  function schedulePreview(src) {
+    var fig = document.querySelector('[data-tpl-preview][data-for="' + src.id + '"]');
+    if (!fig) return;
+    var st = previews[fig.dataset.tplPreview] || (previews[fig.dataset.tplPreview] = { seq: 0 });
+    clearTimeout(st.timer);
+    st.timer = setTimeout(function () { runPreview(fig); }, 400);
+  }
+
+  function setTemplate(ta, value) {
+    ta.value = value;
+    ta.focus();
+    ta.setSelectionRange(value.length, value.length);
+    ta.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function selectTab(form, kind, focus) {
+    form.querySelectorAll("[data-tpl-tab]").forEach(function (t) {
+      var on = t.dataset.tplTab === kind;
+      t.setAttribute("aria-selected", on ? "true" : "false");
+      t.tabIndex = on ? 0 : -1;
+      if (on && focus) t.focus();
+    });
+    form.querySelectorAll("[data-tpl-panel]").forEach(function (p) { p.hidden = p.dataset.tplPanel !== kind; });
+  }
+
+  document.addEventListener("input", function (e) {
+    var t = e.target;
+    if (t instanceof HTMLTextAreaElement && t.hasAttribute("data-tpl-source")) {
+      if (t.getAttribute("aria-invalid") === "true") t.removeAttribute("aria-invalid");
+      schedulePreview(t);
+    }
+  });
+
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!(t instanceof Element)) return;
+    var tab = t.closest("[data-tpl-tab]");
+    if (tab) { selectTab(tab.closest("form"), tab.dataset.tplTab, false); return; }
+    var ins = t.closest("[data-tpl-insert]");
+    if (ins) {
+      var ta = byId(ins.dataset.for);
+      ta.focus();
+      ta.setRangeText(ins.dataset.tplInsert, ta.selectionStart, ta.selectionEnd, "end");
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
+    var wrap = t.closest("[data-tpl-wrap]");
+    if (wrap) {
+      var w = byId(wrap.dataset.for);
+      var tag = wrap.dataset.tplWrap;
+      var s = w.selectionStart, en = w.selectionEnd;
+      w.focus();
+      w.setRangeText("<" + tag + ">" + w.value.slice(s, en) + "</" + tag + ">", s, en, "select");
+      if (s === en) w.setSelectionRange(s + tag.length + 2, s + tag.length + 2);
+      w.dispatchEvent(new Event("input", { bubbles: true }));
+      return;
+    }
+    var bi = t.closest("[data-tpl-builtin]");
+    if (bi) {
+      var b = byId(bi.dataset.for);
+      var text = bi.dataset.tplBuiltin;
+      if (b.value.trim() && b.value.trim() !== text.trim()) {
+        confirmDialog("以內建範本取代目前的內容？", { ok: "取代" }).then(function (yes) { if (yes) setTemplate(b, text); });
+      } else setTemplate(b, text);
+      return;
+    }
+    var clr = t.closest("[data-tpl-clear]");
+    if (clr) setTemplate(byId(clr.dataset.for), "");
+  });
+
+  document.addEventListener("keydown", function (e) {
+    var tab = e.target instanceof Element ? e.target.closest("[data-tpl-tab]") : null;
+    if (!tab) return;
+    var tabs = Array.prototype.slice.call(tab.parentNode.querySelectorAll("[data-tpl-tab]"));
+    var i = tabs.indexOf(tab);
+    var to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    to = (to + tabs.length) % tabs.length;
+    selectTab(tab.closest("form"), tabs[to].dataset.tplTab, true);
+  });
+
+  ready(function () {
+    document.querySelectorAll("form[data-tpl-form]").forEach(function (form) {
+      form.classList.add("is-tabbed");
+      var bad = form.querySelector('[data-tpl-panel] [aria-invalid="true"]');
+      var first = bad ? bad.closest("[data-tpl-panel]") : form.querySelector("[data-tpl-panel]");
+      var hash = (location.hash || "").slice(1);
+      if (!bad && form.querySelector('[data-tpl-panel="' + hash + '"]')) first = form.querySelector('[data-tpl-panel="' + hash + '"]');
+      if (first) selectTab(form, first.dataset.tplPanel, false);
+    });
+    document.querySelectorAll("[data-tpl-preview]").forEach(runPreview);
+  });
+
+  ready(snapshotForms);
 
   window.relay = {
     localTimes: localTimes,

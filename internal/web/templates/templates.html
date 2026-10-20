@@ -1,0 +1,97 @@
+{{template "app" .}}
+{{define "content"}}
+{{template "rules-nav" "templates"}}
+<header class="page-head">
+  <div>
+    <h1 class="page-title">訊息範本</h1>
+    <p class="page-desc">轉發到 Telegram 的訊息長什麼樣子。依信裡找到的內容分成三種，各有一個範本；留空就用內建範本。個別信箱可在信箱的「進階設定」另外指定。</p>
+  </div>
+</header>
+
+<form class="tpl-form" method="post" action="/templates" novalidate data-tpl-form data-dirty-watch>
+  {{template "csrf" .}}
+  <div class="tpl-tabs" role="tablist" aria-label="範本種類" data-tpl-tabs>
+    {{range .Data.Kinds}}
+    <button type="button" class="tpl-tab" role="tab" id="tab-{{.Key}}" aria-controls="panel-{{.Key}}" aria-selected="false" tabindex="-1" data-tpl-tab="{{.Key}}">
+      <span class="tpl-tab-label">{{.Label}}</span>
+      <span class="tpl-tab-state{{if .Err}} is-err{{else if .Value}} is-custom{{end}}" data-tpl-tab-state>{{if .Err}}有錯誤{{else if .Value}}已自訂{{else}}內建{{end}}</span>
+    </button>
+    {{end}}
+  </div>
+
+  {{range .Data.Kinds}}{{$k := .}}
+  <section class="card tpl-panel" id="panel-{{.Key}}" role="tabpanel" aria-labelledby="tab-{{.Key}}" data-tpl-panel="{{.Key}}">
+    <div class="tpl-grid">
+      <div class="tpl-editor">
+        <div class="tpl-editor-head">
+          <div>
+            <label class="card-title" for="{{.ID}}">{{.Label}}範本</label>
+            <p class="card-desc">{{.Desc}}</p>
+          </div>
+        </div>
+
+        <div class="tpl-vars" role="group" aria-label="插入變數（插入到游標位置）">
+          {{range $.Data.Vars}}<button type="button" class="var-chip" data-tpl-insert="{{printf "{{%s}}" .Name}}" data-for="{{$k.ID}}" title="範例：{{.Sample}}"><code>{{.Name}}</code><span>{{.Label}}</span></button>{{end}}
+        </div>
+        <div class="tpl-format" role="group" aria-label="格式（套用到選取的文字）">
+          <button type="button" class="fmt-btn" data-tpl-wrap="b" data-for="{{.ID}}" title="粗體 &lt;b&gt;"><b>B</b><span class="sr-only">粗體</span></button>
+          <button type="button" class="fmt-btn" data-tpl-wrap="i" data-for="{{.ID}}" title="斜體 &lt;i&gt;"><i>I</i><span class="sr-only">斜體</span></button>
+          <button type="button" class="fmt-btn" data-tpl-wrap="code" data-for="{{.ID}}" title="等寬（點一下可複製）&lt;code&gt;"><span class="mono" aria-hidden="true">&lt;/&gt;</span><span class="sr-only">等寬</span></button>
+          <span class="fmt-note">Telegram HTML：<code>b</code> <code>i</code> <code>u</code> <code>s</code> <code>code</code> <code>pre</code> <code>a</code> <code>blockquote</code></span>
+        </div>
+
+        <textarea class="textarea input-mono tpl-text" id="{{.ID}}" name="{{.Field}}" rows="9" spellcheck="false" autocapitalize="none" placeholder="{{.Builtin}}" data-tpl-source="{{.Key}}" aria-describedby="{{.ID}}-hint{{if .Err}} {{.ID}}-err{{end}}"{{if .Err}} aria-invalid="true"{{end}}>{{.Value}}</textarea>
+        <p class="hint" id="{{.ID}}-hint">留空時使用灰字顯示的內建範本。Go <code>html/template</code> 語法，郵件內容會自動跳脫。複製驗證碼、開啟連結的按鈕會自動加上，不用寫在範本裡。</p>
+        <div id="{{.ID}}-err">{{template "field-error" .Err}}</div>
+        <div class="tpl-actions">
+          <button type="button" class="btn btn-sm" data-tpl-builtin="{{.Builtin}}" data-for="{{.ID}}">{{template "icon" "copy"}}<span>以內建範本為起點</span></button>
+          <button type="button" class="btn btn-sm btn-ghost" data-tpl-clear data-for="{{.ID}}">{{template "icon" "refresh"}}<span>清空，改用內建</span></button>
+        </div>
+      </div>
+
+      <figure class="tg-phone" data-tpl-preview="{{.Key}}" data-for="{{.ID}}" aria-labelledby="{{.ID}}-pv-title">
+        <div class="tg-bar">
+          <span class="tg-ava" aria-hidden="true"><i></i><i></i><i></i></span>
+          <div class="tg-who">
+            <p class="tg-name" id="{{.ID}}-pv-title">驗證碼轉發<span class="sr-only">：{{.Label}}訊息預覽</span></p>
+            <p class="tg-sub" data-pv-sub>bot</p>
+          </div>
+        </div>
+        <div class="tg-chat">
+          <p class="tg-day">今天</p>
+          <div class="tg-msg" data-pv-msg>
+            <div class="tg-bubble">
+              <div class="tg-text" data-pv-text><span class="tg-placeholder">需要 JavaScript 才能顯示預覽</span></div>
+              <span class="tg-time" data-pv-time></span>
+            </div>
+            <div class="tg-kb" data-pv-kb></div>
+          </div>
+        </div>
+        <div class="tg-alert" data-pv-error role="alert" hidden>
+          {{template "icon" "alert"}}
+          <div><p class="tg-alert-title">範本無法產生訊息</p><p class="tg-alert-text mono" data-pv-error-text></p></div>
+        </div>
+        <div class="tg-alert tg-alert-warn" data-pv-warn hidden>
+          {{template "icon" "info"}}
+          <div><p class="tg-alert-title">Telegram 不支援 <span data-pv-warn-tags></span></p><p class="tg-alert-text">送出時 Telegram 會拒絕這個格式，訊息改以純文字重送，粗體、連結等格式都會消失。</p></div>
+        </div>
+        <figcaption class="tg-meta">
+          <span>範例：GitHub 寄給「個人 Gmail」的信</span>
+          <span class="tg-len" data-pv-len></span>
+        </figcaption>
+        <details class="tg-raw">
+          <summary>送出的原始內容</summary>
+          <pre class="mono" data-pv-raw></pre>
+        </details>
+      </figure>
+    </div>
+  </section>
+  {{end}}
+
+  <div class="save-bar">
+    <p class="save-note" data-dirty-note hidden>{{template "icon" "info"}}<span>有尚未儲存的變更</span></p>
+    <a class="btn btn-ghost" href="/templates">捨棄變更</a>
+    <button type="submit" class="btn btn-primary" data-busy-text="驗證並套用中…">{{template "icon" "check"}}<span>儲存並套用</span></button>
+  </div>
+</form>
+{{end}}

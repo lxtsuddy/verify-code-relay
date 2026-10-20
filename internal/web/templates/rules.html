@@ -1,0 +1,136 @@
+{{template "app" .}}
+{{define "content"}}
+{{template "rules-nav" "rules"}}
+<header class="page-head">
+  <div>
+    <h1 class="page-title">辨識規則</h1>
+    <p class="page-desc">大部分的信不用設定：內建辨識會自己找出驗證碼與登入連結。遇到格式特殊的寄件者，或不想轉發的信，再在這裡加規則。</p>
+  </div>
+</header>
+
+<form class="rules-form" method="post" action="/rules" novalidate data-rules-form data-dirty-watch>
+  {{template "csrf" .}}
+
+  <section class="card" aria-labelledby="chain-title">
+    <header class="card-head">
+      <div>
+        <h2 class="card-title" id="chain-title">自訂規則</h2>
+        <p class="card-desc">每封信由上而下比對，第一條寄件者與主旨都符合、而且擷取到內容的規則生效；擷取不到就繼續往下。順序可以調整。</p>
+      </div>
+      <div class="rule-head-actions">
+        <button type="button" class="btn btn-ghost btn-compact" data-rules-compact aria-pressed="false" hidden>{{template "icon" "logs"}}<span>精簡檢視</span></button>
+        <button type="button" class="btn" data-rule-add>{{template "icon" "plus"}}<span>新增規則</span></button>
+      </div>
+    </header>
+    <div class="card-body">
+      <details class="rule-guide">
+        <summary>{{template "icon" "info"}}<span>欄位說明</span></summary>
+        <dl class="rule-guide-list">
+          <div><dt>寄件者</dt><dd>寄件地址，可用萬用字元：<code>*</code> 代表任意文字、<code>?</code> 代表一個字元，不分大小寫。例如 <code>*@github.com</code>。</dd></div>
+          <div><dt>主旨</dt><dd>主旨的正規表示式，只要部分符合即可，例如 <code>(?i)verify</code>。寄件者與主旨至少填一項，兩項都填時都要符合。</dd></div>
+          <div><dt>驗證碼</dt><dd><code>code_regex</code>：對「主旨＋換行＋內文」比對；有擷取群組時取第一個有值的群組，沒有群組時取整段比對結果。例如 <code>code:\s*(\d{6})</code>。</dd></div>
+          <div><dt>連結</dt><dd><code>link_regex</code>：用來<b>挑選</b>連結，不是擷取網址的一部分。只要某個連結的網址符合，就轉發該連結的完整網址。例如 <code>^https://github\.com/login/</code>。</dd></div>
+          <div><dt>處理方式</dt><dd>「略過」會明確排除這類信件（例如電子報），不轉發，也不交給內建辨識。</dd></div>
+        </dl>
+      </details>
+
+      <ol class="rule-chain" data-rule-list aria-label="自訂規則，依比對順序">
+        {{range $i, $r := .Data.Rules}}{{template "rule-row" (dict "I" $i "ID" (printf "rule-%d" $i) "R" $r "E" $.Errors)}}{{end}}
+      </ol>
+      <div class="rule-empty">
+        <p class="rule-empty-title">還沒有自訂規則</p>
+        <p class="hint">例如：GitHub 的信用 <code>code:\s*(\d{6})</code> 擷取驗證碼，或把 <code>*@news.example.com</code> 的電子報略過。</p>
+      </div>
+      <div class="rule-end" aria-hidden="true">
+        <span class="rule-end-mark">{{template "icon" "inbox"}}</span>
+        <p><b>內建辨識</b><span>上面都不適用時，自動找出驗證碼與登入連結</span></p>
+      </div>
+      <p class="sr-only" aria-live="polite" data-rule-live></p>
+    </div>
+  </section>
+
+  <section class="card" aria-labelledby="kw-title">
+    <header class="card-head">
+      <div>
+        <h2 class="card-title" id="kw-title">辨識關鍵字</h2>
+        <p class="card-desc">內建辨識靠關鍵字判斷信裡的數字與連結。某類信總是漏掉時，把信中慣用的說法加進來。</p>
+      </div>
+    </header>
+    <div class="card-body grid-2">
+      {{template "kw-field" (dict "ID" "kw-code" "Name" "extra_code_keywords" "Label" "驗證碼關鍵字" "Value" .Data.CodeKeywords "Err" (fieldErr .Errors "recognize.extra_code_keywords") "Placeholder" "例如 驗證號碼" "Hint" "數字前後 200 字內出現這些詞，才會被當成驗證碼。內建已包含「驗證碼」「認證碼」「verification code」「otp」等常見說法。")}}
+      {{template "kw-field" (dict "ID" "kw-link" "Name" "extra_link_keywords" "Label" "連結關鍵字" "Value" .Data.LinkKeywords "Err" (fieldErr .Errors "recognize.extra_link_keywords") "Placeholder" "例如 開通帳號" "Hint" "信裡出現這些詞才會找登入連結，連結文字含這些詞時優先。內建已包含「驗證」「登入」「verify」「sign in」等。")}}
+    </div>
+  </section>
+
+  <div class="save-bar">
+    <p class="save-note" data-dirty-note hidden>{{template "icon" "info"}}<span>有尚未儲存的變更</span></p>
+    <a class="btn btn-ghost" href="/rules">捨棄變更</a>
+    <button type="submit" class="btn btn-primary" data-busy-text="驗證並套用中…">{{template "icon" "check"}}<span>儲存並套用</span></button>
+  </div>
+</form>
+
+<template id="rule-new">{{template "rule-row" (dict "I" -1 "ID" "rule-new" "R" .Data.NewRule "E" .Errors)}}</template>
+{{end}}
+
+{{/* rule-row: dict I (index, -1 for the blank row) ID (id prefix) R (config.Rule) E (Errors) */}}
+{{define "rule-row"}}{{$id := .ID}}{{$e := .E}}{{$p := printf "rules[%d]" .I}}{{$r := .R}}
+{{$rowErr := fieldErr $e $p}}
+<li class="rule{{if $rowErr}} is-invalid{{end}}" data-rule aria-labelledby="{{$id}}-title">
+  <div class="rule-head">
+    <span class="rule-no" aria-hidden="true"></span>
+    <p class="rule-title" id="{{$id}}-title"><span class="sr-only">規則 </span><span data-rule-title>{{with $r.Name}}{{.}}{{else}}未命名規則{{end}}</span><span class="rule-sum" data-rule-sum>{{template "rule-sum" $r}}</span></p>
+    <span class="rule-badge rule-badge-ignore">略過</span>
+    <span class="rule-badge rule-badge-take">擷取</span>
+    <div class="rule-tools" role="group" aria-label="調整這條規則">
+      <button type="button" class="icon-btn" data-rule-move="up" aria-label="上移" title="上移（Alt＋↑）">{{template "icon" "arrow-up"}}</button>
+      <button type="button" class="icon-btn" data-rule-move="down" aria-label="下移" title="下移（Alt＋↓）">{{template "icon" "arrow-down"}}</button>
+      <button type="button" class="icon-btn icon-btn-danger" data-rule-remove aria-label="刪除這條規則" title="刪除">{{template "icon" "trash"}}</button>
+    </div>
+  </div>
+  {{with $rowErr}}<div class="rule-error">{{template "field-error" .}}</div>{{end}}
+  <div class="rule-body">
+    <div class="rule-grid">
+      {{template "rule-input" (dict "ID" (printf "%s-name" $id) "Name" "rule_name" "Label" "名稱" "Value" $r.Name "Err" (fieldErr $e (printf "%s.name" $p)) "Placeholder" "例：github" "Hint" "小寫英文字母、數字、_ 與 -，不可重複。" "Title" true)}}
+      {{$ignErr := fieldErr $e (printf "%s.ignore" $p)}}
+      <div class="field">
+        <label class="label" for="{{$id}}-ignore">處理方式</label>
+        <select class="select" id="{{$id}}-ignore" name="rule_ignore" data-rule-action{{if $ignErr}} aria-invalid="true" aria-describedby="{{$id}}-ignore-err"{{end}}>
+          <option value="0"{{if not $r.Ignore}} selected{{end}}>擷取驗證碼或連結並轉發</option>
+          <option value="1"{{if $r.Ignore}} selected{{end}}>略過，不轉發</option>
+        </select>
+        <div id="{{$id}}-ignore-err">{{template "field-error" $ignErr}}</div>
+      </div>
+      {{template "rule-input" (dict "ID" (printf "%s-from" $id) "Name" "rule_from" "Label" "寄件者" "Value" $r.From "Err" (fieldErr $e (printf "%s.from" $p)) "Placeholder" "例：*@github.com" "Hint" "萬用字元 * 與 ?，不分大小寫。")}}
+      {{template "rule-input" (dict "ID" (printf "%s-subject" $id) "Name" "rule_subject" "Label" "主旨" "Opt" "正規表示式" "Value" $r.Subject "Err" (fieldErr $e (printf "%s.subject" $p)) "Placeholder" "例：(?i)verify" "Hint" "部分符合即可。")}}
+      <div class="rule-extract">
+        {{template "rule-input" (dict "ID" (printf "%s-code_regex" $id) "Name" "rule_code_regex" "Label" "驗證碼" "Opt" "code_regex" "Value" $r.CodeRegex "Err" (fieldErr $e (printf "%s.code_regex" $p)) "Placeholder" "例：code:\\s*(\\d{6})" "Hint" "比對主旨＋內文，取第一個有值的擷取群組。")}}
+        {{template "rule-input" (dict "ID" (printf "%s-link_regex" $id) "Name" "rule_link_regex" "Label" "連結" "Opt" "link_regex" "Value" $r.LinkRegex "Err" (fieldErr $e (printf "%s.link_regex" $p)) "Placeholder" "例：^https://github\\.com/login/" "Hint" "挑選網址符合的連結，轉發完整網址。")}}
+      </div>
+    </div>
+  </div>
+</li>
+{{end}}
+
+{{/* rule-sum: what a rule applies to, shown in the compact view (app.js keeps it current) */}}
+{{define "rule-sum"}}{{if .From}}寄件者 {{.From}}{{end}}{{if and .From .Subject}} · {{end}}{{if .Subject}}主旨 {{.Subject}}{{end}}{{end}}
+
+{{/* rule-input: dict ID Name Label Value Err Placeholder Hint [Opt Title] */}}
+{{define "rule-input"}}
+<div class="field">
+  <label class="label" for="{{.ID}}">{{.Label}}{{with .Opt}}<span class="opt mono">{{.}}</span>{{end}}</label>
+  <input class="input input-mono" id="{{.ID}}" name="{{.Name}}" type="text" value="{{.Value}}" placeholder="{{.Placeholder}}" autocomplete="off" autocapitalize="none" spellcheck="false"{{if .Title}} data-rule-name{{end}} aria-describedby="{{.ID}}-hint{{if .Err}} {{.ID}}-err{{end}}"{{if .Err}} aria-invalid="true"{{end}}>
+  <p class="hint" id="{{.ID}}-hint">{{.Hint}}</p>
+  <div id="{{.ID}}-err">{{template "field-error" .Err}}</div>
+</div>
+{{end}}
+
+{{/* kw-field: dict ID Name Label Value Err Placeholder Hint — a textarea, one keyword per line;
+app.js turns it into removable tags (the textarea stays the submitted field) */}}
+{{define "kw-field"}}
+<div class="field kw-field" data-tags>
+  <label class="label" for="{{.ID}}">{{.Label}}<span class="opt">選填</span></label>
+  <textarea class="textarea input-mono kw-text" id="{{.ID}}" name="{{.Name}}" rows="4" spellcheck="false" placeholder="一行一個" data-tags-source data-tags-placeholder="{{.Placeholder}}" aria-describedby="{{.ID}}-hint{{if .Err}} {{.ID}}-err{{end}}"{{if .Err}} aria-invalid="true"{{end}}>{{.Value}}</textarea>
+  <p class="hint" id="{{.ID}}-hint">{{.Hint}}</p>
+  <div id="{{.ID}}-err">{{template "field-error" .Err}}</div>
+</div>
+{{end}}

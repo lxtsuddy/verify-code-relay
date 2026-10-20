@@ -1,0 +1,5 @@
+{{/* rules-nav: the two pages under 規則與範本. Argument: "rules" | "templates" (current). */}}
+{{define "rules-nav"}}<nav class="subnav" aria-label="規則與範本">
+  <a class="subnav-item" href="/rules"{{if eq . "rules"}} aria-current="page"{{end}}>辨識規則</a>
+  <a class="subnav-item" href="/templates"{{if eq . "templates"}} aria-current="page"{{end}}>訊息範本</a>
+</nav>{{end}}
