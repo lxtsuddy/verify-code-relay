@@ -580,3 +580,17 @@ func TestStopMidBatchRecordsSentItem(t *testing.T) {
 		t.Errorf("pending = %+v, want only chat 2", p)
 	}
 }
+
+func TestUnconfirmedIsNotResent(t *testing.T) {
+	d, st, fs, ck, al, path := setupDB(t, &telegram.SendError{Kind: telegram.Unconfirmed, Description: "HTTP 200, parsing response"})
+	id := record(t, st, ck.t, 1)
+	d.RunOnce(ctx)
+	ck.t = ck.t.Add(time.Hour)
+	d.RunOnce(ctx)
+	if len(fs.reqs) != 1 || len(pending(t, st, ck.t)) != 0 || len(al.keys) != 0 {
+		t.Fatalf("reqs=%d alerts=%v (an unconfirmed 200 must not be resent)", len(fs.reqs), al.keys)
+	}
+	if got := logResults(t, path); got[id] != "sent" {
+		t.Errorf("result = %q, want sent", got[id])
+	}
+}

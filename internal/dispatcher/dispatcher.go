@@ -181,6 +181,10 @@ func (d *Dispatcher) send(ctx context.Context, it store.OutboxItem) {
 		d.fail(ctx, it, se.Description, true)
 	case telegram.Forbidden:
 		d.fail(ctx, it, se.Description, true)
+	case telegram.Unconfirmed:
+		// HTTP 200: Telegram most likely delivered it, and resending would duplicate the message.
+		d.o.Log.Warn("Telegram 回應無法確認，視為已送出不再重送", "target", it.Target, "err", se.Description)
+		d.deleteSent(ctx, it)
 	default:
 		delay := backoffStart << min(it.Attempts, 10)
 		if delay > backoffMax {
