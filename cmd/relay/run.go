@@ -140,7 +140,7 @@ func newService(a *app, st *store.Store, log *slog.Logger, sender dispatcher.Sen
 		}
 		var authn auth.Authenticator = auth.Password{Username: m.Username, Password: m.Auth.Password}
 		if m.Auth.Type == "microsoft_oauth" {
-			authn = &auth.Microsoft{Mailbox: name, Username: m.Username, ClientID: m.Auth.ClientID, Tenant: m.Auth.Tenant, Store: st}
+			authn = &auth.Microsoft{Mailbox: name, Username: m.Username, ClientID: m.Auth.ClientID, Tenant: m.Auth.Tenant, Store: st, Log: log}
 		}
 		mb := pipeline.Mailbox{Name: name, DisplayName: m.DisplayName, Username: m.Username, Targets: targets,
 			MaxAge: m.MaxAge.Duration, TTL: m.TTL.Duration}
