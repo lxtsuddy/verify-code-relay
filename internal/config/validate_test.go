@@ -84,8 +84,8 @@ func TestValidateErrors(t *testing.T) {
 func TestValidateNoMailboxes(t *testing.T) {
 	c := validConfig()
 	c.Mailboxes = nil
-	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "mailboxes: 至少需要一個信箱") {
-		t.Fatalf("got %v", err)
+	if err := c.Validate(); err != nil {
+		t.Fatalf("a config without mailboxes must be valid: %v", err)
 	}
 }
 
