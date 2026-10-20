@@ -18,6 +18,16 @@ docker compose up -d
 docker compose logs -f
 ```
 
+容器內看不到主機的檔案，`relay test --eml` 要先把信件檔掛載進去（路徑需為絕對路徑），或用 `-T` 從標準輸入讀取：
+```bash
+docker compose run --rm -v "$PWD/信件.eml:/mail.eml:ro" relay test --eml /mail.eml
+docker compose run --rm -T relay test --eml /dev/stdin < 信件.eml
+```
+
+映像內建 `HEALTHCHECK`（執行 `relay healthcheck`），所以：
+- `http_listen` 留空時健康檢查一定失敗，容器會一直顯示 `unhealthy`。保持 `":8080"`，或在 `docker-compose.yml` 的服務下加上 `healthcheck: { disable: true }`。
+- `/healthz` 回 503（補抓中、斷線、需要重新授權）時也會顯示 `unhealthy`。這只是狀態標示，Docker 不會因此重啟容器；請看日誌或 `/healthz` 內容找原因。
+
 ## 部署到 K3s
 
 設定檔在 `deploy/k3s/`，以 Kustomize 管理：單一 replica（SQLite 與重複轉發的限制）、K3s 內建 `local-path` PVC 存放資料庫、以 UID 65532 及唯讀根檔案系統執行。程式只需要對外連線，不需要 Service 或 Ingress。
@@ -51,7 +61,12 @@ docker compose logs -f
 **日常操作：**
 - 修改 `deploy/k3s/config.yaml` 或 `secret.env` 後重新 `kubectl apply -k deploy/k3s`。ConfigMap／Secret 名稱帶內容雜湊，Pod 會自動重啟套用新設定。
 - 升級：推送新的 `v*` 標籤發布映像、更新 `newTag`，再 `kubectl apply -k deploy/k3s`。
-- 健康狀態：`/healthz` 在補抓中、斷線或需要重新授權時回 503。readiness probe 據此把 Pod 標為未就緒；liveness probe 只檢查 8080 埠是否在聽，避免因授權失效被不斷重啟。
+- 測試 .eml：映像沒有 shell 也沒有 `tar`，`kubectl cp` 無法使用。改用 `exec -i`（不要加 `-t`）把信件從標準輸入傳進去：
+  ```bash
+  kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay test --eml /dev/stdin < 信件.eml
+  kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay test --eml /dev/stdin --mailbox personal_gmail --send me < 信件.eml
+  ```
+- 健康狀態：`/healthz` 在補抓中、斷線或需要重新授權時回 503。readiness probe 據此把 Pod 標為未就緒；liveness probe 只檢查 8080 埠是否在聽，避免因授權失效被不斷重啟。Kubernetes 不使用映像內的 Docker `HEALTHCHECK`。
 - 備份：資料庫在 PVC 上（`local-path` 預設位於節點的 `/var/lib/rancher/k3s/storage/`），內含 OAuth token，請妥善保管。
 - 刪除：`kubectl delete -k deploy/k3s` 會一併刪除 PVC 與資料庫。
 
@@ -104,7 +119,7 @@ Microsoft 已停用 IMAP 的帳號密碼登入，必須使用 OAuth2：
 
 ## 健康檢查
 
-`http_listen` 啟用時提供 `GET /healthz`：所有信箱連線正常回 200，否則 503，內容列出各信箱狀態（`connected`、`reconnecting`、`auth_failed`、`needs_login`…）。Docker 映像內建 `HEALTHCHECK`。
+`http_listen` 啟用時提供 `GET /healthz`：所有信箱連線正常回 200，否則 503，內容列出各信箱狀態（`connected`、`reconnecting`、`auth_failed`、`needs_login`…）。Docker 映像內建 `HEALTHCHECK`，`http_listen` 留空或回 503 時容器會顯示 `unhealthy`（見「快速開始」）。
 
 ## 開發
 
@@ -121,3 +136,6 @@ go build -o relay ./cmd/relay
 - [ ] Outlook.com 以 `relay login` 授權成功，且 token 過期後能自動更新（運行超過 1 小時後仍能收信）。
 - [ ] 中斷網路數分鐘後恢復，服務自動重連並補抓斷線期間的信。
 - [ ] 重啟服務後，超過 `max_age` 的舊信不會被轉發。
+- [ ] 落入垃圾郵件匣的驗證信也會轉發（Gmail 需在 `folders` 加入 `[Gmail]/Spam`，並在標籤設定勾選「在 IMAP 中顯示」）。
+- [ ] 在容器內執行 `login`（`docker compose run --rm relay login <信箱>` 或 K3s 的 `kubectl exec -it`）授權成功，token 寫入 `/data`，重新啟動後仍有效。
+- [ ] `relay test --eml 信件.eml --send <目標>` 實際送出，Telegram 收到的訊息格式與按鈕（複製驗證碼、開啟連結）正常。
