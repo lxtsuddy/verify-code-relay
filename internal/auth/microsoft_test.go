@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,8 +22,9 @@ import (
 )
 
 type memTokens struct {
-	mu sync.Mutex
-	m  map[string]store.OAuthToken
+	mu      sync.Mutex
+	m       map[string]store.OAuthToken
+	saveErr error // returned by SaveOAuthToken when set
 }
 
 func (s *memTokens) GetOAuthToken(_ context.Context, mb string) (store.OAuthToken, bool, error) {
@@ -35,8 +37,23 @@ func (s *memTokens) GetOAuthToken(_ context.Context, mb string) (store.OAuthToke
 func (s *memTokens) SaveOAuthToken(_ context.Context, mb string, t store.OAuthToken) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.saveErr != nil {
+		return s.saveErr
+	}
 	s.m[mb] = t
 	return nil
+}
+
+func (s *memTokens) setSaveErr(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.saveErr = err
+}
+
+func (s *memTokens) get(mb string) store.OAuthToken {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.m[mb]
 }
 
 type tokenServer struct {
@@ -200,6 +217,158 @@ func TestAccessTokenServerErrorIsNotNeedsLogin(t *testing.T) {
 	_, err := newMS(ts, toks).AccessToken(context.Background())
 	if err == nil || errors.Is(err, ErrNeedsLogin) {
 		t.Fatalf("want transient error, got %v", err)
+	}
+}
+
+func TestAccessTokenInteractionRequiredNeedsLogin(t *testing.T) {
+	ts := newTokenServer(t, func(url.Values) (int, string) {
+		return 400, `{"error":"interaction_required","error_description":"AADSTS50076: MFA required"}`
+	})
+	toks := &memTokens{m: map[string]store.OAuthToken{"outlook": {RefreshToken: "SECRET-REFRESH", AccessToken: "SECRET-ACCESS", ExpiresAt: now0}}}
+	_, err := newMS(ts, toks).AccessToken(context.Background())
+	if !errors.Is(err, ErrNeedsLogin) {
+		t.Fatalf("err = %v", err)
+	}
+	assertNoSecrets(t, err)
+}
+
+// A failed refresh does not stop the mailbox while the access token is still
+// valid: it is used until it expires.
+func TestAccessTokenRefreshFailureKeepsValidToken(t *testing.T) {
+	for _, reply := range []string{"503", "drop"} {
+		ts := newTokenServer(t, pollReplies(reply))
+		toks := &memTokens{m: map[string]store.OAuthToken{"outlook": {RefreshToken: "r", AccessToken: "a", ExpiresAt: now0.Add(3 * time.Minute)}}}
+		tok, err := newMS(ts, toks).AccessToken(context.Background())
+		if err != nil || tok != "a" || ts.calls() != 1 {
+			t.Errorf("%s: tok=%q err=%v calls=%d, want the still-valid token after one refresh attempt", reply, tok, err, ts.calls())
+		}
+	}
+}
+
+// Once the access token has expired, or when the grant itself is rejected,
+// a failed refresh is an error.
+func TestAccessTokenRefreshFailureWithoutValidToken(t *testing.T) {
+	for _, tc := range []struct {
+		reply   string
+		expires time.Time
+		login   bool
+	}{
+		{"503", now0, false},
+		{"drop", now0.Add(-time.Minute), false},
+		{`{"error":"invalid_grant"}`, now0.Add(3 * time.Minute), true},
+	} {
+		ts := newTokenServer(t, pollReplies(tc.reply))
+		toks := &memTokens{m: map[string]store.OAuthToken{"outlook": {RefreshToken: "SECRET-REFRESH", AccessToken: "SECRET-ACCESS", ExpiresAt: tc.expires}}}
+		_, err := newMS(ts, toks).AccessToken(context.Background())
+		if err == nil || errors.Is(err, ErrNeedsLogin) != tc.login {
+			t.Errorf("%s: err = %v, want needs-login %v", tc.reply, err, tc.login)
+		}
+		assertNoSecrets(t, err)
+	}
+}
+
+// rotatingTokens answers the n-th refresh with access token a<n+1> and
+// refresh token r<n+1>.
+func rotatingTokens() func(url.Values) (int, string) {
+	var n atomic.Int32
+	return func(url.Values) (int, string) {
+		i := n.Add(1) + 1
+		return 200, fmt.Sprintf(`{"access_token":"a%d","refresh_token":"r%d","expires_in":3600}`, i, i)
+	}
+}
+
+// A rotated refresh token that cannot be saved stays in memory: it is used,
+// saving is retried, and the next refresh sends it rather than the old one.
+func TestAccessTokenSaveFailureKeepsRotatedToken(t *testing.T) {
+	ts := newTokenServer(t, rotatingTokens())
+	toks := &memTokens{m: map[string]store.OAuthToken{"outlook": {RefreshToken: "r1", AccessToken: "a1", ExpiresAt: now0}},
+		saveErr: errors.New("disk I/O error")}
+	m := newMS(ts, toks)
+	clk := useFakeClock(m)
+	ctx := context.Background()
+
+	tok, err := m.AccessToken(ctx)
+	if err != nil || tok != "a2" {
+		t.Fatalf("tok=%q err=%v, want the refreshed token despite the save failure", tok, err)
+	}
+	// Still unsaved: the in-memory token is used without another refresh.
+	if tok, err := m.AccessToken(ctx); err != nil || tok != "a2" || ts.calls() != 1 {
+		t.Fatalf("tok=%q err=%v calls=%d", tok, err, ts.calls())
+	}
+	// After expiry the refresh must use the rotated refresh token.
+	clk.sleep(ctx, time.Hour)
+	if tok, err := m.AccessToken(ctx); err != nil || tok != "a3" || ts.form(-1).Get("refresh_token") != "r2" {
+		t.Fatalf("tok=%q err=%v refresh_token=%q, want r2", tok, err, ts.form(-1).Get("refresh_token"))
+	}
+	// Once the store works again the pending token is saved.
+	toks.setSaveErr(nil)
+	if tok, err := m.AccessToken(ctx); err != nil || tok != "a3" || ts.calls() != 2 {
+		t.Fatalf("tok=%q err=%v calls=%d", tok, err, ts.calls())
+	}
+	if got := toks.get("outlook"); got.RefreshToken != "r3" || got.AccessToken != "a3" {
+		t.Errorf("saved = %+v, want r3/a3", got)
+	}
+}
+
+// A rejected access token that is only in memory is expired there too.
+func TestExpireUnsavedToken(t *testing.T) {
+	ts := newTokenServer(t, rotatingTokens())
+	toks := &memTokens{m: map[string]store.OAuthToken{"outlook": {RefreshToken: "r1", ExpiresAt: now0}},
+		saveErr: errors.New("disk I/O error")}
+	m := newMS(ts, toks)
+	ctx := context.Background()
+	if tok, err := m.AccessToken(ctx); err != nil || tok != "a2" {
+		t.Fatalf("tok=%q err=%v", tok, err)
+	}
+	if err := m.expire(ctx, "a2"); err != nil {
+		t.Fatal(err)
+	}
+	if tok, err := m.AccessToken(ctx); err != nil || tok != "a3" || ts.form(-1).Get("refresh_token") != "r2" {
+		t.Fatalf("tok=%q err=%v refresh_token=%q, want a3 refreshed with r2", tok, err, ts.form(-1).Get("refresh_token"))
+	}
+}
+
+// Folders of one mailbox share a *Microsoft: concurrent sessions must not
+// refresh (and rotate) the same refresh token twice.
+func TestAccessTokenConcurrentRefreshOnce(t *testing.T) {
+	ts := newTokenServer(t, func(url.Values) (int, string) {
+		time.Sleep(50 * time.Millisecond)
+		return 200, `{"access_token":"a2","refresh_token":"r2","expires_in":3600}`
+	})
+	toks := &memTokens{m: map[string]store.OAuthToken{"outlook": {RefreshToken: "r", ExpiresAt: now0}}}
+	m := newMS(ts, toks)
+	var wg sync.WaitGroup
+	for range 3 {
+		wg.Go(func() {
+			if tok, err := m.AccessToken(context.Background()); err != nil || tok != "a2" {
+				t.Errorf("tok=%q err=%v", tok, err)
+			}
+		})
+	}
+	wg.Wait()
+	if ts.calls() != 1 {
+		t.Errorf("calls = %d, want a single refresh", ts.calls())
+	}
+}
+
+// A caller waiting for another's refresh gives up when its context ends.
+func TestAccessTokenWaitHonoursContext(t *testing.T) {
+	release := make(chan struct{})
+	ts := newTokenServer(t, func(url.Values) (int, string) {
+		<-release
+		return 200, `{"access_token":"a2","refresh_token":"r2","expires_in":3600}`
+	})
+	defer close(release)
+	toks := &memTokens{m: map[string]store.OAuthToken{"outlook": {RefreshToken: "r", ExpiresAt: now0}}}
+	m := newMS(ts, toks)
+	go m.AccessToken(context.Background())
+	for ts.calls() == 0 {
+		time.Sleep(time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := m.AccessToken(ctx); !errors.Is(err, context.DeadlineExceeded) || ts.calls() != 1 {
+		t.Fatalf("err = %v calls = %d, want context.DeadlineExceeded without a second refresh", err, ts.calls())
 	}
 }
 

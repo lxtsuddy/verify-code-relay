@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/emersion/go-imap/v2"
@@ -45,6 +46,10 @@ type Microsoft struct {
 
 	// sleep waits between device-code polls; tests replace it to skip the wait.
 	sleep func(ctx context.Context, d time.Duration) error
+
+	once    sync.Once
+	lock    chan struct{}     // see acquire
+	unsaved *store.OAuthToken // a refreshed token the store failed to save
 }
 
 type DeviceCode struct {
@@ -125,15 +130,48 @@ func (m *Microsoft) post(ctx context.Context, name string, form url.Values, out 
 	return resp.StatusCode, nil
 }
 
-func (m *Microsoft) save(ctx context.Context, tr tokenResponse, oldRefresh string) error {
+// newToken builds the token to store from a token response, keeping the old
+// refresh token when the server did not rotate it.
+func (m *Microsoft) newToken(tr tokenResponse, oldRefresh string) store.OAuthToken {
 	refresh := tr.RefreshToken
 	if refresh == "" {
 		refresh = oldRefresh
 	}
-	return m.Store.SaveOAuthToken(ctx, m.Mailbox, store.OAuthToken{
+	return store.OAuthToken{
 		RefreshToken: refresh, AccessToken: tr.AccessToken,
 		ExpiresAt: m.now().Add(time.Duration(tr.ExpiresIn) * time.Second),
-	})
+	}
+}
+
+// acquire takes the lock that serialises reading, refreshing and saving the
+// token: the folders of one mailbox share a Microsoft, and two concurrent
+// refreshes would each rotate the refresh token.
+func (m *Microsoft) acquire(ctx context.Context) error {
+	m.once.Do(func() { m.lock = make(chan struct{}, 1) })
+	select {
+	case m.lock <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (m *Microsoft) release() { <-m.lock }
+
+// load returns the current token. A refreshed token that the store failed to
+// save takes precedence over the store, and saving it is retried. Callers hold
+// the lock.
+func (m *Microsoft) load(ctx context.Context) (store.OAuthToken, bool, error) {
+	if m.unsaved == nil {
+		return m.Store.GetOAuthToken(ctx, m.Mailbox)
+	}
+	tok := *m.unsaved
+	if err := m.Store.SaveOAuthToken(ctx, m.Mailbox, tok); err != nil {
+		m.log().Error("仍無法儲存更新後的 OAuth token，繼續使用記憶體中的 token", "mailbox", m.Mailbox, "err", err)
+	} else {
+		m.unsaved = nil
+	}
+	return tok, true, nil
 }
 
 func (m *Microsoft) AccessToken(ctx context.Context) (string, error) {
@@ -142,9 +180,15 @@ func (m *Microsoft) AccessToken(ctx context.Context) (string, error) {
 }
 
 // accessToken returns a usable access token; cached reports whether it came from
-// the store rather than a refresh just now.
+// the store rather than a refresh just now. When a refresh fails for a reason
+// other than a revoked grant, an access token that has not yet expired is
+// still returned.
 func (m *Microsoft) accessToken(ctx context.Context) (token string, cached bool, err error) {
-	tok, ok, err := m.Store.GetOAuthToken(ctx, m.Mailbox)
+	if err := m.acquire(ctx); err != nil {
+		return "", false, err
+	}
+	defer m.release()
+	tok, ok, err := m.load(ctx)
 	if err != nil {
 		return "", false, err
 	}
@@ -154,26 +198,43 @@ func (m *Microsoft) accessToken(ctx context.Context) (token string, cached bool,
 	if tok.AccessToken != "" && tok.ExpiresAt.Sub(m.now()) > refreshMargin {
 		return tok.AccessToken, true, nil
 	}
+	tr, err := m.refresh(ctx, tok.RefreshToken)
+	if err != nil {
+		if ctx.Err() == nil && !errors.Is(err, ErrNeedsLogin) && tok.AccessToken != "" && tok.ExpiresAt.After(m.now()) {
+			m.log().Warn("更新 OAuth token 失敗，繼續使用尚未過期的 access token", "mailbox", m.Mailbox, "err", err)
+			return tok.AccessToken, true, nil
+		}
+		return "", false, err
+	}
+	nt := m.newToken(tr, tok.RefreshToken)
+	if err := m.Store.SaveOAuthToken(ctx, m.Mailbox, nt); err != nil {
+		// The old refresh token may no longer work once rotated: keep the new
+		// one in memory rather than losing it.
+		m.unsaved = &nt
+		m.log().Error("儲存更新後的 OAuth token 失敗，暫時保留在記憶體中", "mailbox", m.Mailbox, "err", err)
+	}
+	return tr.AccessToken, false, nil
+}
+
+// refresh redeems a refresh token at the token endpoint.
+func (m *Microsoft) refresh(ctx context.Context, refreshToken string) (tokenResponse, error) {
 	var tr tokenResponse
 	status, err := m.post(ctx, "token", url.Values{
 		"client_id":     {m.ClientID},
 		"grant_type":    {"refresh_token"},
-		"refresh_token": {tok.RefreshToken},
+		"refresh_token": {refreshToken},
 		"scope":         {Scope},
 	}, &tr)
 	if err != nil {
-		return "", false, fmt.Errorf("更新 OAuth token：%w", err)
+		return tr, fmt.Errorf("更新 OAuth token：%w", err)
 	}
 	if tr.Error == "invalid_grant" || tr.Error == "interaction_required" {
-		return "", false, fmt.Errorf("信箱 %s 的授權已失效（%s）：%w", m.Mailbox, tr.Error, ErrNeedsLogin)
+		return tr, fmt.Errorf("信箱 %s 的授權已失效（%s）：%w", m.Mailbox, tr.Error, ErrNeedsLogin)
 	}
 	if status != http.StatusOK || tr.AccessToken == "" {
-		return "", false, fmt.Errorf("更新 OAuth token 失敗：HTTP %d %s", status, tr.Error)
+		return tr, fmt.Errorf("更新 OAuth token 失敗：HTTP %d %s", status, tr.Error)
 	}
-	if err := m.save(ctx, tr, tok.RefreshToken); err != nil {
-		return "", false, err
-	}
-	return tr.AccessToken, false, nil
+	return tr, nil
 }
 
 // Authenticate logs in with XOAUTH2. When the server rejects a cached access
@@ -194,9 +255,19 @@ func (m *Microsoft) Authenticate(ctx context.Context, c *imapclient.Client) erro
 	return err
 }
 
-// expire marks the stored access token as expired, keeping the refresh token.
+// expire marks the current access token as expired, keeping the refresh token.
 // A token that another session has already replaced is left alone.
 func (m *Microsoft) expire(ctx context.Context, access string) error {
+	if err := m.acquire(ctx); err != nil {
+		return err
+	}
+	defer m.release()
+	if m.unsaved != nil {
+		if m.unsaved.AccessToken == access {
+			m.unsaved.ExpiresAt = m.now()
+		}
+		return nil
+	}
 	cur, ok, err := m.Store.GetOAuthToken(ctx, m.Mailbox)
 	if err != nil || !ok || cur.AccessToken != access {
 		return err
@@ -252,7 +323,7 @@ func (m *Microsoft) PollDeviceLogin(ctx context.Context, dc *DeviceCode) error {
 			if tr.RefreshToken == "" {
 				return fmt.Errorf("沒有取得 refresh token（scope 需要包含 offline_access）")
 			}
-			return m.save(ctx, tr, "")
+			return m.Store.SaveOAuthToken(ctx, m.Mailbox, m.newToken(tr, ""))
 		case tr.Error == "authorization_pending":
 			lastErr = nil
 		case tr.Error == "slow_down":
