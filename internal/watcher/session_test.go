@@ -3,10 +3,12 @@ package watcher
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"verify-code-relay/internal/auth"
+	"verify-code-relay/internal/pipeline"
 	"verify-code-relay/internal/store"
 )
 
@@ -35,13 +37,27 @@ func runSession(t *testing.T, e *env) (cancel func(), connected chan struct{}, d
 	}, connected, done
 }
 
-// waitIdle blocks until the session has sent IDLE. imapmemserver only announces
-// mail that arrives once its IDLE loop is registered; a message appended while
-// the session is still catching up (before IDLE) is not announced until the next
-// event. Real servers do not have that gap, so tests append only once idling.
+// waitIdle blocks until the server is serving an IDLE on the latest connection.
+// imapmemserver only announces mail that arrives once its IDLE loop is
+// registered; a message appended while the session is still catching up (after
+// its last search, before IDLE) is not announced until the next event. Tests
+// that exercise the IDLE path therefore append only once the server is idling.
+// The hook fires on the server, so this does not race with the client merely
+// having written IDLE.
 func waitIdle(t *testing.T, e *env) {
 	t.Helper()
-	eventually(t, "session idling", func() bool { return e.dialer.last().idles.Load() >= 1 })
+	waitIdles(t, e, 1)
+}
+
+// waitIdles waits until the server has started n IDLE commands on the latest
+// connection, e.g. n=2 once the session went back to IDLE after handling mail.
+func waitIdles(t *testing.T, e *env, n int) {
+	t.Helper()
+	eventually(t, "session idling", func() bool {
+		e.dialer.mu.Lock()
+		defer e.dialer.mu.Unlock()
+		return len(e.dialer.conns) > 0 && e.srv.idles(e.dialer.conns[len(e.dialer.conns)-1].LocalAddr()) >= n
+	})
 }
 
 func TestFirstRunSkipsBacklogThenIdleDelivers(t *testing.T) {
@@ -98,8 +114,40 @@ func TestDecideSkipsWithoutFetchingBody(t *testing.T) {
 		defer e.proc.mu.Unlock()
 		return equalUIDs(e.proc.skipped, 1)
 	})
+	waitIdles(t, e, 2) // back in IDLE after handling uid 1
+	if n := e.dialer.last().bodies.Load(); n != 0 {
+		t.Fatalf("%d body FETCHes for a skipped message, want 0", n)
+	}
 	e.srv.appendMsg(t, "fresh")
 	eventually(t, "uid 2 processed", func() bool { return equalUIDs(e.proc.got(), 2) })
+	if n := e.dialer.last().bodies.Load(); n != 1 {
+		t.Fatalf("%d body FETCHes, want 1 (uid 2 only)", n)
+	}
+}
+
+// Servers may hold back untagged EXISTS outside IDLE. Mail that arrives while
+// the session is busy fetching must still be picked up before it goes back to
+// IDLE: drain repeats the catch-up until a pass finds nothing. With a single
+// pass, uid 2 would wait for the next event or the 25-minute IDLE cycle.
+func TestDrainPicksUpMailHeldBackOutsideIdle(t *testing.T) {
+	e := newEnv(t, nil, nil)
+	e.dialer.rewriter = holdExists
+	var once sync.Once
+	e.proc.onDecide = func(env pipeline.Envelope) {
+		if env.UID == 1 {
+			// Arrives after the catch-up's SEARCH, before the body FETCH of uid 1.
+			once.Do(func() {
+				if err := e.srv.add("arrives while busy"); err != nil {
+					t.Error(err)
+				}
+			})
+		}
+	}
+	stop, _, _ := runSession(t, e)
+	defer stop()
+	waitIdle(t, e)
+	e.srv.appendMsg(t, "wakes the session")
+	eventually(t, "uids 1,2 processed", func() bool { return equalUIDs(e.proc.got(), 1, 2) })
 }
 
 func TestBurstWhileBusyIsDrained(t *testing.T) {

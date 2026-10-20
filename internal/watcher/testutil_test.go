@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,32 @@ type testServer struct {
 	addr string
 	user *imapmemserver.User
 	srv  *imapserver.Server
+
+	mu     sync.Mutex
+	idling map[string]int // client address -> IDLE commands the server has started serving
+}
+
+// idleSession reports every IDLE the server starts serving. imapmemserver
+// registers the IDLE right after the call (same goroutine, no blocking), and only
+// announces mail that arrives once registered: it does not report changes queued
+// before IDLE started. Waiting for this hook, rather than for the client to write
+// IDLE, is what lets tests append "during IDLE" reliably.
+type idleSession struct {
+	imapserver.SessionIMAP4rev2
+	idle func()
+}
+
+func (s *idleSession) Idle(w *imapserver.UpdateWriter, stop <-chan struct{}) error {
+	s.idle()
+	return s.SessionIMAP4rev2.Idle(w, stop)
+}
+
+// idles returns how many IDLE commands the server has started on the
+// connection whose client side is local.
+func (s *testServer) idles(local net.Addr) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.idling[local.String()]
 }
 
 func startServer(t *testing.T, caps imap.CapSet) *testServer {
@@ -39,9 +66,18 @@ func startServer(t *testing.T, caps imap.CapSet) *testServer {
 	u := imapmemserver.NewUser("me@example.com", "pw")
 	u.Create("INBOX", nil)
 	mem.AddUser(u)
+	ts := &testServer{user: u, idling: map[string]int{}}
 	srv := imapserver.New(&imapserver.Options{
-		NewSession: func(*imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
-			return mem.NewSession(), nil, nil
+		NewSession: func(conn *imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
+			client := conn.NetConn().RemoteAddr().String()
+			return &idleSession{
+				SessionIMAP4rev2: mem.NewSession().(imapserver.SessionIMAP4rev2),
+				idle: func() {
+					ts.mu.Lock()
+					ts.idling[client]++
+					ts.mu.Unlock()
+				},
+			}, nil, nil
 		},
 		Caps:         caps,
 		InsecureAuth: true,
@@ -53,7 +89,8 @@ func startServer(t *testing.T, caps imap.CapSet) *testServer {
 	}
 	go srv.Serve(ln)
 	t.Cleanup(func() { srv.Close() })
-	return &testServer{addr: ln.Addr().String(), user: u, srv: srv}
+	ts.addr, ts.srv = ln.Addr().String(), srv
+	return ts
 }
 
 type nopLogger struct{}
@@ -62,21 +99,49 @@ func (nopLogger) Printf(string, ...any) {}
 
 func (s *testServer) appendMsg(t *testing.T, subject string) {
 	t.Helper()
+	if err := s.add(subject); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// add appends a message; unlike appendMsg it is safe to call from the
+// watcher's goroutine (Processor hooks).
+func (s *testServer) add(subject string) error {
+	return s.with(func(c *imapclient.Client) error {
+		msg := strings.ReplaceAll("From: a@b.c\nTo: me@example.com\nSubject: "+subject+"\n\nbody\n", "\n", "\r\n")
+		cmd := c.Append("INBOX", int64(len(msg)), nil)
+		cmd.Write([]byte(msg))
+		cmd.Close()
+		_, err := cmd.Wait()
+		return err
+	})
+}
+
+// expunge permanently deletes the message with the given UID.
+func (s *testServer) expunge(uid uint32) error {
+	return s.with(func(c *imapclient.Client) error {
+		if _, err := c.Select("INBOX", nil).Wait(); err != nil {
+			return err
+		}
+		set := imap.UIDSetNum(imap.UID(uid))
+		if err := c.Store(set, &imap.StoreFlags{Op: imap.StoreFlagsAdd, Silent: true, Flags: []imap.Flag{imap.FlagDeleted}}, nil).Close(); err != nil {
+			return err
+		}
+		return c.UIDExpunge(set).Close()
+	})
+}
+
+// with runs f on a fresh logged-in connection of the test user.
+func (s *testServer) with(f func(*imapclient.Client) error) error {
 	c, err := imapclient.DialInsecure(s.addr, nil)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	defer c.Close()
 	if err := c.Login("me@example.com", "pw").Wait(); err != nil {
-		t.Fatal(err)
+		return err
 	}
-	msg := strings.ReplaceAll("From: a@b.c\nTo: me@example.com\nSubject: "+subject+"\n\nbody\n", "\n", "\r\n")
-	cmd := c.Append("INBOX", int64(len(msg)), nil)
-	cmd.Write([]byte(msg))
-	cmd.Close()
-	if _, err := cmd.Wait(); err != nil {
-		t.Fatal(err)
-	}
+	return f(c)
 }
 
 func (s *testServer) seenFlags(t *testing.T) int {
@@ -114,9 +179,41 @@ type ctlConn struct {
 	frozen   atomic.Bool
 	idles    atomic.Int32 // IDLE commands written by the client
 	noops    atomic.Int32 // NOOP commands written by the client
+	bodies   atomic.Int32 // BODY.PEEK[] fetches written by the client
+
+	// rewrite, when set, sees every complete line the server sends (CRLF
+	// included, literal contents too) and returns its replacement; nil drops it.
+	rewrite func(line []byte) []byte
+	partial []byte // server bytes after the last complete line
+	out     []byte // rewritten bytes not yet returned to the client
 }
 
 func (c *ctlConn) Read(p []byte) (int, error) {
+	if c.rewrite == nil {
+		return c.read(p)
+	}
+	buf := make([]byte, 4096)
+	for len(c.out) == 0 {
+		n, err := c.read(buf)
+		c.partial = append(c.partial, buf[:n]...)
+		for {
+			i := bytes.IndexByte(c.partial, '\n')
+			if i < 0 {
+				break
+			}
+			c.out = append(c.out, c.rewrite(c.partial[:i+1])...)
+			c.partial = c.partial[i+1:]
+		}
+		if err != nil && len(c.out) == 0 {
+			return 0, err
+		}
+	}
+	n := copy(p, c.out)
+	c.out = c.out[n:]
+	return n, nil
+}
+
+func (c *ctlConn) read(p []byte) (int, error) {
 	for {
 		n, err := c.Conn.Read(p)
 		if err != nil || !c.frozen.Load() {
@@ -135,6 +232,9 @@ func (c *ctlConn) Write(p []byte) (int, error) {
 	if bytes.Contains(p, []byte(" NOOP\r\n")) {
 		c.noops.Add(1)
 	}
+	if bytes.Contains(p, []byte("BODY.PEEK[]")) {
+		c.bodies.Add(1)
+	}
 	if c.killBody != nil && bytes.Contains(p, []byte("BODY.PEEK[]")) && c.killBody.CompareAndSwap(true, false) {
 		n, err := c.Conn.Write(p)
 		c.Conn.Close()
@@ -148,9 +248,32 @@ type testDialer struct {
 	fail atomic.Bool
 	// killBodyFetch kills the connection during the next body FETCH (one shot).
 	killBodyFetch atomic.Bool
-	count         atomic.Int32
-	mu            sync.Mutex
-	conns         []*ctlConn
+	// rewriter, when set, makes the rewrite function of each new connection.
+	rewriter func() func(line []byte) []byte
+	count    atomic.Int32
+	mu       sync.Mutex
+	conns    []*ctlConn
+}
+
+var existsLine = regexp.MustCompile(`^\* \d+ EXISTS\r\n$`)
+
+// holdExists drops "* n EXISTS" outside IDLE, like servers that report new mail
+// only while idling. The IDLE state follows the server stream: a continuation
+// request starts it (the watcher sends no other command that needs one) and the
+// next tagged response ends it.
+func holdExists() func([]byte) []byte {
+	idling := false
+	return func(line []byte) []byte {
+		switch {
+		case bytes.HasPrefix(line, []byte("+ ")):
+			idling = true
+		case !bytes.HasPrefix(line, []byte("* ")):
+			idling = false // tagged response (or literal data, which never occurs while idling)
+		case !idling && existsLine.Match(line):
+			return nil
+		}
+		return line
+	}
 }
 
 func (d *testDialer) dial(_ context.Context, opts *imapclient.Options) (*imapclient.Client, error) {
@@ -163,6 +286,9 @@ func (d *testDialer) dial(_ context.Context, opts *imapclient.Options) (*imapcli
 		return nil, err
 	}
 	cc := &ctlConn{Conn: nc, killBody: &d.killBodyFetch}
+	if d.rewriter != nil {
+		cc.rewrite = d.rewriter()
+	}
 	d.mu.Lock()
 	d.conns = append(d.conns, cc)
 	d.mu.Unlock()
@@ -183,12 +309,19 @@ type fakeProc struct {
 	skip      map[uint32]string
 	failOnce  map[uint32]bool
 	failAll   atomic.Bool // every Process call fails
+	// onDecide, when set, runs on the watcher's goroutine (without f.mu held)
+	// after the metadata FETCH and before the body FETCH of each message.
+	onDecide func(env pipeline.Envelope)
 }
 
 func (f *fakeProc) Decide(_ pipeline.Mailbox, env pipeline.Envelope) string {
 	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.skip[env.UID]
+	hook, kind := f.onDecide, f.skip[env.UID]
+	f.mu.Unlock()
+	if hook != nil {
+		hook(env)
+	}
+	return kind
 }
 
 func (f *fakeProc) RecordSkipped(ctx context.Context, mb pipeline.Mailbox, folder string, uv uint32, env pipeline.Envelope, _ string) error {

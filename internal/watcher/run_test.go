@@ -35,11 +35,12 @@ func TestRunReconnectsAfterKill(t *testing.T) {
 	eventually(t, "redialled", func() bool { return e.dialer.count.Load() >= 2 && e.w.Status() == StatusConnected })
 	// dial() bumps count before it registers the new conn, so wait for the second
 	// conn itself; otherwise last() could still be the killed one.
-	eventually(t, "second connection idling", func() bool {
+	eventually(t, "second connection registered", func() bool {
 		e.dialer.mu.Lock()
 		defer e.dialer.mu.Unlock()
-		return len(e.dialer.conns) >= 2 && e.dialer.conns[len(e.dialer.conns)-1].idles.Load() >= 1
+		return len(e.dialer.conns) >= 2
 	})
+	waitIdle(t, e)
 	e.srv.appendMsg(t, "after reconnect")
 	eventually(t, "uid 1 processed", func() bool { return equalUIDs(e.proc.got(), 1) })
 }
