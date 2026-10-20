@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -53,17 +52,10 @@ type deviceFlow struct {
 	finishedAt, reportedAt time.Time
 }
 
-// msAccount is what a Microsoft token belongs to: the account and app it was issued for
-// and the server it may be sent to.
-type msAccount struct {
-	Username, ClientID, Tenant string
-	Host                       string // lower case
-	Port                       int    // 0 written out as 993
-}
+// msAccount is what a Microsoft token belongs to (runtime.MSAccount).
+type msAccount = runtime.MSAccount
 
-func accountOf(m *config.Mailbox) msAccount {
-	return msAccount{m.Username, m.Auth.ClientID, effectiveTenant(m.Auth.Tenant), strings.ToLower(m.Host), effectivePort(m.Port)}
-}
+func accountOf(m *config.Mailbox) msAccount { return runtime.MSAccountOf(m) }
 
 var errFlowStale = errors.New("信箱設定已變更或已刪除，這次授權作廢，請重新授權")
 
@@ -98,6 +90,36 @@ func (fs flowStore) SaveOAuthToken(ctx context.Context, mailbox string, t store.
 	m := raw.Mailboxes[fs.name]
 	if m == nil || m.Auth.Type != authMicrosoft || accountOf(m) != fs.f.acct {
 		return errFlowStale
+	}
+	return s.o.Store.SaveOAuthToken(ctx, mailbox, t)
+}
+
+// probeStore is the token store of a connection test. A token the test refreshes (or
+// marks expired) is only saved while the stored mailbox still uses Microsoft with the
+// account the test started with; otherwise it is dropped. Like flowStore it holds saveMu,
+// so a change stored before the save fails the check and one stored after it deletes the
+// token again: a test never writes back a token that a change has just deleted.
+type probeStore struct {
+	s    *Server
+	name string
+	acct msAccount
+}
+
+func (ps probeStore) GetOAuthToken(ctx context.Context, mailbox string) (store.OAuthToken, bool, error) {
+	return ps.s.o.Store.GetOAuthToken(ctx, mailbox)
+}
+
+func (ps probeStore) SaveOAuthToken(ctx context.Context, mailbox string, t store.OAuthToken) error {
+	s := ps.s
+	s.saveMu.Lock()
+	defer s.saveMu.Unlock()
+	raw, _, err := runtime.LoadConfig(ctx, s.o.Store)
+	if err != nil {
+		return err
+	}
+	if m := raw.Mailboxes[ps.name]; m == nil || m.Auth.Type != authMicrosoft || accountOf(m) != ps.acct {
+		s.o.Log.Info("連線測試期間信箱設定已變更，不儲存測試時更新的 Microsoft 授權", "mailbox", ps.name)
+		return nil
 	}
 	return s.o.Store.SaveOAuthToken(ctx, mailbox, t)
 }

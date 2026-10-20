@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -71,13 +72,34 @@ func cmdImport(configPath string, args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, err)
 	}
 	defer st.Close()
-	_, id, err := runtime.SaveConfig(context.Background(), st, raw,
+	ctx := context.Background()
+	// the mailboxes before, to drop the OAuth tokens the import makes stale; when the stored
+	// config cannot be read, nil: every imported Microsoft mailbox loses its token
+	var before map[string]*config.Mailbox
+	prev, _, err := runtime.LoadConfig(ctx, st)
+	var invalid *runtime.InvalidConfigError
+	switch {
+	case err == nil:
+		before = prev.Mailboxes
+	case !errors.As(err, &invalid):
+		return fail(stderr, err)
+	}
+	_, id, err := runtime.SaveConfig(ctx, st, raw,
 		runtime.Meta{Source: "import", Summary: "從 " + filepath.Base(path) + " 匯入"}, time.Now())
 	if err != nil {
 		fmt.Fprintf(stderr, "設定檔有誤（%s）：\n%v\n", path, err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "已匯入為版本 #%d。服務執行中時，請重新啟動或在 Web 上任意存檔以套用\n", id)
+	dropped, failed := runtime.DeleteOAuthTokens(ctx, st, runtime.StaleOAuthTokens(before, raw.Mailboxes), func(name string, err error) {
+		fmt.Fprintf(stderr, "信箱 %s 的 Microsoft 授權已不適用，但清除失敗：%v\n", name, err)
+	})
+	for _, name := range dropped {
+		fmt.Fprintf(stdout, "信箱 %s 的 Microsoft 授權已清除，請重新授權\n", name)
+	}
+	if len(failed) > 0 {
+		return 1
+	}
 	return 0
 }
 

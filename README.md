@@ -218,6 +218,7 @@ kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay config i
 
 - 機密可以寫成 `${環境變數}`，匯入時從**執行 import 的環境**展開後存進資料庫（K3s 上是 Pod 的環境，所以變數要在 `secret.env` 中）。`$$` 代表字面上的 `$`。
 - 服務執行中匯入時，請重新啟動（K3s：`kubectl -n verify-code-relay rollout restart deploy/verify-code-relay`）或在 Web 上任意存檔一次以套用。
+- 匯入會清除不再適用的 Microsoft 授權（信箱被移除，主機、埠號、帳號、client_id 或 tenant 改了，或信箱剛改成 Microsoft 授權），並列出「信箱 X 的 Microsoft 授權已清除，請重新授權」；之後在 Web 上重新授權即可。
 - 舊版的 `data_dir`、`http_listen` 會被略過，改用環境變數 `RELAY_DATA_DIR`、`RELAY_LISTEN`。
 - `relay config export` 輸出目前設定（含機密），格式相同，可用於備份或搬家。
 

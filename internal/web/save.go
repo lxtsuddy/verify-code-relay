@@ -34,10 +34,11 @@ type saved struct {
 
 // saveConfig is mutate with another version source (e.g. "restore") that also reports
 // the OAuth tokens it dropped. Which tokens no longer fit is decided here, for every
-// change alike, by comparing each mailbox before and after (tokenInvalidated; a removed
-// mailbox always loses its token). They are deleted only once the new version is stored,
-// so a failed save never loses a token, and while neither the old nor the new service
-// runs (Runtime.ApplyWith), so no watcher can write one back or send one to a new server.
+// change alike, by comparing each mailbox before and after (runtime.StaleOAuthTokens: a
+// removed mailbox always loses its token, one that just became Microsoft any leftover).
+// They are deleted only once the new version is stored, so a failed save never loses a
+// token, and while neither the old nor the new service runs (Runtime.ApplyWith), so no
+// watcher can write one back or send one to a new server.
 func (s *Server) saveConfig(r *http.Request, source, summary string, fn func(raw *config.Config) error) (saved, FieldErrors, error) {
 	s.saveMu.Lock()
 	defer s.saveMu.Unlock()
@@ -46,10 +47,11 @@ func (s *Server) saveConfig(r *http.Request, source, summary string, fn func(raw
 	if err != nil {
 		return saved{}, nil, err
 	}
-	before := map[string]config.Mailbox{} // by value: fn may change the mailboxes in place
+	before := map[string]*config.Mailbox{} // copies: fn may change the mailboxes in place
 	for name, m := range raw.Mailboxes {
 		if m != nil {
-			before[name] = *m
+			c := *m
+			before[name] = &c
 		}
 	}
 	if err := fn(raw); err != nil {
@@ -69,32 +71,16 @@ func (s *Server) saveConfig(r *http.Request, source, summary string, fn func(raw
 	if err != nil {
 		return saved{}, nil, err
 	}
-	var stale []string
-	for _, name := range sortedNames(before) {
-		old := before[name]
-		if next := raw.Mailboxes[name]; next == nil || tokenInvalidated(&old, next) {
-			stale = append(stale, name)
-		}
-	}
+	stale := runtime.StaleOAuthTokens(before, raw.Mailboxes)
 	s.cancelStaleFlows(raw) // before any token is deleted
 	var res saved
 	dctx := context.WithoutCancel(ctx) // the version is stored: finish even if the client went away
 	s.o.Runtime.ApplyWith(b, func() {
-		for _, name := range stale {
-			_, ok, err := s.o.Store.GetOAuthToken(dctx, name)
-			if err == nil && !ok {
-				continue // nothing stored
-			}
-			if err == nil {
-				err = s.o.Store.DeleteOAuthToken(dctx, name)
-			}
-			if err != nil {
-				s.o.Log.Warn("刪除信箱的 OAuth token 失敗", "mailbox", name, "err", err)
-				res.Failed = append(res.Failed, name)
-				continue
-			}
+		res.Dropped, res.Failed = runtime.DeleteOAuthTokens(dctx, s.o.Store, stale, func(name string, err error) {
+			s.o.Log.Warn("刪除信箱的 OAuth token 失敗", "mailbox", name, "err", err)
+		})
+		for _, name := range res.Dropped {
 			s.o.Log.Info("信箱設定已變更，已清除不再適用的 Microsoft 授權", "mailbox", name)
-			res.Dropped = append(res.Dropped, name)
 		}
 	})
 	s.o.Log.Info("設定已儲存並套用", "version", id, "source", source, "summary", summary, "ip", ip)

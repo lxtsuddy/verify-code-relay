@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"verify-code-relay/internal/store"
 )
 
 func TestConfigImportExport(t *testing.T) {
@@ -95,5 +98,123 @@ func TestConfigExportEmpty(t *testing.T) {
 	code, stdout, stderr := run("config", "export")
 	if code != 0 || !strings.Contains(stderr, "尚無設定") || strings.TrimSpace(stdout) != "{}" {
 		t.Fatalf("code=%d out=%q err=%q", code, stdout, stderr)
+	}
+}
+
+// importYAML writes body to a file and imports it, failing the test on a non-zero exit.
+func importYAML(t *testing.T, body string) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "c.yaml")
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := run("config", "import", p)
+	if code != 0 {
+		t.Fatalf("import = %d: %s", code, stderr)
+	}
+	return stdout
+}
+
+const importBase = `bots: { main: { token: "1:x" } }
+targets: { me: { bot: main, chat_id: 5 } }
+`
+
+func msBox(host, user string) string {
+	return "{ host: " + host + ", username: " + user + `, auth: { type: microsoft_oauth, client_id: "00000000-0000-0000-0000-000000000001", tenant: consumers }, targets: [me] }`
+}
+
+// An import drops the OAuth tokens it made stale, like a save on the Web: a removed
+// mailbox, another host or account, and a mailbox that just became Microsoft (any token
+// stored for it is left over from earlier).
+func TestConfigImportDropsStaleOAuthTokens(t *testing.T) {
+	keepUmask(t)
+	t.Setenv("RELAY_DATA_DIR", t.TempDir())
+	importYAML(t, importBase+`mailboxes:
+  outlook: `+msBox("outlook.office365.com", "a@outlook.com")+`
+  gone: `+msBox("outlook.office365.com", "b@outlook.com")+`
+  same: `+msBox("outlook.office365.com", "c@outlook.com")+`
+  pw: { host: imap.gmail.com, username: d@gmail.com, auth: { type: password, password: p }, targets: [me] }
+`)
+	st, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	tok := store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)}
+	for _, name := range []string{"outlook", "gone", "same", "pw"} {
+		if err := st.SaveOAuthToken(ctx, name, tok); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out := importYAML(t, importBase+`mailboxes:
+  outlook: `+msBox("imap-mail.outlook.com", "a@outlook.com")+`
+  same: { display_name: Same, host: OUTLOOK.office365.com, port: 993, username: c@outlook.com, auth: { type: microsoft_oauth, client_id: "00000000-0000-0000-0000-000000000001", tenant: consumers }, targets: [me] }
+  pw: `+msBox("outlook.office365.com", "d@outlook.com")+`
+`)
+	for _, name := range []string{"outlook", "gone", "pw"} {
+		if _, ok, _ := st.GetOAuthToken(ctx, name); ok {
+			t.Errorf("token of %s kept", name)
+		}
+		if !strings.Contains(out, "信箱 "+name+" 的 Microsoft 授權已清除，請重新授權") {
+			t.Errorf("no notice for %s in %q", name, out)
+		}
+	}
+	if _, ok, _ := st.GetOAuthToken(ctx, "same"); !ok {
+		t.Error("token of an unchanged account dropped")
+	}
+	if strings.Contains(out, "信箱 same") {
+		t.Errorf("notice for an unchanged account: %q", out)
+	}
+	// nothing stored: nothing to tell
+	out = importYAML(t, importBase)
+	if strings.Contains(out, "信箱 outlook") || !strings.Contains(out, "信箱 same 的 Microsoft 授權已清除") {
+		t.Errorf("removing every mailbox = %q", out)
+	}
+}
+
+// A rejected import keeps every token.
+func TestConfigImportFailureKeepsOAuthTokens(t *testing.T) {
+	keepUmask(t)
+	t.Setenv("RELAY_DATA_DIR", t.TempDir())
+	importYAML(t, importBase+"mailboxes:\n  outlook: "+msBox("outlook.office365.com", "a@outlook.com")+"\n")
+	st, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	st.SaveOAuthToken(ctx, "outlook", store.OAuthToken{RefreshToken: "r"})
+	p := filepath.Join(t.TempDir(), "bad.yaml")
+	os.WriteFile(p, []byte("targets: { me: { bot: ghost, chat_id: 5 } }\n"), 0o600)
+	if code, _, _ := run("config", "import", p); code == 0 {
+		t.Fatal("invalid config imported")
+	}
+	if _, ok, _ := st.GetOAuthToken(ctx, "outlook"); !ok {
+		t.Fatal("a rejected import dropped a token")
+	}
+}
+
+// When the stored config cannot be read, nothing tells which account a token was for: every
+// imported Microsoft mailbox loses its token.
+func TestConfigImportOverUnreadableConfigDropsTokens(t *testing.T) {
+	keepUmask(t)
+	t.Setenv("RELAY_DATA_DIR", t.TempDir())
+	st, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if _, err := st.SaveConfigVersion(ctx, store.ConfigVersion{CreatedAt: time.Now(), Source: "test", YAML: "mailboxes: ["}); err != nil {
+		t.Fatal(err)
+	}
+	st.SaveOAuthToken(ctx, "outlook", store.OAuthToken{RefreshToken: "r"})
+	out := importYAML(t, importBase+"mailboxes:\n  outlook: "+msBox("outlook.office365.com", "a@outlook.com")+"\n")
+	if _, ok, _ := st.GetOAuthToken(ctx, "outlook"); ok {
+		t.Fatal("token kept although the previous account is unknown")
+	}
+	if !strings.Contains(out, "信箱 outlook 的 Microsoft 授權已清除，請重新授權") {
+		t.Errorf("out = %q", out)
 	}
 }

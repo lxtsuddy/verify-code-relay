@@ -1,12 +1,17 @@
 package web
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -79,12 +84,18 @@ func (d *imapDial) factory(host string, _ int) watcher.DialFunc {
 // server: user u / pw, folders INBOX and Spam. cfg may be nil.
 func newEnvWithIMAP(t *testing.T, cfg ...func(c *config.Config)) *env {
 	t.Helper()
-	d := startIMAP(t)
 	var mod func(c *config.Config)
 	if len(cfg) > 0 {
 		mod = cfg[0]
 	}
-	e := newEnv(t, mod, func(o *Options) { o.Dial = d.factory })
+	return newEnvWithIMAPOpts(t, mod)
+}
+
+// newEnvWithIMAPOpts is newEnvWithIMAP with further Options adjustments.
+func newEnvWithIMAPOpts(t *testing.T, cfg func(c *config.Config), opts ...func(o *Options)) *env {
+	t.Helper()
+	d := startIMAP(t)
+	e := newEnv(t, cfg, append([]func(o *Options){func(o *Options) { o.Dial = d.factory }}, opts...)...)
 	e.imap = d
 	return e
 }
@@ -428,6 +439,97 @@ func TestProbeMicrosoftUsesOnlyStoredSettings(t *testing.T) {
 	}
 	if h := <-e.imap.hosts; h != "outlook.office365.com" {
 		t.Fatalf("dialled %s", h)
+	}
+}
+
+// A token refresh by the connection test that ends after a save changed the server (and
+// deleted the token) must not write the token back.
+func TestProbeRefreshDoesNotRestoreDroppedToken(t *testing.T) {
+	ms := newFakeMicrosoft(t)
+	started, release := make(chan struct{}), make(chan struct{})
+	var startOnce, releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(unblock) // before the fake server closes
+	ms.setToken(func(int) (int, string) {
+		startOnce.Do(func() { close(started) })
+		<-release
+		return 200, fakeGrant
+	})
+	e := newEnvWithIMAPOpts(t, withOutlookMailbox, withFakeMicrosoft(ms))
+	e.login()
+	ctx := context.Background()
+	// expired: the probe has to refresh it
+	e.st.SaveOAuthToken(ctx, "outlook", store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(-time.Hour)})
+
+	b, _ := json.Marshal(map[string]string{"name": "outlook", "host": "outlook.office365.com", "username": "me@outlook.com",
+		"auth_type": "microsoft_oauth", "client_id": "00000000-0000-0000-0000-000000000001", "tenant": "consumers"})
+	req, err := http.NewRequest(http.MethodPost, e.ts.URL+"/api/mailboxes/probe", bytes.NewReader(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("X-CSRF-Token", e.csrf)
+	req.Header.Set("Origin", e.ts.URL)
+	done := make(chan string, 1)
+	go func() {
+		resp, err := e.c.Do(req)
+		if err != nil {
+			done <- "request failed: " + err.Error()
+			return
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		done <- string(body)
+	}()
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the probe never refreshed the token")
+	}
+
+	form := url.Values{"display_name": {"Outlook"}, "host": {"imap-mail.outlook.com"}, "username": {"me@outlook.com"},
+		"auth_type": {"microsoft_oauth"}, "client_id": {"00000000-0000-0000-0000-000000000001"}, "tenant": {"consumers"},
+		"folders": {"INBOX"}, "targets": {"me"}}
+	if resp, body := e.postForm("/mailboxes/outlook", form); resp.StatusCode != 303 {
+		t.Fatalf("host change = %d %s", resp.StatusCode, body)
+	}
+	if _, ok, _ := e.st.GetOAuthToken(ctx, "outlook"); ok {
+		t.Fatal("token kept after the host changed")
+	}
+	unblock()
+	select {
+	case got := <-done:
+		if !strings.Contains(got, `"ok":false`) { // the in-memory server refuses XOAUTH2
+			t.Fatalf("probe = %s", got)
+		}
+	case <-time.After(probeTimeout + 5*time.Second):
+		t.Fatal("the probe did not finish")
+	}
+	if tok, ok, _ := e.st.GetOAuthToken(ctx, "outlook"); ok {
+		t.Fatalf("the probe wrote the dropped token back: %+v", tok)
+	}
+}
+
+// A mailbox that switches to Microsoft authorisation never keeps a token left over from
+// earlier (for example from a deleted mailbox of the same name whose token was not cleared).
+func TestMailboxBecomingMicrosoftDropsLeftoverToken(t *testing.T) {
+	e := newEnv(t, withSample)
+	e.login()
+	ctx := context.Background()
+	e.st.SaveOAuthToken(ctx, "gmail", store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)})
+	form := url.Values{"display_name": {"個人 Gmail"}, "host": {"outlook.office365.com"}, "username": {"me@outlook.com"},
+		"auth_type": {"microsoft_oauth"}, "client_id": {"00000000-0000-0000-0000-000000000001"}, "tenant": {"consumers"},
+		"folders": {"INBOX"}, "targets": {"me"}}
+	resp, body := e.postForm("/mailboxes/gmail", form)
+	if resp.StatusCode != 303 {
+		t.Fatalf("switch to Microsoft = %d %s", resp.StatusCode, body)
+	}
+	if loc := resp.Header.Get("Location"); loc != "/mailboxes/gmail" || !strings.Contains(e.flash(resp), "下一步：在信箱頁按「授權」") {
+		t.Errorf("switch to Microsoft: location %q, flash %q", loc, e.flash(resp))
+	}
+	if _, ok, _ := e.st.GetOAuthToken(ctx, "gmail"); ok {
+		t.Fatal("leftover token kept after the mailbox switched to Microsoft")
 	}
 }
 

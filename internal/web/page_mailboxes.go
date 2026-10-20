@@ -506,6 +506,7 @@ func (s *Server) saveMailbox(w http.ResponseWriter, r *http.Request, name string
 	if isNew {
 		summary = "新增信箱 " + key
 	}
+	becameMS := false // an existing mailbox switched to Microsoft authorisation
 	res, fe, err := s.saveConfig(r, "web", summary, func(raw *config.Config) error {
 		if raw.Mailboxes == nil {
 			raw.Mailboxes = map[string]*config.Mailbox{}
@@ -521,6 +522,7 @@ func (s *Server) saveMailbox(w http.ResponseWriter, r *http.Request, name string
 		if len(local) > 0 {
 			return local
 		}
+		becameMS = cur != nil && cur.Auth.Type != authMicrosoft && next.Auth.Type == authMicrosoft
 		if !isNew {
 			// checkbox and probe order is not a change: keep the stored order of the same set
 			next.Folders = keepOrder(cur.Folders, next.Folders)
@@ -554,6 +556,10 @@ func (s *Server) saveMailbox(w http.ResponseWriter, r *http.Request, name string
 		}
 	case res.failed(key):
 		done += "，但舊的 Microsoft 授權沒有清除成功，詳情請看服務日誌"
+	case becameMS: // a token left over from earlier may have been dropped: it was never this mailbox's
+		done += "。下一步：在信箱頁按「授權」登入 Microsoft 帳號。"
+		s.redirect(w, r, "/mailboxes/"+key, &Flash{Kind: "success", Text: done})
+		return
 	case res.dropped(key) && f.AuthType == authMicrosoft:
 		done += "。主機、帳號或應用程式已變更，舊的 Microsoft 授權已清除，請重新授權。"
 		s.redirect(w, r, "/mailboxes/"+key, &Flash{Kind: "success", Text: done})
@@ -595,15 +601,6 @@ func effectivePort(p int) int {
 		return 993
 	}
 	return p
-}
-
-// tokenInvalidated reports whether a stored OAuth token of mailbox cur no longer fits next:
-// it stopped using Microsoft, or the account, client_id, tenant, host or port changed.
-func tokenInvalidated(cur, next *config.Mailbox) bool {
-	if cur == nil || cur.Auth.Type != authMicrosoft {
-		return false
-	}
-	return next.Auth.Type != authMicrosoft || accountOf(next) != accountOf(cur)
 }
 
 func (s *Server) postMailboxDelete(w http.ResponseWriter, r *http.Request) {
@@ -706,9 +703,10 @@ func (s *Server) postAPIProbe(w http.ResponseWriter, r *http.Request) {
 			bad("應用程式識別碼或 tenant 與已儲存的不同：授權屬於原本的應用程式，請先儲存（需要重新授權）再測試")
 			return
 		}
-		// only the stored settings ever drive the stored token
+		// only the stored settings ever drive the stored token, and a refreshed token is only
+		// saved while they still hold (probeStore)
 		authn = &auth.Microsoft{Mailbox: in.Name, Username: stored.Username, ClientID: stored.Auth.ClientID, Tenant: stored.Auth.Tenant,
-			Store: s.o.Store, Authority: s.o.MSAuthority, Log: s.o.Log}
+			Store: probeStore{s, in.Name, accountOf(stored)}, Authority: s.o.MSAuthority, Log: s.o.Log}
 	case authPassword:
 		pw := in.Password
 		if pw == "" {
