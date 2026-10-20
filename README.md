@@ -120,9 +120,9 @@ IP 只用於記錄與通知，不影響任何安全判斷。
 - **健康狀態**：readiness probe 打 `:8081/readyz`、liveness probe 打 `:8081/livez`，都**不看信箱狀態**，所以 Outlook 需要重新授權或信箱斷線時 Pod 仍然就緒、Web 仍可連線，可以直接在網頁上處理。信箱的問題由 Telegram 告警與總覽頁呈現。Kubernetes 不使用映像內的 Docker `HEALTHCHECK`。
 - **備份**：資料庫在 PVC 上（`local-path` 預設位於節點的 `/var/lib/rancher/k3s/storage/`）。設定也可以匯出成 YAML：
   ```bash
-  kubectl -n verify-code-relay exec deploy/verify-code-relay -- /relay config export > backup-$(date +%F).yaml
+  (umask 077; kubectl -n verify-code-relay exec deploy/verify-code-relay -- /relay config export > backup-$(date +%F).yaml)
   ```
-  兩者都含有全部機密，見「安全」。
+  `umask 077` 讓匯出檔只有自己能讀。資料庫與匯出檔都含有全部機密，請存放在安全的地方（加密的備份、密碼管理器），不要提交到 git，見「安全」。
 - **刪除**：`kubectl delete -k deploy/k3s` 會一併刪除 PVC 與資料庫。
 
 ### 從舊版（ConfigMap）遷移
@@ -136,19 +136,22 @@ IP 只用於記錄與通知，不影響任何安全判斷。
    kubectl -n verify-code-relay rollout status deploy/verify-code-relay
    ```
    新 Pod 沿用同一個 PVC：資料庫會自動升級，信箱的收信進度與 Outlook 的 OAuth token 都會保留（升級後的資料庫無法再給 0.1.0 使用）。匯入前的設定是空的，這段時間不會轉發。
-3. 匯入舊設定（`${}` 變數由 Pod 環境中的舊機密提供）：
+3. **立即登入 Web 並綁定兩步驟驗證**：從這一刻起管理介面已經在公網上，綁定前任何知道密碼的人都能搶先綁定。登入狀態存在資料庫，後面的重新啟動不會讓你登出。
+4. 匯入舊設定（`${}` 變數由 Pod 環境中的舊機密提供）：
    ```bash
    kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay config import /dev/stdin < deploy/k3s/config.yaml
    ```
-4. 把 `secret.env` 改成**只留 `RELAY_ADMIN_PASSWORD`**，再套用一次。Secret 內容改變會讓 Pod 重新啟動，同時載入剛匯入的設定：
+5. 把 `secret.env` 改成**只留 `RELAY_ADMIN_PASSWORD`**，再套用一次。Secret 內容改變會讓 Pod 重新啟動，同時載入剛匯入的設定：
    ```bash
    kubectl apply -k deploy/k3s
    ```
-5. 登入 Web、綁定兩步驟驗證，確認信箱、Telegram、規則都在，總覽頁的信箱顯示已連線。
-6. 刪除舊的 `deploy/k3s/config.yaml`。叢集中不再使用的舊 ConfigMap（`relay-config-…`）與舊 Secret（`relay-secrets-…`）可以手動刪除：
+   重新整理 Web，確認信箱、Telegram、規則都在，總覽頁的信箱顯示已連線。
+6. 刪除舊的 `deploy/k3s/config.yaml`，並清掉叢集中不再使用的舊物件。**有兩個舊 Secret 仍以明文保存舊的機密**（Bot token、應用程式密碼）：0.1.0 的 `relay-secrets-…`，以及第 2 步套用時產生、含舊變數與管理員密碼的 `relay-secrets-…`；另有一個舊 ConfigMap `relay-config-…`。目前使用中的 Secret 是 Deployment 引用的那一個，不要刪：
    ```bash
-   kubectl -n verify-code-relay get configmap,secret
-   kubectl -n verify-code-relay delete configmap <relay-config-…> secret <舊的 relay-secrets-…>
+   kubectl -n verify-code-relay get configmap,secret        # 列出全部，依建立時間辨認
+   kubectl -n verify-code-relay get deploy verify-code-relay \
+     -o jsonpath='{.spec.template.spec.containers[0].envFrom[0].secretRef.name}{"\n"}'   # 使用中的 Secret
+   kubectl -n verify-code-relay delete configmap/relay-config-<雜湊> secret/relay-secrets-<舊雜湊1> secret/relay-secrets-<舊雜湊2>
    ```
 
 ## 安全
@@ -282,7 +285,7 @@ kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay config i
 go test ./...                       # 單元與整合測試（含記憶體 IMAP 伺服器與經由 Web 的端對端測試）
 python3 testdata/eml/gen.py         # 重新產生辨識測試信件
 go build -o relay ./cmd/relay
-RELAY_DATA_DIR=./data RELAY_ADMIN_PASSWORD='本機測試用的長密碼' ./relay run   # 瀏覽器開 http://localhost:8080
+RELAY_DATA_DIR=./data RELAY_ADMIN_PASSWORD='change-me-at-least-12-chars' ./relay run   # 密碼至少 12 字元；瀏覽器開 http://localhost:8080
 ```
 
 ## 需要手動驗證的項目

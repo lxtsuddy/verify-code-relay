@@ -90,24 +90,32 @@ func (w *webClient) mustRedirect(path string, form url.Values, location string) 
 	}
 }
 
-// watcherStatus returns the status of mailbox's watcher from /api/status ("" if absent).
-func (w *webClient) watcherStatus(mailbox string) string {
+// apiStatus is the part of /api/status the test reads.
+type apiStatus struct {
+	Pending  int `json:"pending"` // messages still in the outbox
+	Watchers []struct {
+		Mailbox string `json:"mailbox"`
+		Status  string `json:"status"`
+	} `json:"watchers"`
+}
+
+func (w *webClient) status() apiStatus {
 	w.t.Helper()
 	resp, body := w.do(http.MethodGet, "/api/status", "", nil)
 	if resp.StatusCode != http.StatusOK {
 		w.t.Fatalf("GET /api/status = %d\n%s", resp.StatusCode, body)
 	}
-	var st struct {
-		Applying bool `json:"applying"`
-		Watchers []struct {
-			Mailbox string `json:"mailbox"`
-			Status  string `json:"status"`
-		} `json:"watchers"`
-	}
+	var st apiStatus
 	if err := json.Unmarshal([]byte(body), &st); err != nil {
 		w.t.Fatalf("/api/status: %v\n%s", err, body)
 	}
-	for _, ws := range st.Watchers {
+	return st
+}
+
+// watcherStatus returns the status of mailbox's watcher from /api/status ("" if absent).
+func (w *webClient) watcherStatus(mailbox string) string {
+	w.t.Helper()
+	for _, ws := range w.status().Watchers {
 		if ws.Mailbox == mailbox {
 			return ws.Status
 		}
@@ -252,8 +260,15 @@ func TestWebEndToEnd(t *testing.T) {
 	w.mustRedirect("/mailboxes/mem", mailboxForm("you"), "/mailboxes") // blank password keeps the stored one
 	waitIdle("re-routed watcher idling", dials)
 	imapSrv.appendMail(t, verificationMail("Your second code", "551177"))
-	waitFor(t, "second code forwarded", func() bool { return len(withCode("551177")) >= 1 })
-	time.Sleep(300 * time.Millisecond) // no late or duplicate deliveries may follow
+	// A mail's log row and its outbox items (one per target) are stored together, so once
+	// the second mail is logged and the outbox is empty, every delivery has been made.
+	waitFor(t, "second mail logged and outbox drained", func() bool {
+		_, total, err := st.ListLog(ctx, store.LogQuery{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return total >= 2 && w.status().Pending == 0
+	})
 
 	first, second := withCode("482913"), withCode("551177")
 	if len(first) != 1 || first[0].ChatID != 42 {

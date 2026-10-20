@@ -238,7 +238,7 @@ CREATE TABLE sessions (
 - Caddy 設定範例（`reverse_proxy` 到 Traefik，保留 Host）。
 - 選配：K3s `HelmChartConfig` 設定 Traefik `forwardedHeaders.trustedIPs` 包含 Caddy 的 IP，否則通知中的 IP 會是 Caddy 的位址；搭配系統設定頁的「目前被判定的 IP」確認。
 - 首次部署：apply → 以 Secret 中的密碼登入 → 綁定 TOTP → 在 Web 新增設定，或 `relay config import`。
-- 從現有 ConfigMap 部署遷移：先 `kubectl exec -i ... /relay config import /dev/stdin < config.yaml`（需能展開的環境變數仍在 Secret 中），確認後再套用新的 manifests 並把機密從 `secret.env` 移除。
+- 從現有 ConfigMap 部署遷移：0.1.0 沒有 `config import`，因此在**新版 Pod** 內匯入：`secret.env` 暫時保留舊變數並加上 `RELAY_ADMIN_PASSWORD` → 套用新的 manifests → 立即登入綁定 TOTP（Ingress 此時已對外）→ `kubectl exec -i ... /relay config import /dev/stdin < config.yaml`（`${}` 由 Pod 環境中的舊機密展開）→ `secret.env` 只留 `RELAY_ADMIN_PASSWORD` 再套用（Pod 重啟並載入匯入的設定）→ 刪除舊 `config.yaml`、舊 ConfigMap 與兩個仍含明文舊機密的舊 Secret。
 - 部署後到首次登入綁定 TOTP 之前，任何知道密碼的人都能完成綁定：部署後應立即登入綁定，`RELAY_ADMIN_PASSWORD` 要夠長且隨機。
 - 資料庫含所有機密，備份需妥善保管。
 - 手動驗證清單加入 Web 相關項目（§6.4）。
