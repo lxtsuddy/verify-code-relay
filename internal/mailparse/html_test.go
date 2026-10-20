@@ -54,3 +54,27 @@ func TestHTMLPreKeepsLineBreaks(t *testing.T) {
 		t.Errorf("text = %q", text)
 	}
 }
+
+func TestHTMLPreKeepsIndentation(t *testing.T) {
+	text, _ := HTMLToText("<p>Intro   text</p>before<pre>  code:\n    123456\n\tend  </pre>after   x")
+	want := "Intro text\nbefore\n  code:\n    123456\n\tend\nafter x"
+	if text != want {
+		t.Errorf("text = %q, want %q", text, want)
+	}
+}
+
+func TestHTMLPreAtStartKeepsIndentation(t *testing.T) {
+	text, _ := HTMLToText("<pre>    indented\n<b>  bold</b></pre>")
+	if text != "    indented\n  bold" {
+		t.Errorf("text = %q", text)
+	}
+}
+
+func TestExtractURLsFullWidthPunctuation(t *testing.T) {
+	got := ExtractURLs("網址：https://a.com/x：請點擊 https://b.com/y！ https://c.com/z？ https://d.com/w；" +
+		"【https://e.com/v】 https://f.com/u　下一句")
+	want := []string{"https://a.com/x", "https://b.com/y", "https://c.com/z", "https://d.com/w", "https://e.com/v", "https://f.com/u"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %q", got)
+	}
+}

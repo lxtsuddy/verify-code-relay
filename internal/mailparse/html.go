@@ -12,7 +12,7 @@ var blockAtoms = map[atom.Atom]bool{
 	atom.P: true, atom.Div: true, atom.Tr: true, atom.Li: true, atom.Table: true,
 	atom.H1: true, atom.H2: true, atom.H3: true, atom.H4: true, atom.H5: true, atom.H6: true,
 	atom.Ul: true, atom.Ol: true, atom.Blockquote: true, atom.Section: true, atom.Article: true,
-	atom.Header: true, atom.Footer: true, atom.Hr: true, atom.Center: true,
+	atom.Header: true, atom.Footer: true, atom.Hr: true, atom.Center: true, atom.Pre: true,
 }
 
 var skipAtoms = map[atom.Atom]bool{
@@ -44,6 +44,7 @@ func HTMLToText(src string) (string, []Link) {
 	var b strings.Builder
 	var links []Link
 	pre := 0 // depth of enclosing <pre> elements; whitespace is kept verbatim inside them
+	var verbatim []span
 	var walk func(n *html.Node)
 	walk = func(n *html.Node) {
 		if n.Type == html.ElementNode {
@@ -80,6 +81,8 @@ func HTMLToText(src string) (string, []Link) {
 			s := strings.ReplaceAll(n.Data, "\u00a0", " ")
 			if pre == 0 {
 				s = htmlSpaceRun.ReplaceAllString(s, " ")
+			} else {
+				verbatim = append(verbatim, span{b.Len(), b.Len() + len(s)})
 			}
 			b.WriteString(s)
 		}
@@ -91,7 +94,7 @@ func HTMLToText(src string) (string, []Link) {
 		}
 	}
 	walk(doc)
-	return normalizeText(b.String()), links
+	return normalizeLines(b.String(), verbatim), links
 }
 
 func attr(n *html.Node, key string) string {
@@ -119,11 +122,31 @@ func collapseSpaces(s string) string {
 
 // normalizeText collapses spaces inside lines, trims lines and keeps at most one blank line in a row.
 func normalizeText(s string) string {
-	lines := strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n")
+	return normalizeLines(strings.ReplaceAll(s, "\r\n", "\n"), nil)
+}
+
+// span is a byte range [start, end) of the text being normalized.
+type span struct{ start, end int }
+
+// normalizeLines works like normalizeText, except that lines overlapping one of
+// the ascending verbatim spans (<pre> content) keep their inner and leading
+// whitespace; only trailing whitespace is dropped.
+func normalizeLines(s string, verbatim []span) string {
+	lines := strings.Split(s, "\n")
 	out := make([]string, 0, len(lines))
 	blank := true
+	off := 0
 	for _, l := range lines {
-		l = strings.TrimSpace(spaceRun.ReplaceAllString(l, " "))
+		start, end := off, off+len(l)
+		off = end + 1
+		for len(verbatim) > 0 && verbatim[0].end <= start {
+			verbatim = verbatim[1:]
+		}
+		if len(verbatim) > 0 && verbatim[0].start < end {
+			l = strings.TrimRight(l, " \t\r\f\v")
+		} else {
+			l = strings.TrimSpace(spaceRun.ReplaceAllString(l, " "))
+		}
 		if l == "" {
 			if !blank {
 				out = append(out, "")
@@ -134,10 +157,14 @@ func normalizeText(s string) string {
 		out = append(out, l)
 		blank = false
 	}
-	return strings.TrimSpace(strings.Join(out, "\n"))
+	// Lines are already trimmed and never start blank; TrimSpace would eat a <pre> indent.
+	return strings.TrimRight(strings.Join(out, "\n"), "\n")
 }
 
-var urlRe = regexp.MustCompile(`(?i)https?://[^\s<>"'()\[\]{}（）「」，。、]+`)
+// urlRe stops at full-width punctuation and brackets: CJK text puts them right
+// after a URL without a space, and a real URL would percent-encode them.
+// \s is ASCII-only in RE2, so the ideographic space U+3000 is listed too.
+var urlRe = regexp.MustCompile(`(?i)https?://[^\s<>"'()\[\]{}（）「」『』【】《》〈〉，。、：；！？\x{3000}]+`)
 
 // ExtractURLs finds bare http(s) URLs in text, trimming trailing punctuation.
 func ExtractURLs(text string) []string {
