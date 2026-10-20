@@ -138,6 +138,7 @@ go build -o relay ./cmd/relay
 - [ ] Outlook.com 以 `relay login` 授權成功，且 token 過期後能自動更新（運行超過 1 小時後仍能收信）。
 - [ ] 中斷網路數分鐘後恢復，服務自動重連並補抓斷線期間的信。
 - [ ] 重啟服務後，超過 `max_age` 的舊信不會被轉發。
+- [ ] 連續寄兩封測試信（間隔一兩秒），兩封都應立即轉發，不會有一封延遲到 25 分鐘後才到（確認伺服器在 IDLE 開始時會回報先前到達的信）。
 - [ ] 落入垃圾郵件匣的驗證信也會轉發（Gmail 需在 `folders` 加入 `[Gmail]/Spam`，並在標籤設定勾選「在 IMAP 中顯示」）。
 - [ ] 在容器內執行 `login`（`docker compose run --rm relay login <信箱>` 或 K3s 的 `kubectl exec -it`）授權成功，token 寫入 `/data`，重新啟動後仍有效。
 - [ ] `relay test --eml 信件.eml --send <目標>` 實際送出，Telegram 收到的訊息格式與按鈕（複製驗證碼、開啟連結）正常。
