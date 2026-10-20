@@ -139,3 +139,39 @@ func TestGlobalConfigEqualsForm(t *testing.T) {
 		}
 	}
 }
+
+// 參數放在位置參數之後也要能解析（relay login outlook --config x）。
+func TestFlagsAfterPositional(t *testing.T) {
+	p := writeConfig(t, "")
+	code, _, stderr := run("login", "gmail", "--config", p)
+	if code != 1 || !strings.Contains(stderr, "microsoft_oauth") {
+		t.Fatalf("login: code=%d err=%q", code, stderr)
+	}
+
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		json.Unmarshal(b, &got)
+		w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	t.Setenv("RELAY_TELEGRAM_API", srv.URL)
+	code, stdout, stderr := run("send-test", "me", "-config="+p)
+	if code != 0 || !strings.Contains(stdout, "已送出") || got["chat_id"] != float64(42) {
+		t.Fatalf("send-test: code=%d out=%q err=%q got=%v", code, stdout, stderr, got)
+	}
+
+	// 位置參數仍只能有一個；「--」之後的一律視為位置參數
+	for _, args := range [][]string{
+		{"--config", p, "send-test", "me", "extra"},
+		{"--config", p, "send-test", "me", "--", "--config"},
+	} {
+		if code, _, stderr := run(args...); code != 2 || !strings.Contains(stderr, "用法") {
+			t.Errorf("%v: code=%d err=%q", args, code, stderr)
+		}
+	}
+	code, _, stderr = run("--config", p, "send-test", "--", "nobody")
+	if code != 1 || !strings.Contains(stderr, `找不到目標 "nobody"`) {
+		t.Fatalf("send-test -- nobody: code=%d err=%q", code, stderr)
+	}
+}

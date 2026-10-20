@@ -12,11 +12,12 @@ import (
 
 func cmdSendTest(configPath string, args []string, stdout, stderr io.Writer) int {
 	fs := newFlags("send-test", &configPath, stderr)
-	if err := fs.Parse(args); err != nil || fs.NArg() != 1 {
+	pos, err := parseInterspersed(fs, args)
+	if err != nil || len(pos) != 1 {
 		fmt.Fprintln(stderr, "用法：relay send-test <目標>")
 		return 2
 	}
-	name := fs.Arg(0)
+	name := pos[0]
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fail(stderr, err)

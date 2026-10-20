@@ -28,20 +28,7 @@ func realMain(args []string, stdout, stderr io.Writer) int {
 	if configPath == "" {
 		configPath = "config.yaml"
 	}
-	// global --config before the subcommand
-	for len(args) > 0 {
-		switch {
-		case len(args) >= 2 && (args[0] == "--config" || args[0] == "-config"):
-			configPath, args = args[1], args[2:]
-		case strings.HasPrefix(args[0], "--config="):
-			configPath, args = strings.TrimPrefix(args[0], "--config="), args[1:]
-		case strings.HasPrefix(args[0], "-config="):
-			configPath, args = strings.TrimPrefix(args[0], "-config="), args[1:]
-		default:
-			goto parsed
-		}
-	}
-parsed:
+	configPath, args = globalConfig(configPath, args)
 	if len(args) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
@@ -71,4 +58,22 @@ parsed:
 		fmt.Fprintf(stderr, "未知的指令：%s\n\n%s", cmd, usage)
 		return 2
 	}
+}
+
+// globalConfig consumes the global --config flags before the subcommand and
+// returns the resulting config path and the remaining arguments.
+func globalConfig(configPath string, args []string) (string, []string) {
+	for len(args) > 0 {
+		switch {
+		case len(args) >= 2 && (args[0] == "--config" || args[0] == "-config"):
+			configPath, args = args[1], args[2:]
+		case strings.HasPrefix(args[0], "--config="):
+			configPath, args = strings.TrimPrefix(args[0], "--config="), args[1:]
+		case strings.HasPrefix(args[0], "-config="):
+			configPath, args = strings.TrimPrefix(args[0], "-config="), args[1:]
+		default:
+			return configPath, args
+		}
+	}
+	return configPath, args
 }
