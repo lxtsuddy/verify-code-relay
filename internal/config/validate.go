@@ -71,9 +71,6 @@ func (c *Config) Validate() error {
 			p.add("admin", "找不到目標 %q", c.Admin)
 		}
 	}
-	if len(c.Mailboxes) == 0 {
-		p.add("mailboxes", "至少需要一個信箱")
-	}
 	for _, name := range sortedKeys(c.Mailboxes) {
 		m := c.Mailboxes[name]
 		base := "mailboxes." + name

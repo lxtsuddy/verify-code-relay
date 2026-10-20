@@ -21,6 +21,12 @@ type Duration struct {
 	Set bool
 }
 
+// MarshalYAML writes the duration in Go syntax (e.g. 5m0s).
+func (d Duration) MarshalYAML() (any, error) { return d.Duration.String(), nil }
+
+// IsZero makes omitempty drop durations that were not set explicitly.
+func (d Duration) IsZero() bool { return !d.Set }
+
 func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 	v, err := time.ParseDuration(n.Value)
 	if err != nil {
@@ -32,76 +38,76 @@ func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 }
 
 type Config struct {
-	DataDir    string              `yaml:"data_dir"`
-	LogLevel   string              `yaml:"log_level"`
-	HTTPListen string              `yaml:"http_listen"`
-	Bots       map[string]Bot      `yaml:"bots"`
-	Targets    map[string]Target   `yaml:"targets"`
-	Admin      string              `yaml:"admin"`
-	Defaults   Defaults            `yaml:"defaults"`
-	Mailboxes  map[string]*Mailbox `yaml:"mailboxes"`
-	Templates  Templates           `yaml:"templates"`
-	Rules      []Rule              `yaml:"rules"`
-	Recognize  RecognizeOptions    `yaml:"recognize"`
+	DataDir    string              `yaml:"data_dir,omitempty"`
+	LogLevel   string              `yaml:"log_level,omitempty"`
+	HTTPListen string              `yaml:"http_listen,omitempty"`
+	Bots       map[string]Bot      `yaml:"bots,omitempty"`
+	Targets    map[string]Target   `yaml:"targets,omitempty"`
+	Admin      string              `yaml:"admin,omitempty"`
+	Defaults   Defaults            `yaml:"defaults,omitempty"`
+	Mailboxes  map[string]*Mailbox `yaml:"mailboxes,omitempty"`
+	Templates  Templates           `yaml:"templates,omitempty"`
+	Rules      []Rule              `yaml:"rules,omitempty"`
+	Recognize  RecognizeOptions    `yaml:"recognize,omitempty"`
 }
 
 type Bot struct {
-	Token string `yaml:"token"`
+	Token string `yaml:"token,omitempty"`
 }
 
 type Target struct {
-	Bot    string `yaml:"bot"`
-	ChatID int64  `yaml:"chat_id"`
+	Bot    string `yaml:"bot,omitempty"`
+	ChatID int64  `yaml:"chat_id,omitempty"`
 }
 
 type Defaults struct {
-	MaxAge       Duration `yaml:"max_age"`
-	TTL          Duration `yaml:"ttl"`
-	AlertTTL     Duration `yaml:"alert_ttl"`
-	PollInterval Duration `yaml:"poll_interval"`
-	AlertAfter   Duration `yaml:"alert_after"`
+	MaxAge       Duration `yaml:"max_age,omitempty"`
+	TTL          Duration `yaml:"ttl,omitempty"`
+	AlertTTL     Duration `yaml:"alert_ttl,omitempty"`
+	PollInterval Duration `yaml:"poll_interval,omitempty"`
+	AlertAfter   Duration `yaml:"alert_after,omitempty"`
 }
 
 type Mailbox struct {
 	Name         string    `yaml:"-"`
-	DisplayName  string    `yaml:"display_name"`
-	Host         string    `yaml:"host"`
-	Port         int       `yaml:"port"`
-	Username     string    `yaml:"username"`
-	Auth         Auth      `yaml:"auth"`
-	Folders      []string  `yaml:"folders"`
-	Targets      []string  `yaml:"targets"`
-	MaxAge       Duration  `yaml:"max_age"`
-	TTL          Duration  `yaml:"ttl"`
-	PollInterval Duration  `yaml:"poll_interval"`
-	Templates    Templates `yaml:"templates"`
+	DisplayName  string    `yaml:"display_name,omitempty"`
+	Host         string    `yaml:"host,omitempty"`
+	Port         int       `yaml:"port,omitempty"`
+	Username     string    `yaml:"username,omitempty"`
+	Auth         Auth      `yaml:"auth,omitempty"`
+	Folders      []string  `yaml:"folders,omitempty"`
+	Targets      []string  `yaml:"targets,omitempty"`
+	MaxAge       Duration  `yaml:"max_age,omitempty"`
+	TTL          Duration  `yaml:"ttl,omitempty"`
+	PollInterval Duration  `yaml:"poll_interval,omitempty"`
+	Templates    Templates `yaml:"templates,omitempty"`
 }
 
 type Auth struct {
-	Type     string `yaml:"type"`
-	Password string `yaml:"password"`
-	ClientID string `yaml:"client_id"`
-	Tenant   string `yaml:"tenant"`
+	Type     string `yaml:"type,omitempty"`
+	Password string `yaml:"password,omitempty"`
+	ClientID string `yaml:"client_id,omitempty"`
+	Tenant   string `yaml:"tenant,omitempty"`
 }
 
 type Templates struct {
-	Code string `yaml:"code"`
-	Link string `yaml:"link"`
-	Both string `yaml:"both"`
+	Code string `yaml:"code,omitempty"`
+	Link string `yaml:"link,omitempty"`
+	Both string `yaml:"both,omitempty"`
 }
 
 type Rule struct {
-	Name      string `yaml:"name"`
-	From      string `yaml:"from"`
-	Subject   string `yaml:"subject"`
-	CodeRegex string `yaml:"code_regex"`
-	LinkRegex string `yaml:"link_regex"`
-	Ignore    bool   `yaml:"ignore"`
+	Name      string `yaml:"name,omitempty"`
+	From      string `yaml:"from,omitempty"`
+	Subject   string `yaml:"subject,omitempty"`
+	CodeRegex string `yaml:"code_regex,omitempty"`
+	LinkRegex string `yaml:"link_regex,omitempty"`
+	Ignore    bool   `yaml:"ignore,omitempty"`
 }
 
 type RecognizeOptions struct {
-	ExtraCodeKeywords []string `yaml:"extra_code_keywords"`
-	ExtraLinkKeywords []string `yaml:"extra_link_keywords"`
+	ExtraCodeKeywords []string `yaml:"extra_code_keywords,omitempty"`
+	ExtraLinkKeywords []string `yaml:"extra_link_keywords,omitempty"`
 }
 
 // Load reads the file at path, expands ${ENV} from the process environment and applies defaults.
@@ -122,27 +128,38 @@ func Parse(data []byte, lookup func(string) (string, bool)) (*Config, error) {
 	if err := expandNode(&root, "", lookup); err != nil {
 		return nil, err
 	}
-	var c Config
-	if len(root.Content) > 0 {
-		// Decode straight from the node tree so nodes keep their original line numbers.
-		if err := root.Decode(&c); err != nil {
-			return nil, fmt.Errorf("解析設定：%w", err)
-		}
-		// Re-encoding is only used to detect unknown fields (yaml.Node.Decode lacks KnownFields).
-		// Its line numbers refer to the re-encoded text, so they are stripped from the message.
-		var buf bytes.Buffer
-		enc := yaml.NewEncoder(&buf)
-		if err := enc.Encode(&root); err != nil {
-			return nil, err
-		}
-		var check Config
-		dec := yaml.NewDecoder(&buf)
-		dec.KnownFields(true)
-		if err := dec.Decode(&check); err != nil {
-			return nil, fmt.Errorf("解析設定：%s", yamlLineRe.ReplaceAllString(err.Error(), ""))
-		}
+	c, err := decodeNode(&root)
+	if err != nil {
+		return nil, err
 	}
 	c.applyDefaults()
+	return c, nil
+}
+
+// decodeNode decodes a parsed YAML document strictly: unknown fields are errors.
+// An empty document yields an empty Config.
+func decodeNode(root *yaml.Node) (*Config, error) {
+	var c Config
+	if len(root.Content) == 0 {
+		return &c, nil
+	}
+	// Decode straight from the node tree so nodes keep their original line numbers.
+	if err := root.Decode(&c); err != nil {
+		return nil, fmt.Errorf("解析設定：%w", err)
+	}
+	// Re-encoding is only used to detect unknown fields (yaml.Node.Decode lacks KnownFields).
+	// Its line numbers refer to the re-encoded text, so they are stripped from the message.
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	if err := enc.Encode(root); err != nil {
+		return nil, err
+	}
+	var check Config
+	dec := yaml.NewDecoder(&buf)
+	dec.KnownFields(true)
+	if err := dec.Decode(&check); err != nil {
+		return nil, fmt.Errorf("解析設定：%s", yamlLineRe.ReplaceAllString(err.Error(), ""))
+	}
 	return &c, nil
 }
 
