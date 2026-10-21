@@ -63,6 +63,9 @@
     紀錄    table.table.log-table，每列用 {{template "log-row" …}}（_logs.html）；表頭 th 也加 c-time／c-mb／… class。
             每列是欄寬與內容無關的 grid：表格寬 < 600 為小卡、≥ 600 精簡、≥ 880 完整（有規則欄的表格
             加 .log-table-rule，≥ 1000 才完整）。主旨最多兩行、寄件者一行，完整文字在 title。
+    下拉    <select class="select">（單選）照常寫；app.js 換上同款按鈕 .select-btn 與彈出清單 .select-menu，<select> 留著送出表單。
+            提示用的空值選項加 data-placeholder（淡色）。建議清單用 <input list="datalist-id">，彈出同一款清單。
+            JS 直接改 select.value 後呼叫 relay.syncSelect(select)。
     驗證碼  <input class="otp-input" data-otp …>（小一號加 .otp-sm）；app.js 包成 .otp 並畫出六格 .otp-cell。
 */
 
@@ -508,7 +511,7 @@ b, strong { font-weight: 700; }
 .input::placeholder, .textarea::placeholder { color: var(--faint); }
 .input:hover, .select:hover, .textarea:hover { border-color: #a6b3a8; }
 .input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--green-600); box-shadow: var(--ring); }
-.input[aria-invalid="true"], .select[aria-invalid="true"], .textarea[aria-invalid="true"] { border-color: var(--red); background: #fffbfa; }
+.input[aria-invalid="true"], .select[aria-invalid="true"], .textarea[aria-invalid="true"] { border-color: var(--red); background-color: #fffbfa; }
 .input[aria-invalid="true"]:focus, .select[aria-invalid="true"]:focus, .textarea[aria-invalid="true"]:focus { box-shadow: 0 0 0 3px rgba(200, 51, 43, 0.15); }
 .input[readonly] { background: var(--surface-2); color: var(--ink-2); }
 .input-mono { font-family: var(--mono); font-size: var(--fs-base); }
@@ -517,6 +520,43 @@ b, strong { font-weight: 700; }
   appearance: none; padding-right: 38px;
   background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%235b6861' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center / 16px;
 }
+
+/* select menus (app.js): the <select> stays as the submitted field, out of sight; a button
+   in the dress of every field shows the choice, and the options open in a list in the top
+   layer: white, rounded, a soft shadow; the option under the pointer or the arrow keys is
+   pale green, the chosen one is ticked. A field with suggestions (input[list]) opens the
+   same list. */
+.select.is-enhanced {
+  position: absolute; width: 1px; height: 1px; min-height: 0; margin: 0; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); opacity: 0; pointer-events: none;
+}
+.select-btn { display: flex; align-items: center; text-align: left; cursor: pointer; }
+.select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-btn.is-placeholder .select-value { color: var(--faint); }
+.select-btn[aria-expanded="true"] { border-color: var(--green-600); box-shadow: var(--ring); }
+.select-btn[aria-invalid="true"][aria-expanded="true"] { border-color: var(--red); box-shadow: 0 0 0 3px rgba(200, 51, 43, 0.15); }
+.select-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+.select-menu {
+  display: none; margin: 0; padding: 4px; list-style: none; overflow-y: auto; overscroll-behavior: contain;
+  background: #fff; border: 1px solid var(--line-2); border-radius: var(--radius-sm); color: var(--ink);
+  box-shadow: 0 14px 30px -12px rgba(8, 41, 30, 0.3), 0 2px 6px rgba(8, 41, 30, 0.08);
+  font-size: var(--fs-md); line-height: 1.4;
+}
+.select-menu[popover] { position: fixed; inset: auto; width: auto; height: auto; }
+.select-menu:popover-open, .select-menu.is-open { display: block; animation: menu-in 0.12s var(--ease); }
+.select-menu.is-open { position: fixed; z-index: 200; } /* without popover support */
+.select-menu.is-up { transform-origin: bottom; }
+.select-option { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 5px; cursor: pointer; }
+.select-option + .select-option { margin-top: 1px; }
+.select-option-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.select-option-note { flex: none; font-size: var(--fs-xs); color: var(--muted); }
+.select-menu.is-mono .select-option-text { font-family: var(--mono); font-size: var(--fs-sm); }
+.select-option .icon { width: 16px; height: 16px; color: var(--green-700); visibility: hidden; }
+.select-option.is-active { background: var(--green-50); }
+.select-option[aria-selected="true"] { font-weight: 600; color: var(--green-800); }
+.select-option[aria-selected="true"] .icon { visibility: visible; }
+.select-option[aria-disabled="true"] { color: var(--faint); cursor: default; }
+.select-option.is-placeholder { color: var(--faint); }
 
 input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; margin: 0; accent-color: var(--green-700); flex: none; }
 .check { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
@@ -2275,5 +2315,6 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 @keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
 @keyframes stamp { from { opacity: 0; transform: rotate(-2deg) scale(1.25); } }
 @keyframes blink { 50% { opacity: 0; } }
+@keyframes menu-in { from { opacity: 0; transform: scaleY(0.96); } }
 @keyframes shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
 @keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } }
