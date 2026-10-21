@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"unicode/utf8"
 
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/store"
-	"verify-code-relay/internal/websec"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/websec"
 )
 
 // Process-level settings come from the environment: the database location must be known

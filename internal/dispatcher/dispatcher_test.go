@@ -15,8 +15,8 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"verify-code-relay/internal/store"
-	"verify-code-relay/internal/telegram"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/telegram"
 )
 
 type fakeSender struct {

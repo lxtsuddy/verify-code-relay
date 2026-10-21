@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/telegram"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/telegram"
 )
 
 // Telegram page: bots (write-only tokens) and targets (bot + chat_id). Names are the

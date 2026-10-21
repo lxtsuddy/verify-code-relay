@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
 )
 
 // compileFast compiles src as the global code template, failing the test if that takes

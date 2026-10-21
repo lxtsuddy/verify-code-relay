@@ -12,16 +12,16 @@ import (
 	"sync"
 	"time"
 
-	"verify-code-relay/internal/alert"
-	"verify-code-relay/internal/auth"
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/dispatcher"
-	"verify-code-relay/internal/health"
-	"verify-code-relay/internal/pipeline"
-	"verify-code-relay/internal/recognize"
-	"verify-code-relay/internal/render"
-	"verify-code-relay/internal/store"
-	"verify-code-relay/internal/watcher"
+	"github.com/lxtsuddy/verify-code-relay/internal/alert"
+	"github.com/lxtsuddy/verify-code-relay/internal/auth"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/dispatcher"
+	"github.com/lxtsuddy/verify-code-relay/internal/health"
+	"github.com/lxtsuddy/verify-code-relay/internal/pipeline"
+	"github.com/lxtsuddy/verify-code-relay/internal/recognize"
+	"github.com/lxtsuddy/verify-code-relay/internal/render"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/watcher"
 )
 
 // DialFactory returns the IMAP dialer for a mailbox host.

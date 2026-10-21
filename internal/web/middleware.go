@@ -6,7 +6,7 @@ import (
 	"net/url"
 	"strings"
 
-	"verify-code-relay/internal/websec"
+	"github.com/lxtsuddy/verify-code-relay/internal/websec"
 )
 
 const csp = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'"

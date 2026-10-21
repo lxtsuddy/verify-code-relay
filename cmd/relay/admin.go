@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/term"
 
-	"verify-code-relay/internal/websec"
+	"github.com/lxtsuddy/verify-code-relay/internal/websec"
 )
 
 // stdinReader is where admin reset reads the new password; tests replace it.

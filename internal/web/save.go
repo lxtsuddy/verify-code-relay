@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/websec"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/websec"
 )
 
 // mutate loads the latest raw config, applies fn, validates, stores it as a new version

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
 )
 
 func TestFieldErrors(t *testing.T) {

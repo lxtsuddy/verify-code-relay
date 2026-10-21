@@ -16,8 +16,8 @@ import (
 
 	"golang.org/x/net/idna"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/tglen"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/tglen"
 )
 
 const (

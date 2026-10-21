@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
 
 	_ "modernc.org/sqlite"
 )

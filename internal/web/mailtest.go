@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"strings"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/pipeline"
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/tglen"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/pipeline"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/tglen"
 )
 
 // Mail test: POST /api/rules/test (multipart/form-data) runs one message — an "eml" file

@@ -108,7 +108,13 @@ Please report security issues privately through GitHub [Security Advisories](htt
 
 ## Development
 
-Requires Go 1.26 or newer.
+Requires Go 1.26 or newer. To run without a container, install the binary directly (the web UI is embedded and no CGO is needed):
+
+```bash
+go install github.com/lxtsuddy/verify-code-relay/cmd/relay@latest
+```
+
+Working from source:
 
 ```bash
 go test ./...                       # unit and integration tests (incl. an in-memory IMAP server and end-to-end tests through the web UI)
@@ -126,7 +132,7 @@ GitHub Actions runs `gofmt`, `go vet` and `go test -race` on every push and pull
 
 This project was inspired by:
 
-- [XposedSmsCode](https://github.com/tianma8023/XposedSmsCode), an Xposed module that recognises SMS verification codes and copies them to the clipboard.
+- [XposedSmsCode](https://github.com/magisk317/XposedSmsCode), an Xposed module that recognises SMS verification codes and copies them to the clipboard.
 - [smtp_to_telegram](https://github.com/KostyaEsmukov/smtp_to_telegram), a small program that receives mail over SMTP and forwards it to Telegram.
 
 ## License

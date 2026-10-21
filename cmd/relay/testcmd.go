@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"verify-code-relay/internal/pipeline"
-	"verify-code-relay/internal/telegram"
+	"github.com/lxtsuddy/verify-code-relay/internal/pipeline"
+	"github.com/lxtsuddy/verify-code-relay/internal/telegram"
 )
 
 func cmdTest(args []string, stdout, stderr io.Writer) int {

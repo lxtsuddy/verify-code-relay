@@ -18,12 +18,12 @@ import (
 	"testing"
 	"time"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/store"
-	"verify-code-relay/internal/telegram"
-	"verify-code-relay/internal/web"
-	"verify-code-relay/internal/websec"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/telegram"
+	"github.com/lxtsuddy/verify-code-relay/internal/web"
+	"github.com/lxtsuddy/verify-code-relay/internal/websec"
 )
 
 // webClient drives the admin over HTTP the way a browser does: cookies, the CSRF token

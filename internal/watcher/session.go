@@ -12,9 +12,9 @@ import (
 	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/emersion/go-message/charset"
 
-	"verify-code-relay/internal/auth"
-	"verify-code-relay/internal/pipeline"
-	"verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/auth"
+	"github.com/lxtsuddy/verify-code-relay/internal/pipeline"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
 )
 
 var errDead = errors.New("IMAP 伺服器無回應")

@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/recognize"
-	"verify-code-relay/internal/render"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/recognize"
+	"github.com/lxtsuddy/verify-code-relay/internal/render"
 )
 
 func trialDeps(t *testing.T, rules []config.Rule) (*recognize.Chain, *render.Renderer) {

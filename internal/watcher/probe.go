@@ -13,7 +13,7 @@ import (
 	"github.com/emersion/go-imap/v2/imapclient"
 	"github.com/emersion/go-message/charset"
 
-	"verify-code-relay/internal/auth"
+	"github.com/lxtsuddy/verify-code-relay/internal/auth"
 )
 
 // ErrListFolders marks a Probe failure after a successful login: the folder list could

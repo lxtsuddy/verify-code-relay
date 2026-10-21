@@ -13,11 +13,11 @@ import (
 	"syscall"
 	"time"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/health"
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/web"
-	"verify-code-relay/internal/websec"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/health"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/web"
+	"github.com/lxtsuddy/verify-code-relay/internal/websec"
 )
 
 func cmdRun(args []string, stdout, stderr io.Writer) int {

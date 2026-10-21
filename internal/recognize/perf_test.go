@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/mailparse"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/mailparse"
 )
 
 // A hostile or merely huge message must not stall a watcher: the code finder has

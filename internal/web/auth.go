@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"verify-code-relay/internal/websec"
+	"github.com/lxtsuddy/verify-code-relay/internal/websec"
 )
 
 // loginData never says whether TOTP is bound: the form is the same either way, so a

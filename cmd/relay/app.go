@@ -7,9 +7,9 @@ import (
 	"log/slog"
 	"os"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/telegram"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/telegram"
 )
 
 // newFlags returns a FlagSet for a subcommand that writes its errors to stderr.

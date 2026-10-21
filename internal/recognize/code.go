@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"verify-code-relay/internal/mailparse"
+	"github.com/lxtsuddy/verify-code-relay/internal/mailparse"
 )
 
 var defaultCodeKeywords = []string{

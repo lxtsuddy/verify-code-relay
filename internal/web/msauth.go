@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"verify-code-relay/internal/auth"
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/auth"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
 )
 
 // Microsoft device-code authorisation in the browser. One flow per mailbox lives in

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
 )
 
 func TestTelegramPagesNeverShowTokens(t *testing.T) {

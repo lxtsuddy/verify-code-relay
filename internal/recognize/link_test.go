@@ -3,8 +3,8 @@ package recognize
 import (
 	"testing"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/mailparse"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/mailparse"
 )
 
 func configOpts(code, link []string) config.RecognizeOptions {

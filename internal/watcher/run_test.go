@@ -13,7 +13,7 @@ import (
 
 	"github.com/emersion/go-imap/v2/imapclient"
 
-	"verify-code-relay/internal/auth"
+	"github.com/lxtsuddy/verify-code-relay/internal/auth"
 )
 
 func startRun(t *testing.T, e *env) (stop func()) {

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
 )
 
 // The forward log: forward_log newest first, 20 a page by default (20, 50 or 100),

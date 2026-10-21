@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"verify-code-relay/internal/websec"
+	"github.com/lxtsuddy/verify-code-relay/internal/websec"
 )
 
 // authedPosts are the POST routes that need a signed-in admin with TOTP bound.
