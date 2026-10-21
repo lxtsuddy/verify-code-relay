@@ -127,7 +127,7 @@ func mailboxesUsing(raw *config.Config, target string) []string {
 	var out []string
 	for _, name := range sortedNames(raw.Mailboxes) {
 		if m := raw.Mailboxes[name]; m != nil {
-			for _, t := range m.Targets {
+			for _, t := range m.RouteTargets() {
 				if t == target {
 					out = append(out, name)
 					break

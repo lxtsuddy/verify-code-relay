@@ -644,10 +644,13 @@
       input[name=preset][data-host][data-auth]   服務郵票：改選時帶入主機、埠號（清空＝993）與認證方式，
                                                  被改到的欄位短暫標示綠色。
       [data-probe]                               「測試連線」：以表單目前的值 POST /api/mailboxes/probe，
-                                                 結果寫進 [data-probe-out]；成功時把伺服器的資料夾列進
-                                                 [data-folder-list]（已勾選的保持勾選，伺服器上沒有的另外標示）。
-      [data-folder-input] ＋ [data-folder-add]   手動加入資料夾（Enter 也可以）。
-    資料夾名稱來自 IMAP 伺服器，一律以 textContent 寫入。
+                                                 結果寫進 [data-probe-out]；成功時把伺服器的資料夾放進
+                                                 datalist[data-folder-options]，路由列的資料夾欄位可直接挑選。
+      ol[data-route-rows] > li[data-route-row]   轉發路由：每列 route_folder → route_target。
+                                                 [data-route-add] 複製 template#tpl-route-row 新增一列；
+                                                 [data-route-remove] 刪除該列（只剩一列時改為清空）。
+                                                 伺服器多渲染的空白備用列（.route-row-spare，給沒有 JS 時用）載入後移除。
+    資料夾名稱來自 IMAP 伺服器，一律以屬性或 textContent 寫入。
   */
 
   var PRESET_HOSTS = ["imap.gmail.com", "imap.mail.me.com", "outlook.office365.com"];
@@ -683,70 +686,79 @@
     probeStale(form);
   }
 
-  // folderChip builds one checkbox row of the folder list.
-  function folderChip(name, checked, tag, warn) {
-    var li = el("li");
-    var label = el("label", "folder");
-    var box = el("input");
-    box.type = "checkbox";
-    box.name = "folders";
-    box.value = name;
-    box.checked = !!checked;
-    label.appendChild(box);
-    label.appendChild(el("span", "folder-name mono", name));
-    if (tag) label.appendChild(el("span", "folder-tag" + (warn ? " is-warn" : ""), tag));
-    li.appendChild(label);
-    return li;
-  }
-
   function folderTag(name) {
     if (name.toUpperCase() === "INBOX") return "收件匣";
     return JUNK_RE.test(name) ? "垃圾郵件" : "";
   }
 
-  function currentFolders(list) {
-    var all = [], checked = {};
-    list.querySelectorAll('input[name="folders"]').forEach(function (b) {
-      all.push(b.value);
-      if (b.checked) checked[b.value] = true;
+  // suggestFolders offers the server's folders (then any routed folder it does not list)
+  // in every route row's folder field.
+  function suggestFolders(form, serverFolders) {
+    var list = form.querySelector("[data-folder-options]");
+    if (!list) return;
+    var routed = [];
+    form.querySelectorAll('input[name="route_folder"]').forEach(function (i) {
+      var v = i.value.trim();
+      if (v && serverFolders.indexOf(v) < 0 && routed.indexOf(v) < 0) routed.push(v);
     });
-    return { all: all, checked: checked };
-  }
-
-  function showFolders(list, serverFolders) {
-    var cur = currentFolders(list);
-    var onServer = {};
     list.textContent = "";
     serverFolders.forEach(function (f) {
-      onServer[f] = true;
-      list.appendChild(folderChip(f, cur.checked[f], folderTag(f), false));
+      var o = el("option");
+      o.value = f;
+      o.label = folderTag(f);
+      list.appendChild(o);
     });
-    // chosen folders the server does not list stay (and stay chosen), marked
-    cur.all.forEach(function (f) {
-      if (cur.checked[f] && !onServer[f]) list.appendChild(folderChip(f, true, "伺服器上沒有", true));
+    routed.forEach(function (f) {
+      var o = el("option");
+      o.value = f;
+      o.label = "伺服器上沒有";
+      list.appendChild(o);
     });
-    list.classList.remove("is-invalid");
   }
 
-  function addFolder(form) {
-    var input = form.querySelector("[data-folder-input]");
-    var list = form.querySelector("[data-folder-list]");
-    if (!input || !list) return;
-    var name = input.value.trim();
-    if (!name) { input.focus(); return; }
-    var existing = null;
-    list.querySelectorAll('input[name="folders"]').forEach(function (b) { if (b.value === name) existing = b; });
-    if (existing) {
-      existing.checked = true;
-      toast("已勾選 " + name, "info");
-    } else {
-      var chip = folderChip(name, true, folderTag(name), false);
-      chip.firstChild.classList.add("is-new");
-      list.appendChild(chip);
-    }
-    input.value = "";
-    input.focus();
+  var routeSeq = 0;
+
+  // addRoute appends a blank row (a copy of template#tpl-route-row) and puts the cursor in it.
+  function addRoute(form) {
+    var rows = form.querySelector("[data-route-rows]");
+    var tpl = byId("tpl-route-row");
+    if (!rows || !tpl) return;
+    var li = tpl.content.firstElementChild.cloneNode(true);
+    var id = "n" + (++routeSeq);
+    li.querySelectorAll("[id]").forEach(function (n) { n.id = n.id.replace(/-\d+$/, "-" + id); });
+    li.querySelectorAll("label[for]").forEach(function (n) { n.htmlFor = n.htmlFor.replace(/-\d+$/, "-" + id); });
+    li.classList.add("is-new");
+    rows.appendChild(li);
+    li.querySelector('input[name="route_folder"]').focus();
   }
+
+  // removeRoute drops a row; the last one is cleared instead, so there is always a row to fill.
+  function removeRoute(btn) {
+    var li = btn.closest("[data-route-row]");
+    var rows = li && li.parentElement;
+    if (!rows) return;
+    if (rows.querySelectorAll("[data-route-row]").length === 1) {
+      li.querySelector('input[name="route_folder"]').value = "";
+      li.querySelector('select[name="route_target"]').value = "";
+      li.querySelector('input[name="route_folder"]').focus();
+    } else {
+      var next = li.nextElementSibling || li.previousElementSibling;
+      li.remove();
+      next.querySelector('input[name="route_folder"]').focus();
+    }
+  }
+
+  // the blank spare rows are for use without script; with it, rows are added on demand
+  ready(function () {
+    document.querySelectorAll("[data-route-rows]").forEach(function (rows) {
+      var spares = rows.querySelectorAll(".route-row-spare");
+      var keepOne = spares.length === rows.querySelectorAll("[data-route-row]").length;
+      spares.forEach(function (li, i) {
+        if (keepOne && i === 0) li.classList.remove("route-row-spare");
+        else li.remove();
+      });
+    });
+  });
 
   function probeOut(form) { return form.querySelector("[data-probe-out]"); }
 
@@ -801,8 +813,8 @@
       function (d) {
         if (d.ok) {
           var folders = d.folders || [];
-          showFolders(form.querySelector("[data-folder-list]"), folders);
-          setProbe(out, "ok", "：伺服器上有 " + folders.length + " 個資料夾，勾選要監看的。", "登入成功");
+          suggestFolders(form, folders);
+          setProbe(out, "ok", "：伺服器上有 " + folders.length + " 個資料夾，可在路由的資料夾欄位挑選。", "登入成功");
         } else {
           setProbe(out, "err", d.error || "測試失敗");
         }
@@ -818,12 +830,9 @@
 
   document.addEventListener("change", function (e) {
     var t = e.target;
-    if (!(t instanceof HTMLInputElement) || !mailboxForm(t)) return;
-    if (t.name === "preset" && t.checked) applyPreset(t);
-    if (t.name === "targets") {
-      t.form.querySelectorAll('input[name="targets"][aria-invalid]').forEach(function (b) { b.removeAttribute("aria-invalid"); });
-    }
-    if (t.name === "folders") t.closest("[data-folder-list]").classList.remove("is-invalid");
+    if (!mailboxForm(t)) return;
+    if (t instanceof HTMLInputElement && t.name === "preset" && t.checked) applyPreset(t);
+    if (t instanceof HTMLSelectElement && t.name === "route_target") t.removeAttribute("aria-invalid");
   });
 
   document.addEventListener("input", function (e) {
@@ -833,21 +842,15 @@
     if (["host", "port", "username", "password", "client_id", "tenant"].indexOf(t.name) >= 0) probeStale(t.form);
   });
 
-  document.addEventListener("keydown", function (e) {
-    var t = e.target;
-    if (e.key === "Enter" && t instanceof HTMLInputElement && t.hasAttribute("data-folder-input")) {
-      e.preventDefault(); // add the folder instead of submitting the form
-      addFolder(mailboxForm(t));
-    }
-  });
-
   document.addEventListener("click", function (e) {
     var t = e.target;
     if (!(t instanceof Element)) return;
     var probe = t.closest("[data-probe]");
     if (probe) { runProbe(probe); return; }
-    var add = t.closest("[data-folder-add]");
-    if (add) addFolder(mailboxForm(add));
+    var add = t.closest("[data-route-add]");
+    if (add) { addRoute(mailboxForm(add)); return; }
+    var remove = t.closest("[data-route-remove]");
+    if (remove) removeRoute(remove);
   });
 
   /* ---------- Microsoft authorisation ----------

@@ -105,13 +105,13 @@ func TestCreateEditDeleteMailbox(t *testing.T) {
 	e.login()
 	form := url.Values{"name": {"work"}, "display_name": {"工作信箱"}, "host": {"imap.example.com"}, "port": {""},
 		"username": {"u@example.com"}, "auth_type": {"password"}, "password": {"SECRET-PW-1"},
-		"folders": {"INBOX", "Spam", ""}, "targets": {"me"}, "max_age": {"5m"}}
+		"route_folder": {"INBOX", "Spam", ""}, "route_target": {"me", "me", ""}, "max_age": {"5m"}}
 	if resp, body := e.postForm("/mailboxes/new", form); resp.StatusCode != 303 {
 		t.Fatalf("create = %d %s", resp.StatusCode, body)
 	}
 	raw, _, _ := runtime.LoadConfig(context.Background(), e.st)
 	m := raw.Mailboxes["work"]
-	if m == nil || m.Port != 0 || len(m.Folders) != 2 || m.MaxAge.Duration != 5*time.Minute || m.Auth.Password != "SECRET-PW-1" {
+	if m == nil || m.Port != 0 || len(m.Routes) != 2 || m.MaxAge.Duration != 5*time.Minute || m.Auth.Password != "SECRET-PW-1" {
 		t.Fatalf("stored = %+v", m)
 	}
 	if len(e.rt.Snapshot().Watchers) != 2 {
@@ -147,7 +147,7 @@ func TestMailboxValidationErrorsShowOnFields(t *testing.T) {
 	e := newEnv(t, nil)
 	e.login()
 	resp, body := e.postForm("/mailboxes/new", url.Values{"name": {"x"}, "host": {""}, "username": {"u"}, "auth_type": {"password"}, "password": {"p"}})
-	if resp.StatusCode != 422 || !strings.Contains(body, "不可為空") || !strings.Contains(body, "至少需要一個目標") {
+	if resp.StatusCode != 422 || !strings.Contains(body, "不可為空") || !strings.Contains(body, "至少需要一條轉發路由") {
 		t.Fatalf("= %d", resp.StatusCode)
 	}
 	// the messages sit under their fields, not in the form-level callout
@@ -166,7 +166,8 @@ func TestMailboxValidationErrorsShowOnFields(t *testing.T) {
 func TestMailboxFormRejects(t *testing.T) {
 	e := newEnv(t, withSample)
 	e.login()
-	base := url.Values{"host": {"imap.example.com"}, "username": {"u"}, "auth_type": {"password"}, "password": {"p"}, "targets": {"me"}}
+	base := url.Values{"host": {"imap.example.com"}, "username": {"u"}, "auth_type": {"password"}, "password": {"p"},
+		"route_folder": {"INBOX"}, "route_target": {"me"}}
 	with := func(kv ...string) url.Values {
 		f := url.Values{}
 		for k, v := range base {
@@ -186,7 +187,7 @@ func TestMailboxFormRejects(t *testing.T) {
 		{with("name", "Bad Name"), msgNameRule},
 		{with("name", "a", "port", "99999"), "1 到 65535"},
 		{with("name", "a", "max_age", "5"), "缺少單位"},
-		{with("name", "a", "targets", "nobody"), "找不到目標"},
+		{with("name", "a", "route_target", "nobody"), "找不到目標"},
 	}
 	for _, c := range cases {
 		resp, body := e.postForm("/mailboxes/new", c.form)
@@ -194,11 +195,13 @@ func TestMailboxFormRejects(t *testing.T) {
 			t.Errorf("%v = %d, want 422 with %q", c.form, resp.StatusCode, c.want)
 		}
 	}
-	// duplicate folders: reported under the folder group
+	// a duplicate route: reported under its row
 	f := with("name", "a")
-	f["folders"] = []string{"INBOX", "INBOX"}
-	if resp, body := e.postForm("/mailboxes/new", f); resp.StatusCode != 422 || !strings.Contains(body, "重複") {
-		t.Errorf("duplicate folders = %d", resp.StatusCode)
+	f["route_folder"] = []string{"INBOX", "INBOX"}
+	f["route_target"] = []string{"me", "me"}
+	if resp, body := e.postForm("/mailboxes/new", f); resp.StatusCode != 422 || !strings.Contains(body, "與第 1 條路由重複") ||
+		!strings.Contains(body, `id="f-route-err-1"`) || strings.Contains(body, `id="f-route-err-0"`) {
+		t.Errorf("duplicate route = %d", resp.StatusCode)
 	}
 	raw, _, _ := runtime.LoadConfig(context.Background(), e.st)
 	if len(raw.Mailboxes) != 1 {
@@ -210,7 +213,7 @@ func TestMailboxAuthSwitchClearsOtherFields(t *testing.T) {
 	e := newEnv(t, withSample)
 	e.login()
 	form := url.Values{"display_name": {"x"}, "host": {"outlook.office365.com"}, "username": {"me@outlook.com"},
-		"auth_type": {"microsoft_oauth"}, "password": {""}, "client_id": {"cid"}, "tenant": {"consumers"}, "targets": {"me"}}
+		"auth_type": {"microsoft_oauth"}, "password": {""}, "client_id": {"cid"}, "tenant": {"consumers"}, "route_folder": {"INBOX"}, "route_target": {"me"}}
 	if resp, body := e.postForm("/mailboxes/gmail", form); resp.StatusCode != 303 {
 		t.Fatalf("switch to oauth = %d %s", resp.StatusCode, body)
 	}
@@ -367,7 +370,7 @@ func TestMailboxNoOpEditStoresNothing(t *testing.T) {
 	before, _, _ := e.st.LatestConfigVersion(context.Background())
 	// the gmail sample exactly as the edit page would post it back (password left blank)
 	form := url.Values{"display_name": {"個人 Gmail"}, "host": {"imap.gmail.com"}, "port": {""}, "username": {"me@gmail.com"},
-		"auth_type": {"password"}, "password": {""}, "folders": {"INBOX"}, "targets": {"me"}}
+		"auth_type": {"password"}, "password": {""}, "route_folder": {"INBOX"}, "route_target": {"me"}}
 	resp, _ := e.postForm("/mailboxes/gmail", form)
 	if resp.StatusCode != 303 || e.flash(resp) != msgNoChange {
 		t.Fatalf("no-op edit = %d %q", resp.StatusCode, e.flash(resp))
@@ -376,19 +379,21 @@ func TestMailboxNoOpEditStoresNothing(t *testing.T) {
 	if after.ID != before.ID {
 		t.Fatalf("a no-op edit stored version %d (was %d)", after.ID, before.ID)
 	}
-	// the same targets and folders ticked in another order are no change either
+	// the routes are in the order the user put them: reordering them is a change
 	e2 := newEnv(t, func(c *config.Config) {
 		withSample(c)
 		c.Targets["family"] = config.Target{Bot: "main", ChatID: 7}
-		c.Mailboxes["gmail"].Targets = []string{"me", "family"}
-		c.Mailboxes["gmail"].Folders = []string{"INBOX", "Spam"}
+		c.Mailboxes["gmail"].Routes = []config.Route{{Folder: "INBOX", Target: "me"}, {Folder: "Spam", Target: "family"}}
 	})
 	e2.login()
-	form.Set("targets", "family")
-	form.Add("targets", "me")
-	form["folders"] = []string{"Spam", "INBOX"}
-	if resp, _ := e2.postForm("/mailboxes/gmail", form); e2.flash(resp) != msgNoChange {
-		t.Fatalf("reordered edit = %q", e2.flash(resp))
+	form["route_folder"] = []string{"Spam", "INBOX"}
+	form["route_target"] = []string{"family", "me"}
+	if resp, _ := e2.postForm("/mailboxes/gmail", form); resp.StatusCode != 303 || e2.flash(resp) == msgNoChange {
+		t.Fatalf("reordered edit = %d %q", resp.StatusCode, e2.flash(resp))
+	}
+	raw, _, _ := runtime.LoadConfig(context.Background(), e2.st)
+	if got := raw.Mailboxes["gmail"].Routes; len(got) != 2 || got[0].Folder != "Spam" {
+		t.Fatalf("stored routes = %v", got)
 	}
 }
 
@@ -490,7 +495,7 @@ func TestProbeRefreshDoesNotRestoreDroppedToken(t *testing.T) {
 
 	form := url.Values{"display_name": {"Outlook"}, "host": {"imap-mail.outlook.com"}, "username": {"me@outlook.com"},
 		"auth_type": {"microsoft_oauth"}, "client_id": {"00000000-0000-0000-0000-000000000001"}, "tenant": {"consumers"},
-		"folders": {"INBOX"}, "targets": {"me"}}
+		"route_folder": {"INBOX"}, "route_target": {"me"}}
 	if resp, body := e.postForm("/mailboxes/outlook", form); resp.StatusCode != 303 {
 		t.Fatalf("host change = %d %s", resp.StatusCode, body)
 	}
@@ -540,7 +545,7 @@ func TestMailboxBecomingMicrosoftDropsLeftoverToken(t *testing.T) {
 	e.st.SaveOAuthToken(ctx, "gmail", store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)})
 	form := url.Values{"display_name": {"個人 Gmail"}, "host": {"outlook.office365.com"}, "username": {"me@outlook.com"},
 		"auth_type": {"microsoft_oauth"}, "client_id": {"00000000-0000-0000-0000-000000000001"}, "tenant": {"consumers"},
-		"folders": {"INBOX"}, "targets": {"me"}}
+		"route_folder": {"INBOX"}, "route_target": {"me"}}
 	resp, body := e.postForm("/mailboxes/gmail", form)
 	if resp.StatusCode != 303 {
 		t.Fatalf("switch to Microsoft = %d %s", resp.StatusCode, body)
@@ -560,7 +565,7 @@ func TestMailboxEditDropsStaleOAuthToken(t *testing.T) {
 	tok := store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)}
 	form := url.Values{"display_name": {"Outlook"}, "host": {"outlook.office365.com"}, "username": {"me@outlook.com"},
 		"auth_type": {"microsoft_oauth"}, "client_id": {"00000000-0000-0000-0000-000000000001"}, "tenant": {"consumers"},
-		"folders": {"INBOX"}, "targets": {"me"}}
+		"route_folder": {"INBOX"}, "route_target": {"me"}}
 	hasToken := func() bool { _, ok, _ := e.st.GetOAuthToken(ctx, "outlook"); return ok }
 	edit := func(kv ...string) {
 		t.Helper()
@@ -603,7 +608,7 @@ func TestMailboxServerChangeNeedsPassword(t *testing.T) {
 	e := newEnv(t, withSample)
 	e.login()
 	base := url.Values{"display_name": {"個人 Gmail"}, "host": {"imap.gmail.com"}, "port": {""}, "username": {"me@gmail.com"},
-		"auth_type": {"password"}, "password": {""}, "folders": {"INBOX"}, "targets": {"me"}}
+		"auth_type": {"password"}, "password": {""}, "route_folder": {"INBOX"}, "route_target": {"me"}}
 	for field, v := range map[string]string{"host": "imap.evil.example", "port": "994", "username": "other@gmail.com"} {
 		form := url.Values{}
 		for k, x := range base {
@@ -658,7 +663,7 @@ func TestMailboxServerChangeDropsOAuthToken(t *testing.T) {
 	for field, v := range map[string]string{"host": "imap.evil.example", "port": "994"} {
 		form := url.Values{"display_name": {"Outlook"}, "host": {"outlook.office365.com"}, "username": {"me@outlook.com"},
 			"auth_type": {"microsoft_oauth"}, "client_id": {"00000000-0000-0000-0000-000000000001"}, "tenant": {"consumers"},
-			"folders": {"INBOX"}, "targets": {"me"}}
+			"route_folder": {"INBOX"}, "route_target": {"me"}}
 		e.st.SaveOAuthToken(ctx, "outlook", tok)
 		form.Set(field, v)
 		resp, body := e.postForm("/mailboxes/outlook", form)
@@ -718,7 +723,7 @@ func TestMailboxFormMicrosoftAppDefaults(t *testing.T) {
 		t.Error("a new mailbox must not carry a tenant override by default")
 	}
 	outlook := url.Values{"name": {"o"}, "host": {"outlook.office365.com"}, "username": {"me@outlook.com"},
-		"auth_type": {"microsoft_oauth"}, "client_id": {""}, "tenant": {""}, "targets": {"me"}}
+		"auth_type": {"microsoft_oauth"}, "client_id": {""}, "tenant": {""}, "route_folder": {"INBOX"}, "route_target": {"me"}}
 	resp, body := e.postForm("/mailboxes/new", outlook)
 	if resp.StatusCode != 422 || !strings.Contains(body, "未設定：請在系統設定填寫 Microsoft 應用程式，或在信箱進階設定覆寫") {
 		t.Fatalf("without any client_id = %d", resp.StatusCode)
@@ -779,5 +784,43 @@ func TestMailboxListFolderTitle(t *testing.T) {
 	_, body := e.get("/mailboxes")
 	if !strings.Contains(body, `<span class="mb-folder-name mono" title="INBOX">INBOX</span>`) {
 		t.Error("folder name without title")
+	}
+}
+
+// The routes card: a new mailbox starts with INBOX → the only target; an edit shows the
+// stored rows; both carry blank spare rows for use without script; problems sit on their row.
+func TestMailboxRoutesCard(t *testing.T) {
+	e := newEnv(t, withSample)
+	e.login()
+	_, body := e.get("/mailboxes/new")
+	if !strings.Contains(body, `name="route_folder" value="INBOX"`) || !strings.Contains(body, `<option value="me" selected>`) {
+		t.Error("new mailbox does not start with INBOX → me")
+	}
+	if n := strings.Count(body, "route-row-spare"); n != spareRoutes {
+		t.Errorf("spare rows = %d", n)
+	}
+	if !strings.Contains(body, `<template id="tpl-route-row">`) || !strings.Contains(body, `<datalist id="f-folder-options"`) {
+		t.Error("no row template or folder suggestions")
+	}
+	_, body = e.get("/mailboxes/gmail")
+	if !strings.Contains(body, `id="f-route-folder-0" name="route_folder" value="INBOX"`) {
+		t.Error("edit page lacks the stored route")
+	}
+
+	base := url.Values{"name": {"x"}, "host": {"imap.example.com"}, "username": {"u"}, "auth_type": {"password"}, "password": {"p"}}
+	resp, body := e.postForm("/mailboxes/new", base)
+	if resp.StatusCode != 422 || !strings.Contains(body, "至少需要一條轉發路由") || !strings.Contains(body, `aria-describedby="f-routes-err"`) {
+		t.Errorf("no routes = %d", resp.StatusCode)
+	}
+	f := url.Values{}
+	for k, v := range base {
+		f[k] = v
+	}
+	f["route_folder"] = []string{"INBOX", ""}
+	f["route_target"] = []string{"me", "me"}
+	_, body = e.postForm("/mailboxes/new", f)
+	if !strings.Contains(body, `id="f-route-folder-1" name="route_folder" value="" list="f-folder-options" placeholder="資料夾，例如 INBOX" autocomplete="off" spellcheck="false" aria-invalid="true"`) ||
+		!strings.Contains(body, `id="f-route-err-1"`) {
+		t.Error("blank folder not marked on its row")
 	}
 }

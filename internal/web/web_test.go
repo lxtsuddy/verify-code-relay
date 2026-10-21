@@ -466,8 +466,8 @@ func (e *env) waitMessage(match func(string) bool) bool {
 func withSample(c *config.Config) {
 	c.Mailboxes["gmail"] = &config.Mailbox{
 		DisplayName: "個人 Gmail", Host: "imap.gmail.com", Username: "me@gmail.com",
-		Auth:    config.Auth{Type: "password", Password: "p"},
-		Folders: []string{"INBOX"}, Targets: []string{"me"},
+		Auth:   config.Auth{Type: "password", Password: "p"},
+		Routes: []config.Route{{Folder: "INBOX", Target: "me"}},
 	}
 }
 
@@ -475,8 +475,8 @@ func withSample(c *config.Config) {
 func withOutlookMailbox(c *config.Config) {
 	c.Mailboxes["outlook"] = &config.Mailbox{
 		DisplayName: "Outlook", Host: "outlook.office365.com", Username: "me@outlook.com",
-		Auth:    config.Auth{Type: "microsoft_oauth", ClientID: "00000000-0000-0000-0000-000000000001", Tenant: "consumers"},
-		Folders: []string{"INBOX"}, Targets: []string{"me"},
+		Auth:   config.Auth{Type: "microsoft_oauth", ClientID: "00000000-0000-0000-0000-000000000001", Tenant: "consumers"},
+		Routes: []config.Route{{Folder: "INBOX", Target: "me"}},
 	}
 }
 

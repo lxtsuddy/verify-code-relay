@@ -209,14 +209,18 @@ func TestWebEndToEnd(t *testing.T) {
 		t.Fatalf("GET /mailboxes/new = %d", resp.StatusCode)
 	}
 	mailboxForm := func(targets ...string) url.Values {
+		folders := make([]string, len(targets)) // every target gets INBOX
+		for i := range folders {
+			folders[i] = "INBOX"
+		}
 		return url.Values{
 			"display_name": {"記憶體信箱"},
 			"host":         {"127.0.0.1"},
 			"port":         {strconv.Itoa(imapSrv.addr.Port)},
 			"username":     {memUser},
 			"auth_type":    {"password"},
-			"folders":      {"INBOX"},
-			"targets":      targets,
+			"route_folder": folders,
+			"route_target": targets,
 		}
 	}
 	f := mailboxForm("me")
