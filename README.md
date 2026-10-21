@@ -265,16 +265,18 @@ kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay config i
 ### 內建辨識怎麼運作
 
 - **內文來源**：以 HTML 版內文為主；HTML 版辨識不到時，才改用純文字版再辨識一次（有些信的 HTML 版才有粗體的驗證碼，也有些信的純文字版才有完整說明）。
-- **驗證碼**：數字前後出現「驗證碼」「this code」「code below」「PIN」「動態密碼」「安全性代碼」等關鍵字時會被辨識，粗體、大字或字距加寬的文字加分。
-  - 主旨中的數字，若也獨佔內文一行（例如主旨「Use 123456 to set up recovery email」，內文另起一行寫 `123456`），即使附近沒有「驗證碼」等字樣也會被當成驗證碼；1900～2099 的年份，以及主旨提到訂單、發票、出貨（order、invoice、shipment …）時除外。
-  - 純英文字母的驗證碼（5～8 個大寫字母）只在緊接「code: / code is / 驗證碼：」等字樣、且獨佔一行或為粗體時辨識。
+- **驗證碼**：數字前後出現「驗證碼」「this code」「code below」「PIN is」「one-time PIN」「動態密碼」「安全性代碼」等關鍵字時會被辨識，粗體、大字或字距加寬的文字加分。單獨的「PIN」與「the code」不算關鍵字（常見於「忘記 PIN 請來電」或優惠碼）；只寫「PIN: 4821」的信請自行加關鍵字。
+  - 主旨中的數字，若也獨佔內文一行（例如主旨「Use 123456 to set up recovery email」，內文另起一行寫 `123456`），即使附近沒有「驗證碼」等字樣也會被當成驗證碼；1900～2099 的年份，以及主旨提到訂單、發票、出貨、付款、訂房、案件、帳號等（order、invoice、payment、booking、case、account …）時除外。
+  - 純英文字母的驗證碼（5～8 個大寫字母）只在緊接「code: / code is / 驗證碼：」等字樣、且獨佔一行或本身就是一段粗體時辨識（標題「YOUR CODE IS READY」裡的 READY 不算）。
 - **連結**：關鍵字（驗證、確認、登入、重設密碼、verify、confirm、sign in …）可以出現在主旨、內文，或任何一個連結的文字。
   - 按鈕只寫「驗證」「验证」「Verify」等字樣，或按鈕是圖片（取圖片的替代文字）時，也會辨識。
-  - 「Click here」「點此」這類泛用的連結文字，只有在同一行說明用途（「To verify your email, click here」），或上一行說明用途並指向下文（含 below、link、以下、下方，或以冒號結尾）時才採用；純文字信裡的裸網址同樣處理。
+  - 「Click here」「點此」這類泛用的連結文字，只有在同一行說明用途（「To verify your email, click here」），或上一行說明用途並指向下文（含 below、link、以下、下方，或以冒號結尾）時才採用；純文字信裡的裸網址同樣處理。這裡的英文關鍵字要完整成字（「confirmation」不算「confirm」），而且前文或主旨提到訂單、收據、付款、出貨（order、receipt、payment、訂單、付款 …）時不採用，以免轉發「Order confirmation:」下面的訂單頁。
   - 網址中的 `activation`、`validation`、`verify`、`token=` 等字樣也有加分。
 - **會排除**：
   - 卡號末碼（末四碼、尾號、ending in、last 4 …）、郵遞區號（郵遞區號、邮编、zip、postal 與美國 `CA 94043`）、地址門牌（`1600 Main St`、`100 號`），以及電話、金額、時間、年份、訂單編號。
-  - 電子報常見連結：取消訂閱、在瀏覽器中檢視、聯絡我們、contact（只看連結文字與網址路徑），以及圖片、`.pdf`、`.css`、`.js` 等靜態檔案。
+  - 優惠碼：同一行或上一行提到 promo、coupon、discount、voucher、checkout、% off、優惠、折扣、折價的碼（例如「Use this code SAVE20 at checkout」）。
+  - 電子報常見連結：取消訂閱、在瀏覽器中檢視、聯絡我們、contact（只看連結文字與網址路徑），以及圖片、`.pdf`、`.css`、`.js` 等靜態檔案。這些連結的文字也不會讓信件通過「含連結關鍵字」的檢查。
+  - 一封信最多看 500 個不同的連結。
 
 ### 辨識不到或辨識錯誤時
 
@@ -295,7 +297,7 @@ kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay config i
 - 使用**本頁目前填寫**的自訂規則與關鍵字，尚未儲存也會套用，所以可以先調整、測試，滿意再存檔。
 - 「預覽訊息使用的信箱」可選填：不指定時用全域範本；選擇信箱則使用該信箱的範本與顯示名稱。
 - 結果包含：結論（轉發驗證碼／轉發連結／被規則略過／不轉發）、驗證碼或連結、Telegram 訊息預覽、辨識過程（每個候選的分數與排除原因）、信件摘要（寄件者、主旨、內文前 500 字、連結清單）。
-- 信件只在記憶體中處理：不會儲存、不會發送到 Telegram、不會寫進日誌。上限 5 MiB（與實際運作時略過的上限相同）。需要啟用 JavaScript。
+- 信件只在記憶體中處理：不會儲存、不會發送到 Telegram、不會寫進日誌。上限 5 MiB（與實際運作時略過的上限相同；超過時頁面直接提示，不會上傳）。需要啟用 JavaScript。
 
 命令列 `relay test --eml` 仍可使用，並與網頁共用同一套辨識與渲染；只有它能用 `--send` 實際送出到 Telegram。
 
