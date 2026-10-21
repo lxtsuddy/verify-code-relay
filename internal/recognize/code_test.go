@@ -101,3 +101,29 @@ func TestSubjectEchoTrace(t *testing.T) {
 		t.Fatalf("got %q trace %q", got, tr.Steps)
 	}
 }
+
+func TestCodeFinderEmphasisAndAlpha(t *testing.T) {
+	cases := []struct {
+		name, subject, text string
+		emph                []mailparse.Span
+		want                string
+	}{
+		{"emphasis wins", "Notice", "Your verification code: 111111 or 222222", []mailparse.Span{{Start: 34, End: 40}}, "222222"},
+		{"no emphasis, nearest wins", "Notice", "Your verification code: 111111 or 222222", nil, "111111"},
+		{"alpha own line", "Sign in", "Your code is:\nQWERTY\nIt expires soon.", nil, "QWERTY"},
+		{"alpha emphasised inline", "Sign in", "Enter this code: QWERTY to continue", []mailparse.Span{{Start: 17, End: 23}}, "QWERTY"},
+		{"alpha inline without emphasis", "Sign in", "Your code is QWERTY and more", nil, ""},
+		{"alpha not right after keyword", "Sign in", "Verification code below.\nHELLO\n", nil, ""},
+		{"alpha after 為", "登入", "您的驗證碼為\nABCDEF", nil, "ABCDEF"},
+		{"emphasis past scan limit is ignored", "Notice", "Your verification code: 111111", []mailparse.Span{{Start: 1 << 20, End: 1<<20 + 6}}, "111111"},
+	}
+	f := newCodeFinder(nil)
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tr := &Trace{}
+			if got := f.find(&mailparse.Message{Subject: c.subject, Text: c.text, Emphasis: c.emph}, tr); got != c.want {
+				t.Errorf("got %q want %q\ntrace:\n%v", got, c.want, tr.Steps)
+			}
+		})
+	}
+}

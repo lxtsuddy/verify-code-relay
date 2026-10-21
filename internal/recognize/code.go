@@ -23,9 +23,12 @@ var defaultCodeKeywords = []string{
 }
 
 var (
-	digitsRe   = regexp.MustCompile(`\b\d{4,8}\b`)
-	splitRe    = regexp.MustCompile(`\b\d{3}[ -]\d{3}\b`)
-	alnumRe    = regexp.MustCompile(`\b[A-Z0-9]{4,8}\b`)
+	digitsRe = regexp.MustCompile(`\b\d{4,8}\b`)
+	splitRe  = regexp.MustCompile(`\b\d{3}[ -]\d{3}\b`)
+	alnumRe  = regexp.MustCompile(`\b[A-Z0-9]{4,8}\b`)
+	// alphaRe finds letter-only codes; they are candidates only right after a keyword and
+	// alone on their line or emphasised (see find), as plain words look the same.
+	alphaRe    = regexp.MustCompile(`\b[A-Z]{5,8}\b`)
 	urlLikeRe  = regexp.MustCompile(`(?i)(https?://|www\.)\S+`)
 	emailRe    = regexp.MustCompile(`[\w.+-]+@[\w-]+(\.[\w-]+)+`)
 	monthRe    = regexp.MustCompile(`(?i)\b(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|june?|july?|aug(ust)?|sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?)\b|\bmay\s+\d|\d\s+may\b`)
@@ -119,6 +122,8 @@ func addressReason(c codeCand, t *codeText) string {
 const (
 	codeMaxDistance = 200
 	codeThreshold   = 40.0
+	// emphasisBonus is added to the score of a candidate inside an emphasised span.
+	emphasisBonus = 15
 )
 
 type codeFinder struct{ keywords [][]rune }
@@ -158,6 +163,7 @@ type codeText struct {
 	kws       []span // keyword occurrences sorted by start
 	maxKwLen  int
 	blocked   []span // URL and e-mail spans, merged and sorted
+	emph      []span // emphasised spans of the scanned text, merged and sorted
 	yearLine  map[int]bool
 }
 
@@ -217,6 +223,55 @@ func (t *codeText) dateLine(pos int) bool {
 func (t *codeText) blockedAt(c span) bool {
 	i := sort.Search(len(t.blocked), func(i int) bool { return t.blocked[i].end > c.start })
 	return i < len(t.blocked) && t.blocked[i].start < c.end
+}
+
+// emphSpans returns msg.Emphasis as spans of the scanned text (Subject+"\n"+Text, cut to n runes).
+func emphSpans(msg *mailparse.Message, subjLen, n int) []span {
+	var out []span
+	for _, e := range msg.Emphasis {
+		if s, end := e.Start+subjLen+1, min(e.End+subjLen+1, n); s < end {
+			out = append(out, span{s, end})
+		}
+	}
+	return out
+}
+
+// emphasized reports whether c lies inside an emphasised span.
+func (t *codeText) emphasized(c span) bool {
+	i := sort.Search(len(t.emph), func(i int) bool { return t.emph[i].end > c.start })
+	return i < len(t.emph) && t.emph[i].start <= c.start && c.end <= t.emph[i].end
+}
+
+// keywordEndsAt reports whether a keyword ends exactly at pos.
+func (t *codeText) keywordEndsAt(pos int) bool {
+	i := sort.Search(len(t.kws), func(i int) bool { return t.kws[i].start >= pos-t.maxKwLen })
+	for ; i < len(t.kws) && t.kws[i].start < pos; i++ {
+		if t.kws[i].end == pos {
+			return true
+		}
+	}
+	return false
+}
+
+// afterKeyword reports whether a keyword ends right before pos, with only white space,
+// colons and the words "is", 為, 为, 是 in between ("Your code is: QWERTY").
+func (t *codeText) afterKeyword(pos int) bool {
+	j := pos
+	for {
+		if t.keywordEndsAt(j) {
+			return true
+		}
+		switch {
+		case j == 0:
+			return false
+		case unicode.IsSpace(t.lower[j-1]) || strings.ContainsRune(":：為为是", t.lower[j-1]):
+			j--
+		case j >= 2 && t.lower[j-2] == 'i' && t.lower[j-1] == 's' && (j == 2 || !isASCIILetter(t.lower[j-3])):
+			j -= 2
+		default:
+			return false
+		}
+	}
 }
 
 // mergeSpans returns the union of list as sorted, disjoint spans.
@@ -300,6 +355,7 @@ func (f *codeFinder) find(msg *mailparse.Message, tr *Trace) string {
 	blocked := append(regexpSpans(urlLikeRe, full, b2r), regexpSpans(emailRe, full, b2r)...)
 	kws := findKeywords(lower, f.keywords)
 	t := newCodeText(rs, lower, kws, blocked)
+	t.emph = mergeSpans(emphSpans(msg, subjLen, len(rs)))
 	digits := regexpSpans(digitsRe, full, b2r)
 	for _, s := range subjectEcho(t, digits, subjLen) {
 		tr.Addf("驗證碼：主旨的 %s 也獨佔內文一行，視為關鍵字", string(rs[s.start:s.end]))
@@ -328,6 +384,12 @@ func (f *codeFinder) find(msg *mailparse.Message, tr *Trace) string {
 			cands = append(cands, codeCand{sp, raw, raw})
 		}
 	}
+	for _, sp := range regexpSpans(alphaRe, full, b2r) {
+		if t.afterKeyword(sp.start) && (t.aloneOnLine(sp) || t.emphasized(sp)) {
+			raw := string(rs[sp.start:sp.end])
+			cands = append(cands, codeCand{sp, raw, raw})
+		}
+	}
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].start < cands[j].start })
 
 	best, bestScore := "", -1e9
@@ -350,6 +412,9 @@ func (f *codeFinder) find(msg *mailparse.Message, tr *Trace) string {
 		}
 		if len(c.value) == 6 && isAllDigits(c.value) {
 			score += 10
+		}
+		if t.emphasized(c.span) {
+			score += emphasisBonus
 		}
 		tr.Addf("  候選 %q：分數 %.1f", c.raw, score)
 		if score > bestScore {
