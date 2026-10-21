@@ -95,6 +95,35 @@ func TestLinkFinder(t *testing.T) {
 		{"contact in query kept", "Please verify", "x", []mailparse.Link{
 			{URL: "https://example.com/verify?email=contact%40corp.com", Text: "Verify email"},
 		}, "https://example.com/verify?email=contact%40corp.com"},
+		{"order confirmation bare url", "Your order", "Order confirmation:\nhttps://shop.example.com/o/48213", []mailparse.Link{
+			{URL: "https://shop.example.com/o/48213", Before: "Order confirmation:\n"},
+		}, ""},
+		{"order confirmation link below", "Thanks for shopping", "View your order confirmation at the link below:\nhttps://example.com/o/48213", []mailparse.Link{
+			{URL: "https://example.com/o/48213", Before: "View your order confirmation at the link below:\n"},
+		}, ""},
+		{"order details zh", "感謝您的訂購", "請確認以下訂單資訊：\nhttps://example.com/o/48213", []mailparse.Link{
+			{URL: "https://example.com/o/48213", Before: "請確認以下訂單資訊：\n"},
+		}, ""},
+		{"payment subject blocks the text before", "Payment received", "Please confirm your email at the link below:", []mailparse.Link{
+			{URL: "https://example.com/x/y", Text: "Click here", Before: "Please confirm your email at the link below:\n"},
+		}, ""},
+		{"in order to is not an order", "Welcome", "In order to verify your email, click the link below:", []mailparse.Link{
+			{URL: "https://example.com/x/y", Text: "Click here", Before: "In order to verify your email, click the link below:\n"},
+		}, "https://example.com/x/y"},
+		{"confirmation is not confirm", "Hello", "Your confirmation is below:", []mailparse.Link{
+			{URL: "https://example.com/x/y", Text: "Click here", Before: "Your confirmation is below:\n"},
+		}, ""},
+		{"button needs keyword text", "Please confirm", "x", []mailparse.Link{
+			{URL: "https://example.com/posts/confirm-your-seat", Text: "Read more", Button: true},
+		}, ""},
+		{"button beats an equal plain link", "Please verify", "x", []mailparse.Link{
+			{URL: "https://other.test/a", Text: "Verify"},
+			{URL: "https://other.test/b", Text: "Verify", Button: true},
+		}, "https://other.test/b"},
+		{"excluded link does not open the gate", "Weekly news", "Our latest posts.", []mailparse.Link{
+			{URL: "https://example.com/preferences", Text: "Confirm email preferences"},
+			{URL: "https://example.com/posts/1?token=Zx8_kq2LmN0pQr7sTuVwXy-1", Text: "Read more"},
+		}, ""},
 		{"view in browser excluded", "Please verify", "x", []mailparse.Link{
 			{URL: "https://example.com/v/verify-123", Text: "View in browser"},
 			{URL: "https://example.com/verify?t=1", Text: "Verify"},

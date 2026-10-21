@@ -74,8 +74,13 @@ func (f *linkFinder) find(msg *mailparse.Message, tr *Trace) string {
 		tr.Addf("連結：關鍵字 %q", kw)
 	} else {
 		// The body may be a stub ("use an HTML client") while a button names the action.
+		// Links excluded below ("Confirm email preferences") do not count.
 		for _, l := range msg.Links {
-			if kw, ok = f.containsKeyword(strings.ToLower(l.Text)); ok {
+			lt := strings.ToLower(l.Text)
+			if u, err := url.Parse(l.URL); err != nil || linkExcludeReason(u, strings.ToLower(l.URL), lt) != "" {
+				continue
+			}
+			if kw, ok = f.containsKeyword(lt); ok {
 				tr.Addf("連結：連結文字 %q 含關鍵字 %q", l.Text, kw)
 				break
 			}
@@ -89,6 +94,7 @@ func (f *linkFinder) find(msg *mailparse.Message, tr *Trace) string {
 	if at := strings.LastIndexByte(msg.From.Addr, '@'); at >= 0 {
 		senderLabel = MainLabel(msg.From.Addr[at+1:])
 	}
+	subject := strings.ToLower(msg.Subject)
 	best, bestScore := "", -1
 	for _, l := range msg.Links {
 		u, err := url.Parse(l.URL)
@@ -105,7 +111,9 @@ func (f *linkFinder) find(msg *mailparse.Message, tr *Trace) string {
 		if _, ok := f.containsKeyword(lt); ok {
 			textKeyword = true
 		} else if genericLinkText(lt) {
-			if k, ok := f.introducesLink(l.Before); ok {
+			if w, ok := purchaseContext(l.Before, subject); ok {
+				note = "，前文或主旨含 " + w + "，不採用前文"
+			} else if k, ok := f.introducesLink(l.Before); ok {
 				textKeyword, note = true, "，前文含 "+k
 			}
 		}
@@ -156,17 +164,31 @@ func genericLinkText(lt string) bool {
 	return lt == "" || genericLinkTexts[lt]
 }
 
+// purchaseContext returns the commerce word (commerceWords: order, receipt, payment, 訂單 …)
+// found in the text before a generic link or in the lower-cased subject: "Order
+// confirmation:" above a bare URL introduces an order page, not a verification link.
+// "In order to" is not an order.
+func purchaseContext(before, subject string) (string, bool) {
+	for _, s := range []string{strings.ToLower(before), subject} {
+		if w, ok := containsAnyWord(strings.ReplaceAll(s, "in order to", " "), commerceWords); ok {
+			return w, true
+		}
+	}
+	return "", false
+}
+
 // introducesLink reports whether the text before a generic link (Link.Before, "previous
 // line\nsame line") says what it is for: a keyword on the link's own line, or one on the
 // line above that also points at what follows ("the link below", "以下連結", a closing
 // colon). A keyword alone on the line above is not enough: newsletters mention "confirm"
-// in one paragraph and put "Click here to read more" in the next.
+// in one paragraph and put "Click here to read more" in the next. Keywords match whole
+// English words here ("confirm" is not in "Order confirmation").
 func (f *linkFinder) introducesLink(before string) (string, bool) {
 	prev, cur, _ := strings.Cut(strings.ToLower(before), "\n")
-	if k, ok := f.containsKeyword(cur); ok {
+	if k, ok := containsAnyWord(cur, f.keywords); ok {
 		return k, true
 	}
-	k, ok := f.containsKeyword(prev)
+	k, ok := containsAnyWord(prev, f.keywords)
 	if !ok {
 		return "", false
 	}
