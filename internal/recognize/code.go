@@ -17,8 +17,8 @@ var defaultCodeKeywords = []string{
 	"安全性代碼", "驗證代碼", "验证代码", "動態密碼", "动态密码",
 	"verification code", "security code", "confirmation code", "authentication code", "login code",
 	"sign-in code", "one-time code", "one-time password", "otp", "passcode", "2fa", "two-factor",
-	"your code", "code is", "this code", "the code", "use this code", "enter this code", "code below",
-	"following code", "temporary code", "pin code", "pin",
+	"your code", "code is", "this code", "use this code", "enter this code", "code below",
+	"following code", "temporary code", "pin code", "pin is", "one-time pin", "temporary pin", "security pin",
 	"認証コード", "確認コード", "セキュリティコード", "ワンタイムパスワード",
 }
 
@@ -27,7 +27,7 @@ var (
 	splitRe  = regexp.MustCompile(`\b\d{3}[ -]\d{3}\b`)
 	alnumRe  = regexp.MustCompile(`\b[A-Z0-9]{4,8}\b`)
 	// alphaRe finds letter-only codes; they are candidates only right after a keyword and
-	// alone on their line or emphasised (see find), as plain words look the same.
+	// alone on their line or emphasised on their own (see find), as plain words look the same.
 	alphaRe    = regexp.MustCompile(`\b[A-Z]{5,8}\b`)
 	urlLikeRe  = regexp.MustCompile(`(?i)(https?://|www\.)\S+`)
 	emailRe    = regexp.MustCompile(`[\w.+-]+@[\w-]+(\.[\w-]+)+`)
@@ -45,6 +45,10 @@ var (
 	// are not codes.
 	cardWords = []string{"末四碼", "末4碼", "末四码", "末4码", "尾號", "尾号", "ending in", "ends in", "last 4", "last4", "last four"}
 	zipWords  = []string{"郵遞區號", "郵政編碼", "邮编", "邮政编码", "zip", "postal", "postcode"}
+	// promoWords on a candidate's line or the nearest non-blank line above it make it a
+	// coupon ("Use this code SAVE20 at checkout"); English words match whole (see containsWord).
+	promoWords = []string{"promo", "promos", "coupon", "coupons", "discount", "discounts", "voucher", "vouchers",
+		"checkout", "% off", "優惠", "折扣", "折價", "优惠", "折扣码", "折价"}
 	// streetWords after a number make it a house number ("1600 Amphitheatre Parkway").
 	// Product names ("G Suite") rule out words like suite or floor.
 	streetWords = map[string]bool{"st": true, "street": true, "ave": true, "avenue": true, "rd": true, "road": true,
@@ -100,11 +104,12 @@ func addressReason(c codeCand, t *codeText) string {
 	end := min(len(rs), c.end+streetScanRunes)
 	var word []rune
 	for i := c.end; i <= end; i++ {
-		if i < end && rs[i] != '\n' && (isASCIILetter(lower[i]) || isDigit(lower[i])) {
+		if i < end && rs[i] != '\n' && isWordRune(lower[i]) {
 			word = append(word, lower[i])
 			continue
 		}
-		if streetWords[string(word)] {
+		// A word running past the window is cut ("Stay" → "st"), not a street word.
+		if (i < end || end == len(rs) || !isWordRune(lower[end])) && streetWords[string(word)] {
 			return "地址"
 		}
 		word = word[:0]
@@ -165,10 +170,14 @@ type codeText struct {
 	blocked   []span // URL and e-mail spans, merged and sorted
 	emph      []span // emphasised spans of the scanned text, merged and sorted
 	yearLine  map[int]bool
+	// body is where the body starts in the scanned text (after Subject+"\n"); the
+	// promo check does not look from the body up into the subject.
+	body      int
+	promoLine map[int]bool // by line index: promoNear's answer
 }
 
 func newCodeText(rs, lower []rune, kws, blocked []span) *codeText {
-	t := &codeText{rs: rs, lower: lower, yearLine: map[int]bool{}}
+	t := &codeText{rs: rs, lower: lower, yearLine: map[int]bool{}, promoLine: map[int]bool{}}
 	for s := 0; ; {
 		e := s
 		for e < len(rs) && rs[e] != '\n' {
@@ -219,6 +228,31 @@ func (t *codeText) dateLine(pos int) bool {
 	return v
 }
 
+// promoNear reports whether the line holding pos, or the nearest non-blank line above
+// it within the same part (subject or body), mentions a promotion (promoWords).
+func (t *codeText) promoNear(pos int) bool {
+	li := t.line(pos)
+	if v, ok := t.promoLine[li]; ok {
+		return v
+	}
+	mentions := func(j int) bool {
+		_, ok := containsAnyWord(string(t.lower[t.lines[j].start:t.lines[j].end]), promoWords)
+		return ok
+	}
+	v := mentions(li)
+	for j := li - 1; !v && j >= 0; j-- {
+		if t.lines[li].start >= t.body && t.lines[j].start < t.body {
+			break
+		}
+		if t.trimmed[j].start < t.trimmed[j].end {
+			v = mentions(j)
+			break
+		}
+	}
+	t.promoLine[li] = v
+	return v
+}
+
 // blockedAt reports whether c overlaps a URL or e-mail address.
 func (t *codeText) blockedAt(c span) bool {
 	i := sort.Search(len(t.blocked), func(i int) bool { return t.blocked[i].end > c.start })
@@ -240,6 +274,23 @@ func emphSpans(msg *mailparse.Message, subjLen, n int) []span {
 func (t *codeText) emphasized(c span) bool {
 	i := sort.Search(len(t.emph), func(i int) bool { return t.emph[i].end > c.start })
 	return i < len(t.emph) && t.emph[i].start <= c.start && c.end <= t.emph[i].end
+}
+
+// emphasizedAlone reports whether c is a whole emphasised span (white space aside), as
+// a letter-only code set in bold is; a heading merely containing c does not count.
+func (t *codeText) emphasizedAlone(c span) bool {
+	i := sort.Search(len(t.emph), func(i int) bool { return t.emph[i].end > c.start })
+	if i == len(t.emph) {
+		return false
+	}
+	s, e := t.emph[i].start, t.emph[i].end
+	for s < e && unicode.IsSpace(t.rs[s]) {
+		s++
+	}
+	for e > s && unicode.IsSpace(t.rs[e-1]) {
+		e--
+	}
+	return s == c.start && e == c.end
 }
 
 // keywordEndsAt reports whether a keyword ends exactly at pos.
@@ -289,9 +340,18 @@ func mergeSpans(list []span) []span {
 	return out
 }
 
-// subjectOrderWords in a subject mean its numbers are references, not codes.
-var subjectOrderWords = toRuneKeywords([]string{"訂單", "订单", "order", "orders", "invoice", "invoices",
-	"receipt", "receipts", "tracking", "shipment", "shipments", "包裹", "物流", "出貨", "出货", "發票", "发票"})
+// commerceWords name orders, payments and deliveries. A subject using one is about a
+// purchase; so is the text before a generic link (see linkFinder.introducesLink).
+var commerceWords = []string{"訂單", "订单", "order", "orders", "invoice", "invoices", "receipt", "receipts",
+	"tracking", "shipment", "shipments", "shipping", "payment", "payments", "purchase", "purchases",
+	"包裹", "物流", "出貨", "出货", "發票", "发票", "付款", "購買", "购买", "繳費"}
+
+// subjectOrderWords in a subject mean its numbers are references, not codes: commerce,
+// bookings, support cases and account or member numbers.
+var subjectOrderWords = toRuneKeywords(append(append([]string{}, commerceWords...),
+	"booking", "bookings", "reservation", "reservations", "ticket", "tickets", "case", "reference", "ref",
+	"account", "member", "flight", "預訂", "訂房", "訂位", "預約", "案件", "編號", "單號", "帳號", "帳戶",
+	"预订", "预约", "账号", "账户"))
 
 // addKeyword adds k to the sorted keyword list.
 func (t *codeText) addKeyword(k span) {
@@ -356,6 +416,7 @@ func (f *codeFinder) find(msg *mailparse.Message, tr *Trace) string {
 	kws := findKeywords(lower, f.keywords)
 	t := newCodeText(rs, lower, kws, blocked)
 	t.emph = mergeSpans(emphSpans(msg, subjLen, len(rs)))
+	t.body = subjLen + 1
 	digits := regexpSpans(digitsRe, full, b2r)
 	for _, s := range subjectEcho(t, digits, subjLen) {
 		tr.Addf("驗證碼：主旨的 %s 也獨佔內文一行，視為關鍵字", string(rs[s.start:s.end]))
@@ -385,7 +446,7 @@ func (f *codeFinder) find(msg *mailparse.Message, tr *Trace) string {
 		}
 	}
 	for _, sp := range regexpSpans(alphaRe, full, b2r) {
-		if t.afterKeyword(sp.start) && (t.aloneOnLine(sp) || t.emphasized(sp)) {
+		if t.afterKeyword(sp.start) && (t.aloneOnLine(sp) || t.emphasizedAlone(sp)) {
 			raw := string(rs[sp.start:sp.end])
 			cands = append(cands, codeCand{sp, raw, raw})
 		}
@@ -470,6 +531,9 @@ func isAllDigits(s string) bool {
 }
 
 func isDigit(r rune) bool { return r >= '0' && r <= '9' }
+
+// isWordRune reports whether r is part of an English word (or number) for the street scan.
+func isWordRune(r rune) bool { return isASCIILetter(r) || isDigit(r) }
 
 // phoneSeps are the separators allowed between two digit groups of a phone
 // number. Anything longer, such as " - " or a double space, ends the run.
@@ -557,6 +621,9 @@ func excludeReason(c codeCand, t *codeText) string {
 				return "訂單編號"
 			}
 		}
+	}
+	if t.promoNear(c.start) {
+		return "優惠碼"
 	}
 	// Spaces are collapsed, not removed, so that hasContextWord can still see word boundaries.
 	ctx := strings.Join(strings.Fields(string(lower[max(0, c.start-contextRunes):c.start])), " ")

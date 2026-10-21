@@ -50,6 +50,37 @@ func keywordAt(lower, kw []rune, i int) bool {
 	return !(isASCIILetter(kw[len(kw)-1]) && end < len(lower) && isASCIILetter(lower[end]))
 }
 
+// containsWord reports whether the lower-cased s contains w, where an ASCII letter at
+// either end of w must not touch another ASCII letter ("confirm" is not in "confirmation").
+func containsWord(s, w string) bool {
+	if w == "" {
+		return false
+	}
+	for i := 0; ; {
+		j := strings.Index(s[i:], w)
+		if j < 0 {
+			return false
+		}
+		j += i
+		e := j + len(w)
+		if (!isASCIILetter(rune(w[0])) || j == 0 || !isASCIILetter(rune(s[j-1]))) &&
+			(!isASCIILetter(rune(w[len(w)-1])) || e == len(s) || !isASCIILetter(rune(s[e]))) {
+			return true
+		}
+		i = j + 1
+	}
+}
+
+// containsAnyWord returns the first of words that s contains (see containsWord).
+func containsAnyWord(s string, words []string) (string, bool) {
+	for _, w := range words {
+		if containsWord(s, w) {
+			return w, true
+		}
+	}
+	return "", false
+}
+
 func runesEqual(a, b []rune) bool {
 	for i := range a {
 		if a[i] != b[i] {
