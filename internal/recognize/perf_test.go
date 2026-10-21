@@ -40,3 +40,25 @@ func TestRecognizeLargeInputIsFast(t *testing.T) {
 		})
 	}
 }
+
+// A long subject full of numbers must not make the subject echo rule quadratic.
+func TestSubjectEchoLargeSubjectIsFast(t *testing.T) {
+	var subj, body strings.Builder
+	for i := 0; i < 6000; i++ {
+		fmt.Fprintf(&subj, "%06d ", 100000+i)
+		fmt.Fprintf(&body, "%06d\n", 200000+i) // none echoes the subject: the worst case for a scan
+	}
+	chain, err := New(nil, config.RecognizeOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := 500 * time.Millisecond
+	if raceEnabled {
+		limit *= 4
+	}
+	start := time.Now()
+	chain.Recognize(&mailparse.Message{Subject: subj.String(), Text: body.String()})
+	if d := time.Since(start); d > limit {
+		t.Fatalf("Recognize took %s on a %d byte subject, want < %s", d, subj.Len(), limit)
+	}
+}

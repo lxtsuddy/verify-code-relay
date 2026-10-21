@@ -259,22 +259,33 @@ func subjectEcho(t *codeText, digits []span, subjLen int) []span {
 		}
 	}
 	var out []span
+	var echoed map[string]struct{} // values standing alone on a body line; built on first use
 	for _, s := range digits {
 		if s.start >= subjLen {
 			break
 		}
 		v := string(t.rs[s.start:s.end])
+		// Stricter than excludeReason's year check (no date-line condition) on purpose.
 		if y, _ := strconv.Atoi(v); len(v) == 4 && y >= 1900 && y <= 2099 {
 			continue
 		}
 		if excludeReason(codeCand{s, v, v}, t) != "" {
 			continue
 		}
-		for _, b := range digits {
-			if b.start > subjLen && string(t.rs[b.start:b.end]) == v && t.aloneOnLine(b) && excludeReason(codeCand{b, v, v}, t) == "" {
-				out = append(out, s)
-				break
+		if echoed == nil {
+			echoed = map[string]struct{}{}
+			for _, b := range digits {
+				if b.start <= subjLen || !t.aloneOnLine(b) {
+					continue
+				}
+				bv := string(t.rs[b.start:b.end])
+				if _, ok := echoed[bv]; !ok && excludeReason(codeCand{b, bv, bv}, t) == "" {
+					echoed[bv] = struct{}{}
+				}
 			}
+		}
+		if _, ok := echoed[v]; ok {
+			out = append(out, s)
 		}
 	}
 	return out

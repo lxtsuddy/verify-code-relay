@@ -68,6 +68,8 @@ func TestCodeFinder(t *testing.T) {
 		{"subject echo", "Use 123456 to set up recovery email", "Finish setting up:\n123456\nExpires in 24 hours.", "123456"},
 		{"subject echo needs own line", "Use 123456 to sign in", "Your number 123456 was used today.", ""},
 		{"subject echo order word", "您的訂單已出貨：20261021", "出貨通知\n貨運單號\n20261021\n", ""},
+		{"subject echo invoice in subject", "Your invoice is ready: 482913", "Details\n482913\n", ""},
+		{"subject echo shipment in subject", "Use 482913 to track your shipment", "x\n482913\n", ""},
 		{"subject echo orders", "Your orders 48213 shipped", "Package\n48213\n", ""},
 		{"subject echo year", "Annual report 2026", "Highlights\n2026\n", ""},
 		{"subject echo excluded in subject", "Payment $2500 received", "Total\n2500\n", ""},
