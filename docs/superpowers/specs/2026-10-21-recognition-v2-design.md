@@ -220,8 +220,8 @@ CLI `relay test` 與 Web 共用「解析 → 辨識 → 渲染」的邏輯，抽
 | `order-subject-zh` | 主旨與內文都有訂單號 `20261021`，且內文獨佔一行 |
 | `card-last4-zh` | 信用卡消費通知：「您末四碼 1234 的信用卡…」，同段有「請勿將驗證碼告訴他人」 |
 | `newsletter-click-here-en` | 電子報「Click here to read more」 |
-| `author-link-en` | 同網域「Read more」按鈕連到 `https://blog.example.com/author/jane`，內文有「verified」 |
-| `footer-zip-en` | 安全提醒信「We will never ask for your verification code」，200 字內的頁尾有 `Zip: 94043`，沒有驗證連結 |
+| `author-link-en` | 同網域「Read more」按鈕連到 `https://blog.example.com/author/jane`，內文有「verify your own profile」（讓連結入口檢查通過） |
+| `footer-zip-en` | 安全提醒信「We will never ask for your verification code」，頁尾 `Example Inc., 1600 Main Street, Mountain View, CA 94043`，沒有驗證連結 |
 
 > 註：`order-subject-zh` 的主旨寫成「您的訂單已出貨：20261021」（訂單詞與數字相距超過 10 個 rune），專門驗證 §3.3 條件 3。另加 `author-link-en`（反例）：同網域「Read more」按鈕連到 `/author/jane`，內文含「verified」，驗證 §4.3 的 `auth` 錨定與 §4.4 的按鈕條件。
 

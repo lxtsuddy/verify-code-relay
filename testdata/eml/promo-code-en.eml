@@ -1,0 +1,10 @@
+From: Example Shop <deals@shop.example.com>
+To: me@gmail.com
+Subject: 20% off this weekend
+Date: Mon, 19 Oct 2026 08:00:00 +0800
+MIME-Version: 1.0
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+VXNlIHByb21vIGNvZGUgU0FWRTIwIGF0IGNoZWNrb3V0LgpZb3VyIGRpc2NvdW50IGNvZGU6IDg4
+ODgKU2hvcCBub3c6IGh0dHBzOi8vc2hvcC5leGFtcGxlLmNvbS9zYWxlCg==

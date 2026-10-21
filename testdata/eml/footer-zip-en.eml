@@ -1,0 +1,11 @@
+From: Example <security@example.com>
+To: me@gmail.com
+Subject: Security tip
+Date: Mon, 19 Oct 2026 08:00:00 +0800
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PHA+V2Ugd2lsbCBuZXZlciBhc2sgZm9yIHlvdXIgdmVyaWZpY2F0aW9uIGNvZGUgYnkgcGhvbmUg
+b3IgZW1haWwuPC9wPjxwPkV4YW1wbGUgSW5jLiwgMTYwMCBNYWluIFN0cmVldCwgTW91bnRhaW4g
+VmlldywgQ0EgOTQwNDM8L3A+
