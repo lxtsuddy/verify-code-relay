@@ -1,7 +1,7 @@
 # Web 管理介面響應式版面設計規格
 
 - 日期：2026-10-21
-- 狀態：已確認設計（方案 A），待撰寫實作計畫
+- 狀態：已實作（分支 responsive-layout）
 - 前一份規格：`2026-10-20-web-admin-design.md`。技術選擇不變：Go `html/template` 伺服器渲染＋原生 JS，靜態檔以 `embed` 打包，不引入 Node。
 
 ## 1. 問題
