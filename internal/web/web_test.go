@@ -532,3 +532,26 @@ func (s *syncBuf) String() string {
 	defer s.mu.Unlock()
 	return s.b.String()
 }
+
+// Pages declare their width: lists and the overview are wide, forms are narrower.
+func TestPageWidthClass(t *testing.T) {
+	e := newEnv(t, withSample)
+	e.login()
+	for path, want := range map[string]string{
+		"/":                  "main-wide",
+		"/logs":              "main-wide",
+		"/mailboxes":         "main-wide",
+		"/telegram":          "main-wide",
+		"/mailboxes/new":     "main-form",
+		"/mailboxes/gmail":   "main-form",
+		"/rules":             "main-form",
+		"/templates":         "main-form",
+		"/settings":          "main-form",
+		"/settings/versions": "main-form",
+	} {
+		_, body := e.get(path)
+		if !strings.Contains(body, `<main id="main" class="main `+want+`"`) {
+			t.Errorf("%s: want <main> with class %s", path, want)
+		}
+	}
+}

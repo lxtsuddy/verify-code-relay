@@ -85,7 +85,7 @@
         </div>
       </div>
       <ul class="dash-folders" aria-label="{{.DisplayName}} 的資料夾">
-        {{range .Folders}}<li class="dash-folder" data-folder="{{.Name}}"><span class="dash-folder-name mono">{{.Name}}</span><span class="badge {{.Class}}{{if .Live}} badge-live{{end}}">{{.Label}}</span></li>{{end}}
+        {{range .Folders}}<li class="dash-folder" data-folder="{{.Name}}"><span class="dash-folder-name mono" title="{{.Name}}">{{.Name}}</span><span class="badge {{.Class}}{{if .Live}} badge-live{{end}}">{{.Label}}</span></li>{{end}}
       </ul>
       <div class="dash-foot" data-mb-foot{{if not .Note}} hidden{{end}}>
         <p class="dash-note" data-mb-note>{{.Note}}</p>
@@ -113,9 +113,9 @@
     <a class="section-link" href="{{if $d.RecentAll}}/logs{{else}}/logs?kind=hit{{end}}">查看全部紀錄{{template "icon" "arrow-right"}}</a>
   </div>
   <div class="table-wrap" data-recent-wrap{{if not $d.Recent}} hidden{{end}}>
-    <table class="table log-table">
-      <thead><tr><th scope="col">時間</th><th scope="col">信箱</th><th scope="col">主旨與寄件者</th><th scope="col">種類</th><th scope="col">結果</th></tr></thead>
-      <tbody data-recent>{{range $d.Recent}}{{template "log-row" (dict "R" . "Rule" false)}}{{end}}</tbody>
+    <table role="table" class="table log-table">
+      <thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col" class="c-time">時間</th><th role="columnheader" scope="col" class="c-mb">信箱</th><th role="columnheader" scope="col" class="c-msg">主旨與寄件者</th><th role="columnheader" scope="col" class="c-kind">種類</th><th role="columnheader" scope="col" class="c-result">結果</th></tr></thead>
+      <tbody role="rowgroup" data-recent>{{range $d.Recent}}{{template "log-row" (dict "R" . "Rule" false)}}{{end}}</tbody>
     </table>
   </div>
   <p class="quiet-empty" data-recent-empty{{if $d.Recent}} hidden{{end}}>{{template "icon" "inbox"}}<span>{{if $d.RecentAll}}還沒有檢查過的郵件。信箱收到新郵件後，處理結果會出現在這裡。{{else}}還沒有轉發驗證碼或連結。其他檢查過的信在「全部檢查過的信」裡。{{end}}</span></p>

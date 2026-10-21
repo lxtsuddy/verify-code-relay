@@ -367,6 +367,57 @@
     }
   });
 
+  // One-time code cells: the input stays the real field and lies invisible over six cells
+  // that show its digits (see .otp in app.css); the cell where the next digit goes is lit
+  // while the input has focus. Repainted after every change, including the digit filter
+  // above (it runs later, on the document), autofill, form resets and a server error.
+  function otpCells(input) {
+    var box = el("div", "otp" + (input.classList.contains("otp-sm") ? " otp-sm" : ""));
+    var cells = el("div", "otp-cells");
+    cells.setAttribute("aria-hidden", "true");
+    for (var i = 0; i < 6; i++) cells.appendChild(el("span", "otp-cell"));
+    var hadFocus = document.activeElement === input; // moving it would drop an autofocus
+    input.parentNode.insertBefore(box, input);
+    box.appendChild(cells);
+    box.appendChild(input);
+    if (hadFocus) input.focus();
+
+    function paint() {
+      var v = input.value.slice(0, 6);
+      var focused = document.activeElement === input;
+      Array.prototype.forEach.call(cells.children, function (c, i) {
+        c.textContent = v.charAt(i);
+        c.classList.toggle("is-filled", i < v.length);
+        c.classList.toggle("is-active", focused && i === Math.min(v.length, 5));
+      });
+      box.classList.toggle("is-invalid", input.getAttribute("aria-invalid") === "true");
+    }
+    function later() { requestAnimationFrame(paint); }
+    // digits are added and removed at the end, as the cells read; a selection (select all)
+    // is left alone so typing replaces it, and a full code is selected when the field is
+    // entered, so a wrong one is retyped rather than erased digit by digit
+    function toEnd(selectFull) {
+      var n = input.value.length;
+      if (input.selectionStart !== input.selectionEnd) return;
+      if (selectFull && n === 6) input.select();
+      else if (input.selectionStart !== n) input.setSelectionRange(n, n);
+    }
+    function enter() { toEnd(true); }
+    input.addEventListener("input", later);
+    input.addEventListener("change", later);
+    input.addEventListener("focus", function () { enter(); paint(); });
+    input.addEventListener("blur", paint);
+    input.addEventListener("click", enter);
+    input.addEventListener("keyup", function () { toEnd(false); });
+    if (input.form) input.form.addEventListener("reset", later);
+    new MutationObserver(paint).observe(input, { attributes: true, attributeFilter: ["aria-invalid"] });
+    paint();
+  }
+
+  ready(function () {
+    document.querySelectorAll("input.otp-input[data-otp]").forEach(otpCells);
+  });
+
   ready(function () {
     document.querySelectorAll("[data-flash][data-autohide]").forEach(function (f) {
       var ms = parseInt(f.dataset.autohide, 10) || 5000;
@@ -2115,12 +2166,21 @@
     return changed;
   }
 
+  // a cell of the log table; the rows are grids, so the table states its roles (as _logs.html)
+  function logCell(cls) {
+    var td = document.createElement("td");
+    td.setAttribute("role", "cell");
+    td.className = cls;
+    return td;
+  }
+
   function recentRow(r) {
     var tr = document.createElement("tr");
-    var time = el("td", "c-time");
+    tr.setAttribute("role", "row");
+    var time = logCell("c-time");
     if (r.at) time.appendChild(timeEl(r.at));
     tr.appendChild(time);
-    var mb = el("td", "c-mb");
+    var mb = logCell("c-mb");
     var label = r.mailbox_label || r.mailbox;
     var name = mb.appendChild(el("span", "log-mb", label));
     name.title = label;
@@ -2128,16 +2188,18 @@
     var folder = mb.appendChild(el("span", "log-folder mono", r.folder));
     folder.title = r.folder;
     tr.appendChild(mb);
-    var msg = el("td", "c-msg");
+    var msg = logCell("c-msg");
     var subj = el("span", "log-subject", r.subject ? r.subject : null);
-    if (!r.subject) subj.appendChild(el("span", "muted", "（沒有主旨）"));
+    if (r.subject) subj.title = r.subject;
+    else subj.appendChild(el("span", "muted", "（沒有主旨）"));
     msg.appendChild(subj);
-    msg.appendChild(el("span", "log-from mono", r.from));
+    var from = msg.appendChild(el("span", "log-from mono", r.from));
+    from.title = r.from;
     tr.appendChild(msg);
-    var kind = el("td", "c-kind");
+    var kind = logCell("c-kind");
     kind.appendChild(el("span", "tag" + (r.hit ? " tag-hit" : ""), r.kind_label));
     tr.appendChild(kind);
-    var res = el("td", "c-result");
+    var res = logCell("c-result");
     res.appendChild(badge(r.result_class, r.live, r.result_label));
     tr.appendChild(res);
     return tr;
