@@ -70,7 +70,10 @@ func TestParseManyLinksIsFast(t *testing.T) {
 	}
 	limit := 500 * time.Millisecond
 	if raceEnabled {
-		limit *= 4
+		// The race detector slows parsing down 4× and more, unevenly on a shared CI
+		// runner. The bound is only there to catch a quadratic blow-up on 1 MiB of links,
+		// which would be slower by far more than this.
+		limit *= 10
 	}
 	for _, c := range []struct{ name, ctype, body string }{
 		{"bare urls", "text/plain", urls.String()},
