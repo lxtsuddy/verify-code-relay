@@ -177,9 +177,12 @@ type ctlConn struct {
 	// after the client writes a BODY.PEEK[] fetch, so the fetch is in flight.
 	killBody *atomic.Bool
 	frozen   atomic.Bool
-	idles    atomic.Int32 // IDLE commands written by the client
-	noops    atomic.Int32 // NOOP commands written by the client
-	bodies   atomic.Int32 // BODY.PEEK[] fetches written by the client
+	// killed is set when the body fetch is killed: from then on every read fails,
+	// so a reply the server sends before Close lands cannot reach the client.
+	killed atomic.Bool
+	idles  atomic.Int32 // IDLE commands written by the client
+	noops  atomic.Int32 // NOOP commands written by the client
+	bodies atomic.Int32 // BODY.PEEK[] fetches written by the client
 
 	// rewrite, when set, sees every complete line the server sends (CRLF
 	// included, literal contents too) and returns its replacement; nil drops it.
@@ -216,6 +219,9 @@ func (c *ctlConn) Read(p []byte) (int, error) {
 func (c *ctlConn) read(p []byte) (int, error) {
 	for {
 		n, err := c.Conn.Read(p)
+		if c.killed.Load() {
+			return 0, net.ErrClosed
+		}
 		if err != nil || !c.frozen.Load() {
 			return n, err
 		}
@@ -236,6 +242,7 @@ func (c *ctlConn) Write(p []byte) (int, error) {
 		c.bodies.Add(1)
 	}
 	if c.killBody != nil && bytes.Contains(p, []byte("BODY.PEEK[]")) && c.killBody.CompareAndSwap(true, false) {
+		c.killed.Store(true)
 		n, err := c.Conn.Write(p)
 		c.Conn.Close()
 		return n, err
