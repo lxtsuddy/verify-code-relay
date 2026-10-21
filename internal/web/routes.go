@@ -54,6 +54,7 @@ func (s *Server) routes() {
 
 	m.HandleFunc("GET /rules", s.authed(s.getRules))
 	m.HandleFunc("POST /rules", s.authed(s.postRules))
+	m.HandleFunc("POST "+mailTestPath, s.authed(s.postAPIRulesTest))
 	m.HandleFunc("GET /templates", s.authed(s.getTemplates))
 	m.HandleFunc("POST /templates", s.authed(s.postTemplates))
 	m.HandleFunc("POST /api/templates/preview", s.authed(s.postAPITemplatePreview))

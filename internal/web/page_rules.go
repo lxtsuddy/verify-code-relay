@@ -3,9 +3,11 @@ package web
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 
 	"verify-code-relay/internal/config"
@@ -35,11 +37,15 @@ const (
 
 var rulePathRe = regexp.MustCompile(`^rules\[\d+\](\.(name|from|subject|code_regex|link_regex|ignore))?$`)
 
+// mailboxOption is a mailbox the mail test can preview the message for.
+type mailboxOption struct{ Name, Label string }
+
 type rulesData struct {
 	Rules        []config.Rule
 	NewRule      config.Rule // the blank row the page adds from
 	CodeKeywords string      // one per line
 	LinkKeywords string
+	Mailboxes    []mailboxOption // for the mail test, by name
 }
 
 func (s *Server) getRules(w http.ResponseWriter, r *http.Request) {
@@ -56,6 +62,17 @@ func (s *Server) getRules(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) renderRules(w http.ResponseWriter, r *http.Request, status int, errs FieldErrors, d rulesData) {
+	if raw, _, err := runtime.LoadConfig(r.Context(), s.o.Store); err == nil {
+		for _, name := range slices.Sorted(maps.Keys(raw.Mailboxes)) {
+			label := raw.Mailboxes[name].DisplayName
+			if label == "" {
+				label = name
+			}
+			d.Mailboxes = append(d.Mailboxes, mailboxOption{name, label})
+		}
+	} else {
+		s.o.Log.Warn("讀取信箱清單失敗", "err", err)
+	}
 	s.render(w, r, status, "rules", Page{Title: "辨識規則", Nav: "rules", Errors: errs, Data: d})
 }
 
