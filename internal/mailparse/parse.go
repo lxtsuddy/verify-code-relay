@@ -39,7 +39,13 @@ type Message struct {
 	Subject string
 	Date    time.Time
 	Text    string
-	Links   []Link
+	// AltText is the other body when the message has both: the text/plain part when
+	// Text came from text/html. It is empty when there is only one, or both read the same.
+	AltText string
+	// Emphasis lists the parts of Text set apart in the HTML (bold, code, headings,
+	// large or spaced-out type), in rune offsets; nil when Text is not from HTML.
+	Emphasis []Span
+	Links    []Link
 	// Warnings lists non-fatal problems met while reading the body (unreadable
 	// or truncated parts). They carry the part index, content type and decoder
 	// error but no body text; a malformed-header error may quote that header line.
@@ -143,19 +149,26 @@ func Parse(raw []byte) (*Message, error) {
 		}
 	}
 
-	var htmlText string
+	var plainText, htmlText string
 	var htmlLinks []Link
+	var emph []Span
 	if haveHTML {
-		htmlText, htmlLinks = HTMLToText(htmlBody)
+		htmlText, htmlLinks, emph = renderHTML(htmlBody)
 	}
 	if havePlain {
-		m.Text = normalizeText(plain)
+		plainText = normalizeText(plain)
 	}
-	if m.Text == "" {
-		// An empty text/plain part must not hide a populated HTML alternative.
-		m.Text = htmlText
+	if htmlText != "" {
+		// HTML is what the reader sees; the plain part is often a stub ("use an HTML client").
+		m.Text, m.Emphasis = htmlText, emph
+		if plainText != htmlText {
+			m.AltText = plainText
+		}
+	} else {
+		// An empty text/html part must not hide a populated plain alternative.
+		m.Text = plainText
 	}
-	m.Links = mergeLinks(htmlLinks, ExtractURLs(m.Text))
+	m.Links = mergeLinks(htmlLinks, bareLinks(m.Text), bareLinks(m.AltText))
 	if readErr != nil && m.Subject == "" && m.Text == "" && len(m.Links) == 0 {
 		// Nothing left to recognize: surface the failure instead of an empty message.
 		return nil, fmt.Errorf("讀取信件內文：%w", readErr)
@@ -176,8 +189,9 @@ func trimPartialRune(b []byte) []byte {
 	return b
 }
 
-// mergeLinks de-duplicates by URL, preferring entries that have visible text.
-func mergeLinks(htmlLinks []Link, bare []string) []Link {
+// mergeLinks de-duplicates by URL. The first entry of a URL wins (HTML links come
+// first, so their Button and Before stand); a later entry only fills an empty Text.
+func mergeLinks(htmlLinks []Link, bare ...[]Link) []Link {
 	idx := map[string]int{}
 	var out []Link
 	add := func(l Link) {
@@ -193,8 +207,10 @@ func mergeLinks(htmlLinks []Link, bare []string) []Link {
 	for _, l := range htmlLinks {
 		add(l)
 	}
-	for _, u := range bare {
-		add(Link{URL: u})
+	for _, list := range bare {
+		for _, l := range list {
+			add(l)
+		}
 	}
 	return out
 }

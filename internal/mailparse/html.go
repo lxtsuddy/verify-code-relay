@@ -448,3 +448,14 @@ func ExtractURLs(text string) []string {
 	}
 	return out
 }
+
+// bareLinks returns the bare http(s) URLs of text, each with the text before it.
+func bareLinks(text string) []Link {
+	var out []Link
+	for _, m := range urlRe.FindAllStringIndex(text, -1) {
+		if u := strings.TrimRight(text[m[0]:m[1]], ".,;:!?"); u != "" {
+			out = append(out, Link{URL: u, Before: textBefore(text, m[0])})
+		}
+	}
+	return out
+}
