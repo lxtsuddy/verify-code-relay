@@ -13,10 +13,12 @@ import (
 var defaultCodeKeywords = []string{
 	"驗證碼", "验证码", "校驗碼", "校验码", "動態碼", "动态码", "確認碼", "确认码", "安全碼", "安全码",
 	"認證碼", "认证码", "一次性密碼", "一次性密码", "登入碼", "登录码",
+	"安全性代碼", "驗證代碼", "验证代码", "動態密碼", "动态密码",
 	"verification code", "security code", "confirmation code", "authentication code", "login code",
 	"sign-in code", "one-time code", "one-time password", "otp", "passcode", "2fa", "two-factor",
-	"your code", "code is",
-	"認証コード", "確認コード", "ワンタイムパスワード",
+	"your code", "code is", "this code", "the code", "use this code", "enter this code", "code below",
+	"following code", "temporary code", "pin code", "pin",
+	"認証コード", "確認コード", "セキュリティコード", "ワンタイムパスワード",
 }
 
 var (
@@ -32,6 +34,86 @@ var (
 	// "reorder", while CJK words and "#" match anywhere.
 	orderWords = toRuneKeywords([]string{"訂單", "订单", "order", "invoice", "#"})
 )
+
+var (
+	// cardWords and zipWords are matched in the lower-cased text just before a candidate,
+	// white space collapsed to one space: card numbers ("ending in 4821") and postcodes
+	// are not codes.
+	cardWords = []string{"末四碼", "末4碼", "末四码", "末4码", "尾號", "尾号", "ending in", "ends in", "last 4", "last4", "last four"}
+	zipWords  = []string{"郵遞區號", "郵政編碼", "邮编", "邮政编码", "zip", "postal", "postcode"}
+	// streetWords after a number make it a house number ("1600 Amphitheatre Parkway").
+	// Product names ("G Suite") rule out words like suite or floor.
+	streetWords = map[string]bool{"st": true, "street": true, "ave": true, "avenue": true, "rd": true, "road": true,
+		"blvd": true, "boulevard": true, "parkway": true, "pkwy": true}
+	usStates = map[string]bool{}
+)
+
+func init() {
+	for _, s := range strings.Fields("AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY") {
+		usStates[s] = true
+	}
+}
+
+const (
+	// contextRunes is how far before a candidate cardWords and zipWords are looked for;
+	// it covers "last 4 digits 4821".
+	contextRunes = 16
+	// streetScanRunes is how far after a candidate, on its line, a street word is looked for.
+	streetScanRunes = 30
+)
+
+// hasContextWord reports whether s contains one of words; a word starting with an ASCII
+// letter must not follow another ASCII letter ("zip" is not in "unzip").
+func hasContextWord(s string, words []string) bool {
+	for _, w := range words {
+		for i := 0; ; {
+			j := strings.Index(s[i:], w)
+			if j < 0 {
+				break
+			}
+			j += i
+			if !isASCIILetter(rune(w[0])) || j == 0 || !isASCIILetter(rune(s[j-1])) {
+				return true
+			}
+			i = j + 1
+		}
+	}
+	return false
+}
+
+// addressReason returns "地址" when c looks like part of a postal address: a house
+// number (a street word later on its line, or 號/路/街/樓 right after it) or a US ZIP
+// code ("CA 94043").
+func addressReason(c codeCand, t *codeText) string {
+	rs, lower := t.rs, t.lower
+	j := c.end
+	if j < len(rs) && rs[j] == ' ' {
+		j++
+	}
+	if j < len(rs) && strings.ContainsRune("號号路街樓楼", rs[j]) {
+		return "地址"
+	}
+	end := min(len(rs), c.end+streetScanRunes)
+	var word []rune
+	for i := c.end; i <= end; i++ {
+		if i < end && rs[i] != '\n' && (isASCIILetter(lower[i]) || isDigit(lower[i])) {
+			word = append(word, lower[i])
+			continue
+		}
+		if streetWords[string(word)] {
+			return "地址"
+		}
+		word = word[:0]
+		if i < end && rs[i] == '\n' {
+			break
+		}
+	}
+	if len(c.value) == 5 && isAllDigits(c.value) && c.start >= 3 && rs[c.start-1] == ' ' &&
+		usStates[string(rs[c.start-3:c.start-1])] && (c.start == 3 || !unicode.IsLetter(rs[c.start-4])) {
+		return "地址"
+	}
+	return ""
+}
 
 const (
 	codeMaxDistance = 200
@@ -348,5 +430,13 @@ func excludeReason(c codeCand, t *codeText) string {
 			}
 		}
 	}
-	return ""
+	// Spaces are collapsed, not removed, so that hasContextWord can still see word boundaries.
+	ctx := strings.Join(strings.Fields(string(lower[max(0, c.start-contextRunes):c.start])), " ")
+	if hasContextWord(ctx, cardWords) {
+		return "卡號末碼"
+	}
+	if hasContextWord(ctx, zipWords) {
+		return "郵遞區號"
+	}
+	return addressReason(c, t)
 }

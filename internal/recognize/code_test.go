@@ -48,6 +48,22 @@ func TestCodeFinder(t *testing.T) {
 		{"double space is not a phone", "Verification code", "Code  654321  1234-5678", "654321"},
 		{"paren phone excluded", "OTP", "Call (800) 555-0199 now", ""},
 		{"dashed phone excluded", "OTP", "客服 02-2345-6789", ""},
+		{"this code", "Use 123456 to set up recovery email", "Use this code to finish setting up:\n123456\n\nThis code will expire in 24 hours.", "123456"},
+		{"pin", "Your PIN", "PIN: 4821", "4821"},
+		{"pin boundary", "Spinning class", "Room 4821", ""},
+		{"dynamic password zh", "通知", "您的動態密碼為 739201", "739201"},
+		{"card last4 zh", "交易通知", "您末四碼 1234 的信用卡刷卡成功，請勿將驗證碼告訴他人", ""},
+		{"card ending in", "Verification code", "Card ending in 4821 was charged", ""},
+		{"card last 4 digits", "Verification code", "Card (last 4 digits 4821) was charged", ""},
+		{"zip word", "Verification code", "We never ask for your verification code. Zip: 94043", ""},
+		{"unzip is not zip", "Verification code", "Unzip 482913", "482913"},
+		{"postcode zh", "验证码", "邮编 100080", ""},
+		{"street number", "Verification code", "We never ask for your verification code.\nExample Inc., 1600 Main Street, Springfield", ""},
+		{"parkway", "Verification code", "Never share your verification code. 1600 Amphitheatre Parkway", ""},
+		{"1st is not st", "Verification code", "Your verification code 482913 (1st sign-in)", "482913"},
+		{"cjk house number", "驗證碼", "請勿將驗證碼告訴他人。台北市中山路 1200 號", ""},
+		{"us zip", "Verification code", "Never share your verification code. Mountain View, CA 94043", ""},
+		{"by the way is fine", "Verification code", "Your verification code: 48213 by the way", "48213"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
