@@ -940,17 +940,49 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .section-head .section-title { margin: 0; }
 .section-desc { margin-top: 2px; font-size: var(--fs-sm); color: var(--muted); }
 
+/* bots and targets: the list is the grid and every row a subgrid, so the usage and the
+   actions line up from row to row whatever buttons a row has. As with the mailbox list,
+   the tracks stay and the list's own width decides what a row's parts span: stacked
+   below 720px, a column each above. */
 .tg-list {
+  --row-pad: 20px;
+  container: list / inline-size;
+  display: grid;
+  grid-template-columns: calc(38px + var(--row-pad)) minmax(0, 1.2fr) minmax(0, 1fr) auto;
   margin: 0; padding: 0; list-style: none;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1);
 }
+@media (max-width: 640px) {
+  .tg-list { --row-pad: 16px; }
+}
 .tg-item {
-  display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto; gap: 6px 22px; align-items: center;
-  padding: 14px 20px; border-bottom: 1px solid var(--line);
+  display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; gap: 8px 12px; align-items: center;
+  padding: 14px var(--row-pad); border-bottom: 1px solid var(--line);
 }
 .tg-item:last-child { border-bottom: 0; }
 .tg-item:hover { background: #fafcf9; }
-.tg-bot { grid-template-columns: 38px minmax(0, 1.2fr) minmax(0, 1fr) auto; }
+.tg-item > * { grid-column: 1 / -1; }
+.tg-bot > .tg-avatar { grid-column: 1; grid-row: span 3; align-self: start; }
+.tg-bot > :not(.tg-avatar) { grid-column: 2 / -1; }
+
+@container list (min-width: 720px) {
+  .tg-item { gap: 6px 22px; }
+  .tg-bot > .tg-avatar { grid-row: auto; align-self: center; }
+  .tg-bot > .tg-main { grid-column: 2; }
+  .tg-target > .tg-main { grid-column: 1 / 3; }
+  .tg-item > .tg-uses { grid-column: 3; }
+  .tg-item > .tg-actions { grid-column: 4; }
+}
+.tg-avatar { grid-column: 1; grid-row: span 3; align-self: start; }
+.tg-bot > :not(.tg-avatar) { grid-column: 2; }
+
+@container list (min-width: 720px) {
+  .tg-list { grid-template-columns: 38px minmax(0, 1.2fr) minmax(0, 1fr) auto; }
+  .tg-item { gap: 6px 22px; padding: 14px 20px; }
+  .tg-item > *, .tg-bot > :not(.tg-avatar) { grid-column: auto; }
+  .tg-target > .tg-main { grid-column: 1 / 3; }
+  .tg-bot > .tg-avatar { grid-row: auto; align-self: center; }
+}
 .tg-avatar {
   display: grid; place-items: center; width: 38px; height: 38px;
   border-radius: 50%; background: var(--green-50); color: var(--green-700);
@@ -962,8 +994,15 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .tg-handle.is-err { color: var(--red-700); font-weight: 600; }
 .tg-handle .icon { display: inline-block; width: 15px; height: 15px; margin-right: 4px; vertical-align: -2.5px; }
 .tg-uses { font-size: var(--fs-sm); color: var(--ink-2); overflow-wrap: anywhere; }
-.tg-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; }
+.tg-actions { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 8px; }
 .tg-actions form { display: contents; }
+@container list (min-width: 720px) {
+  .tg-actions { justify-content: flex-end; }
+}
+/* buttons in a narrow list (Telegram or mailboxes) keep only their icon */
+@container list (max-width: 599px) {
+  .tg-btn-text { display: none; }
+}
 
 /* bot → chat: the routing line of an address label; the chat id sits in a box like a postcode */
 .route { display: flex; align-items: center; gap: 0; margin-top: 6px; font-size: var(--fs-sm); }
@@ -1036,12 +1075,6 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .spinner { width: 22px; height: 22px; border: 2.5px solid var(--green-200); border-right-color: var(--green-700); border-radius: 50%; animation: spin 0.7s linear infinite; }
 
 @media (max-width: 640px) {
-  .tg-item, .tg-bot { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 14px 16px; }
-  .tg-bot { grid-template-columns: 38px minmax(0, 1fr); column-gap: 12px; }
-  .tg-bot .tg-avatar { align-self: start; }
-  .tg-bot .tg-uses, .tg-bot .tg-actions { grid-column: 2; }
-  .tg-actions { justify-content: flex-start; }
-  .tg-btn-text { display: none; }
   .token-row { grid-template-columns: minmax(0, 1fr); }
   .token-row > .btn { justify-self: start; }
   .chats-hint { margin: 0 16px 12px; }
@@ -1053,14 +1086,31 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 
 /* list: one address label per mailbox — engraved initial, account, folders with their
    live status, and the routing line to the targets */
+/* the list is the grid and every row a subgrid, so the columns (the actions too, however
+   many buttons a row has) line up from row to row. The tracks never change (a container
+   cannot query itself); what changes with the list's own width ("list" container) is
+   which tracks a row's parts span:
+     narrow  (default)   glyph | the account, then folders, route and actions under it
+     medium  (>= 600px)  glyph | account | actions; folders and route under the account
+     wide    (>= 900px)  glyph | account | folders | route | actions
+   A subgrid's padding is taken from its edge tracks, so the glyph track includes it. */
 .mb-list {
+  --row-pad: 20px;
+  container: list / inline-size;
+  display: grid;
+  grid-template-columns: calc(44px + var(--row-pad)) minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 0.7fr) auto;
   margin: 0; padding: 0; list-style: none;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1);
 }
-.mb-item {
-  display: grid; grid-template-columns: 44px minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 0.8fr) auto; gap: 8px 20px; align-items: center;
-  padding: 16px 20px; border-bottom: 1px solid var(--line);
+@media (max-width: 640px) {
+  .mb-list { --row-pad: 16px; }
 }
+.mb-item {
+  display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; gap: 10px 16px; align-items: center;
+  padding: 14px var(--row-pad); border-bottom: 1px solid var(--line);
+}
+.mb-item > .mb-glyph { grid-column: 1; grid-row: span 4; align-self: start; }
+.mb-item > :not(.mb-glyph) { grid-column: 2 / -1; }
 .mb-item:last-child { border-bottom: 0; }
 .mb-item:hover { background: #fafcf9; }
 .mb-glyph {
@@ -1073,15 +1123,36 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .mb-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: var(--fs-lg); font-weight: 700; }
 .mb-link { color: var(--ink); text-decoration: none; overflow-wrap: anywhere; }
 .mb-link:hover { color: var(--green-700); text-decoration: underline; }
-.mb-account { margin-top: 1px; font-size: var(--fs-sm); color: var(--ink-2); overflow-wrap: anywhere; }
+.mb-account { display: flex; flex-wrap: wrap; margin-top: 1px; font-size: var(--fs-sm); color: var(--ink-2); }
+/* an address never breaks mid-word: a long one ends in … (the full one is the title) */
+.mb-user { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mb-host { color: var(--muted); }
-.mb-folders { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; min-width: 0; }
-.mb-folder { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: var(--fs-sm); }
-.mb-folder-name { overflow-wrap: anywhere; color: var(--ink-2); }
-.mb-folder .badge { font-size: var(--fs-xs); line-height: 18px; }
+.mb-folders { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+/* a folder keeps its badge on its line: a long name ends in … (the full name is the title) */
+.mb-folder { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; font-size: var(--fs-sm); }
+.mb-folder-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.mb-folder .badge { flex: none; font-size: var(--fs-xs); line-height: 18px; }
 .mb-route { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--fs-sm); }
 .mb-route .route-line { margin: 0 4px 0 0; width: 22px; }
-.mb-actions { display: flex; justify-content: flex-end; }
+.mb-actions { display: flex; justify-content: flex-start; }
+
+@container list (min-width: 600px) {
+  .mb-item { padding-top: 16px; padding-bottom: 16px; }
+  .mb-item > .mb-glyph { grid-row: span 3; }
+  .mb-item > .mb-main { grid-column: 2 / 5; grid-row: 1; }
+  .mb-item > .mb-actions { grid-column: 5; grid-row: 1; align-self: start; justify-content: flex-end; }
+}
+
+@container list (min-width: 900px) {
+  .mb-item { gap: 8px 20px; }
+  .mb-item > .mb-glyph { grid-row: auto; align-self: center; }
+  .mb-item > .mb-main { grid-column: 2; }
+  /* folder names in one column, their states lined up in the next */
+  .mb-item > .mb-folders { grid-column: 3; display: grid; grid-template-columns: minmax(0, max-content) max-content; gap: 5px 10px; align-items: center; }
+  .mb-folder { display: contents; }
+  .mb-item > .mb-route { grid-column: 4; }
+  .mb-item > .mb-actions { align-self: center; }
+}
 .mb-after { margin-top: 18px; }
 .empty-steps li.is-done::before { content: "✓"; background: var(--green-100); color: var(--green-800); }
 
@@ -1262,7 +1333,6 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .danger-body .card-title { color: var(--red-700); }
 
 @media (max-width: 640px) {
-  .mb-item { padding: 14px 16px; }
   .stamps { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .stamp-face { min-height: 112px; }
   .stamp-glyph { font-size: 40px; }
@@ -1373,14 +1443,6 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .btn-auth:hover { color: var(--amber-ink); border-color: var(--amber); background: #fbeccc; }
 .mb-actions { gap: 8px; flex-wrap: wrap; }
 
-/* the list's five columns need room: below that, folders and route go under the account */
-@media (max-width: 1080px) {
-  .mb-item { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 10px 16px; }
-  .mb-glyph { grid-row: span 3; align-self: start; }
-  .mb-actions { grid-column: 3; grid-row: 1; align-self: start; }
-  .mb-folders { grid-column: 2 / 4; display: flex; flex-wrap: wrap; gap: 6px 16px; }
-  .mb-route { grid-column: 2 / 4; }
-}
 
 .callout p, .flash-text { white-space: pre-line; }
 
@@ -1392,7 +1454,6 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .modal-oauth .modal-foot .btn { flex: 1; }
   .oauth-link { width: 100%; }
   /* with an authorise button the actions need a row of their own */
-  .mb-item:has(.btn-auth) .mb-actions { grid-column: 2 / 4; grid-row: auto; justify-content: flex-start; }
 }
 
 /* ---------- rules and templates ----------

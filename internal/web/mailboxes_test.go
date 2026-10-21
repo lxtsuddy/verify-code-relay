@@ -771,3 +771,13 @@ func TestMailboxOverridePlaceholderBlankWithoutGlobal(t *testing.T) {
 		t.Error("client_id override shows a sample UUID placeholder")
 	}
 }
+
+// A long folder name is clipped in the list; its full name is the title.
+func TestMailboxListFolderTitle(t *testing.T) {
+	e := newEnv(t, withSample)
+	e.login()
+	_, body := e.get("/mailboxes")
+	if !strings.Contains(body, `<span class="mb-folder-name mono" title="INBOX">INBOX</span>`) {
+		t.Error("folder name without title")
+	}
+}

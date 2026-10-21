@@ -17,10 +17,10 @@
     <span class="mb-glyph" aria-hidden="true">{{.Glyph}}</span>
     <div class="mb-main">
       <p class="mb-title"><a class="mb-link" href="/mailboxes/{{.Name}}">{{.DisplayName}}</a>{{if ne .DisplayName .Name}} <span class="tag mono">{{.Name}}</span>{{end}}{{if .NeedsAuth}} <span class="badge badge-warn">尚未授權</span>{{end}}</p>
-      <p class="mb-account"><span class="mono">{{.Username}}</span><span class="mb-host"> · {{.Host}}{{if ne .Port 993}}:{{.Port}}{{end}}</span></p>
+      <p class="mb-account"><span class="mb-user mono" title="{{.Username}}">{{.Username}}</span><span class="mb-host"> · {{.Host}}{{if ne .Port 993}}:{{.Port}}{{end}}</span></p>
     </div>
     <ul class="mb-folders" aria-label="資料夾與狀態">
-      {{range .Folders}}<li class="mb-folder"><span class="mb-folder-name mono">{{.Name}}</span><span class="badge {{.Class}}{{if .Live}} badge-live{{end}}">{{.Label}}</span></li>{{end}}
+      {{range .Folders}}<li class="mb-folder"><span class="mb-folder-name mono" title="{{.Name}}">{{.Name}}</span><span class="badge {{.Class}}{{if .Live}} badge-live{{end}}">{{.Label}}</span></li>{{end}}
     </ul>
     <p class="mb-route" aria-label="轉發到">
       <span class="route-line" aria-hidden="true"></span>
