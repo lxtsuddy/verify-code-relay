@@ -367,6 +367,52 @@
     }
   });
 
+  // One-time code cells: the input stays the real field and lies invisible over six cells
+  // that show its digits (see .otp in app.css); the cell where the next digit goes is lit
+  // while the input has focus. Repainted after every change, including the digit filter
+  // above (it runs later, on the document), autofill, form resets and a server error.
+  function otpCells(input) {
+    var box = el("div", "otp" + (input.classList.contains("otp-sm") ? " otp-sm" : ""));
+    var cells = el("div", "otp-cells");
+    cells.setAttribute("aria-hidden", "true");
+    for (var i = 0; i < 6; i++) cells.appendChild(el("span", "otp-cell"));
+    var hadFocus = document.activeElement === input; // moving it would drop an autofocus
+    input.parentNode.insertBefore(box, input);
+    box.appendChild(cells);
+    box.appendChild(input);
+    if (hadFocus) input.focus();
+
+    function paint() {
+      var v = input.value.slice(0, 6);
+      var focused = document.activeElement === input;
+      Array.prototype.forEach.call(cells.children, function (c, i) {
+        c.textContent = v.charAt(i);
+        c.classList.toggle("is-filled", i < v.length);
+        c.classList.toggle("is-active", focused && i === Math.min(v.length, 5));
+      });
+      box.classList.toggle("is-invalid", input.getAttribute("aria-invalid") === "true");
+    }
+    function later() { requestAnimationFrame(paint); }
+    // digits are always added and removed at the end, like the cells read
+    function toEnd() {
+      var n = input.value.length;
+      if (input.selectionStart !== n || input.selectionEnd !== n) input.setSelectionRange(n, n);
+    }
+    input.addEventListener("input", later);
+    input.addEventListener("change", later);
+    input.addEventListener("focus", function () { toEnd(); paint(); });
+    input.addEventListener("blur", paint);
+    input.addEventListener("click", toEnd);
+    input.addEventListener("keyup", toEnd);
+    if (input.form) input.form.addEventListener("reset", later);
+    new MutationObserver(paint).observe(input, { attributes: true, attributeFilter: ["aria-invalid"] });
+    paint();
+  }
+
+  ready(function () {
+    document.querySelectorAll("input.otp-input[data-otp]").forEach(otpCells);
+  });
+
   ready(function () {
     document.querySelectorAll("[data-flash][data-autohide]").forEach(function (f) {
       var ms = parseInt(f.dataset.autohide, 10) || 5000;
