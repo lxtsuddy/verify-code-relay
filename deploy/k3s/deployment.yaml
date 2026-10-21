@@ -23,7 +23,7 @@ spec:
           args: ["run"]
           env:
             # 選配：K3s 預設 Pod 網段，Traefik 由此網段轉送請求。再加上 Caddy 的 IP
-            # （以逗號分隔），並讓 Traefik 信任 Caddy 的 X-Forwarded-For（見 README），
+            # （以逗號分隔），並讓 Traefik 信任 Caddy 的 X-Forwarded-For（見 docs/deploy.md），
             # 登入通知與紀錄中才會是真實的用戶端 IP。只影響記錄，不影響安全判斷。
             - name: RELAY_TRUSTED_PROXIES
               value: "10.42.0.0/16"

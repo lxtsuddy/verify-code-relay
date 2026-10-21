@@ -8,3 +8,6 @@ backup*.yaml
 *.db
 *.db-*
 /.claude/worktrees/
+# 本機的開發筆記與工具暫存
+/.superpowers/
+/argon_sug.md

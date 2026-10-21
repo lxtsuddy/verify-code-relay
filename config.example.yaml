@@ -24,7 +24,7 @@ defaults:
   alert_after: 10m           # 連續斷線多久才告警
 
 microsoft:                   # 選填：Microsoft 信箱共用的 Azure 應用程式（Web：系統設定 → Microsoft 應用程式）
-  client_id: "00000000-0000-0000-0000-000000000000"   # 見 README「信箱設定 → Microsoft」
+  client_id: "00000000-0000-0000-0000-000000000000"   # 見 docs/configuration.md「Microsoft」
   tenant: consumers          # 個人帳號 consumers；公司帳號 organizations 或租戶 ID；省略為 common
 
 mailboxes:
