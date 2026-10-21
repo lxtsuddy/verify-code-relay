@@ -2145,7 +2145,8 @@
     var root = boardEl();
     if (!root || document.visibilityState === "hidden") return;
     var gen = ++board.gen;
-    fetchJSON("/api/status").then(
+    var scope = root.querySelector("[data-recent-scope]");
+    fetchJSON("/api/status" + (scope && scope.dataset.recentScope === "all" ? "?recent=all" : "")).then(
       function (d) {
         if (gen !== board.gen) return;
         if (!d || d.ok === false || !d.health) {

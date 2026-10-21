@@ -17,8 +17,9 @@ import (
 // refreshes the live parts every 10 seconds from GET /api/status; every label, class and
 // health decision comes from here, so the page and the JSON never disagree.
 
-// recentLimit is the number of forward_log rows on the overview.
-const recentLimit = 20
+// recentLimit is the number of forward_log rows on the overview: the latest forwarded
+// mail, or with "?recent=all" the latest checked mail of any kind.
+const recentLimit = 10
 
 // statusLabels are the watcher states in words (the overview, the mailbox list, the JSON).
 var statusLabels = map[watcher.Status]string{
@@ -217,24 +218,29 @@ type dashboard struct {
 	Cards      []dashMailbox
 	Health     dashHealth
 	Recent     []logView
+	RecentAll  bool // Recent lists every checked mail, not only forwarded mail
 	Watchers   []runtime.WatcherStatus
 	microsoft  map[string]bool
 	HasBots    bool
 	HasTargets bool
 }
 
-func (s *Server) loadDashboard(ctx context.Context, withTokens bool) (*dashboard, error) {
+func (s *Server) loadDashboard(ctx context.Context, withTokens, recentAll bool) (*dashboard, error) {
 	raw, _, err := runtime.LoadConfig(ctx, s.o.Store)
 	if err != nil {
 		return nil, err
 	}
 	snap := s.o.Runtime.Snapshot()
 	d := &dashboard{Applying: snap.Applying, AppliedAt: snap.AppliedAt, Watchers: snap.Watchers, microsoft: map[string]bool{},
-		HasBots: len(raw.Bots) > 0, HasTargets: len(raw.Targets) > 0}
+		HasBots: len(raw.Bots) > 0, HasTargets: len(raw.Targets) > 0, RecentAll: recentAll}
 	if d.Pending, err = s.o.Store.CountOutbox(ctx); err != nil {
 		return nil, err
 	}
-	rows, _, err := s.o.Store.ListLog(ctx, store.LogQuery{Limit: recentLimit})
+	lq := store.LogQuery{Limit: recentLimit}
+	if !recentAll {
+		lq.Kinds = logKindFilters["hit"]
+	}
+	rows, _, err := s.o.Store.ListLog(ctx, lq)
 	if err != nil {
 		return nil, err
 	}
@@ -284,7 +290,7 @@ func dashCard(name string, m *config.Mailbox, status map[[2]string]watcher.Statu
 }
 
 func (s *Server) getDashboard(w http.ResponseWriter, r *http.Request) {
-	d, err := s.loadDashboard(r.Context(), true)
+	d, err := s.loadDashboard(r.Context(), true, r.URL.Query().Get("recent") == "all")
 	if err != nil {
 		s.serverError(w, r, err)
 		return
@@ -358,7 +364,7 @@ func rfc3339(t time.Time) string {
 // getAPIStatus is polled by the overview. It does not count as activity for the
 // session's idle timeout (see loadSession).
 func (s *Server) getAPIStatus(w http.ResponseWriter, r *http.Request) {
-	d, err := s.loadDashboard(r.Context(), false)
+	d, err := s.loadDashboard(r.Context(), false, r.URL.Query().Get("recent") == "all")
 	if err != nil {
 		s.serverError(w, r, err)
 		return

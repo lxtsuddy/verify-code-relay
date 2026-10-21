@@ -8,12 +8,31 @@
   </div>
 </header>
 
+<nav class="log-view" aria-label="顯示範圍">
+  <a class="log-view-item" href="{{$d.AllURL}}"{{if ne $d.Kind "hit"}} aria-current="true"{{end}}>{{template "icon" "logs"}}<span>全部紀錄</span></a>
+  <a class="log-view-item" href="{{$d.HitsURL}}"{{if eq $d.Kind "hit"}} aria-current="true"{{end}}>{{template "icon" "send"}}<span>只看轉發</span></a>
+</nav>
+
 <form class="log-filter" method="get" action="/logs" role="search" aria-label="篩選轉發紀錄">
+  <div class="field log-search">
+    <label class="label" for="f-q">搜尋</label>
+    <div class="log-search-box">
+      {{template "icon" "search"}}
+      <input class="input" id="f-q" name="q" type="search" value="{{$d.Search}}" maxlength="100" placeholder="主旨或寄件者" autocomplete="off" spellcheck="false">
+    </div>
+  </div>
   <div class="field">
     <label class="label" for="f-mailbox">信箱</label>
     <select class="select" id="f-mailbox" name="mailbox">
       <option value="">全部信箱</option>
       {{range $d.Mailboxes}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+  </div>
+  <div class="field">
+    <label class="label" for="f-kind">種類</label>
+    <select class="select" id="f-kind" name="kind">
+      <option value="">全部種類</option>
+      {{range $d.Kinds}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
     </select>
   </div>
   <div class="field">
@@ -23,8 +42,21 @@
       {{range $d.Results}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
     </select>
   </div>
+  <div class="field">
+    <label class="label" for="f-since">時間</label>
+    <select class="select" id="f-since" name="since">
+      <option value="">全部時間</option>
+      {{range $d.Sinces}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+  </div>
+  <div class="field log-size">
+    <label class="label" for="f-size">每頁</label>
+    <select class="select" id="f-size" name="size">
+      {{range $d.Sizes}}<option value="{{.Value}}"{{if .Selected}} selected{{end}}>{{.Label}}</option>{{end}}
+    </select>
+  </div>
   <div class="log-filter-actions">
-    <button type="submit" class="btn">{{template "icon" "logs"}}<span>篩選</span></button>
+    <button type="submit" class="btn">{{template "icon" "search"}}<span>篩選</span></button>
     {{if $d.Filtered}}<a class="btn btn-ghost" href="{{$d.ClearURL}}">{{template "icon" "x"}}<span>清除篩選</span></a>{{end}}
   </div>
 </form>
@@ -39,16 +71,19 @@
 </div>
 {{if gt $d.Pages 1}}
 <nav class="pager" aria-label="分頁">
-  {{if $d.PrevURL}}<a class="btn btn-sm" href="{{$d.PrevURL}}" rel="prev">{{template "icon" "arrow-left"}}<span>較新</span></a>{{else}}<span class="btn btn-sm" aria-disabled="true">{{template "icon" "arrow-left"}}<span>較新</span></span>{{end}}
-  <span class="pager-pos" aria-current="page">第 {{$d.Page}} / {{$d.Pages}} 頁</span>
-  {{if $d.NextURL}}<a class="btn btn-sm" href="{{$d.NextURL}}" rel="next"><span>較舊</span>{{template "icon" "arrow-right"}}</a>{{else}}<span class="btn btn-sm" aria-disabled="true"><span>較舊</span>{{template "icon" "arrow-right"}}</span>{{end}}
+  {{if $d.PrevURL}}<a class="btn btn-sm pager-step" href="{{$d.PrevURL}}" rel="prev">{{template "icon" "arrow-left"}}<span>較新</span></a>{{else}}<span class="btn btn-sm pager-step" aria-disabled="true">{{template "icon" "arrow-left"}}<span>較新</span></span>{{end}}
+  <ol class="pager-pages">
+    {{range $d.PageLinks}}{{if .Gap}}<li class="pager-gap" aria-hidden="true">…</li>{{else if .Current}}<li><a class="pager-num" href="{{.URL}}" aria-current="page">{{.Num}}</a></li>{{else}}<li><a class="pager-num" href="{{.URL}}" aria-label="第 {{.Num}} 頁">{{.Num}}</a></li>{{end}}{{end}}
+  </ol>
+  <span class="pager-pos">第 {{$d.Page}} / {{$d.Pages}} 頁</span>
+  {{if $d.NextURL}}<a class="btn btn-sm pager-step" href="{{$d.NextURL}}" rel="next"><span>較舊</span>{{template "icon" "arrow-right"}}</a>{{else}}<span class="btn btn-sm pager-step" aria-disabled="true"><span>較舊</span>{{template "icon" "arrow-right"}}</span>{{end}}
 </nav>
 {{end}}
 {{else if $d.Filtered}}
 <section class="empty">
   <span class="empty-icon">{{template "icon" "logs"}}</span>
   <h2 class="empty-title">沒有符合條件的紀錄</h2>
-  <p class="empty-text">換個信箱或結果再試，或清除篩選看全部紀錄。</p>
+  <p class="empty-text">換個條件或關鍵字再試，或清除篩選看全部紀錄。</p>
   <a class="btn" href="{{$d.ClearURL}}">{{template "icon" "x"}}<span>清除篩選</span></a>
 </section>
 {{else}}
