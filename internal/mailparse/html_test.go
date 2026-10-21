@@ -78,3 +78,92 @@ func TestExtractURLsFullWidthPunctuation(t *testing.T) {
 		t.Errorf("got %q", got)
 	}
 }
+
+// normalizeLinesRef is normalizeLines as it was before it tracked positions: the
+// position-tracking version must produce exactly the same text.
+func normalizeLinesRef(s string, verbatim []span) string {
+	lines := strings.Split(s, "\n")
+	out := make([]string, 0, len(lines))
+	blank := true
+	off := 0
+	for _, l := range lines {
+		start, end := off, off+len(l)
+		off = end + 1
+		for len(verbatim) > 0 && verbatim[0].end <= start {
+			verbatim = verbatim[1:]
+		}
+		if len(verbatim) > 0 && verbatim[0].start < end {
+			l = strings.TrimRight(l, " \t\r\f\v")
+		} else {
+			l = strings.TrimSpace(spaceRun.ReplaceAllString(l, " "))
+		}
+		if l == "" {
+			if !blank {
+				out = append(out, "")
+			}
+			blank = true
+			continue
+		}
+		out = append(out, l)
+		blank = false
+	}
+	return strings.TrimRight(strings.Join(out, "\n"), "\n")
+}
+
+func TestNormalizeLinesMapMatchesReference(t *testing.T) {
+	cases := []struct {
+		s        string
+		verbatim []span
+	}{
+		{"", nil},
+		{"  a   b  \n\n\n c\t\td \n", nil},
+		{"　全形空白　\n nbsp ", nil},
+		{"a\u0085\nb ", nil},
+		{"bad \xff byte\n\xef\xbf\xbd ok", nil},
+		{"x\n  keep   inner  \ny", []span{{2, 20}}},
+		{"\n\n\nlead\n\n\ntrail\n\n\n", nil},
+		{"中文  字\t\t間\n第二行", nil},
+	}
+	for _, c := range cases {
+		got, pos := normalizeLinesMap(c.s, c.verbatim)
+		if want := normalizeLinesRef(c.s, c.verbatim); got != want {
+			t.Errorf("normalizeLinesMap(%q) = %q, want %q", c.s, got, want)
+		}
+		if len(pos) != len(c.s)+1 {
+			t.Fatalf("len(pos) = %d, want %d", len(pos), len(c.s)+1)
+		}
+		for i := 1; i < len(pos); i++ {
+			if pos[i] < pos[i-1] || pos[i] > len(got) {
+				t.Fatalf("pos not monotonic within [0,%d]: %v", len(got), pos)
+			}
+		}
+	}
+}
+
+func TestRenderHTMLEmphasis(t *testing.T) {
+	cases := []struct {
+		src, text string
+		want      []Span
+	}{
+		{`<p>Your code is <b>123456</b></p>`, "Your code is 123456", []Span{{13, 19}}},
+		{`<p>您的驗證碼為 <strong>482913</strong>。</p>`, "您的驗證碼為 482913。", []Span{{7, 13}}},
+		{`<p>a    b <b>  777777  </b> c</p>`, "a b 777777 c", []Span{{4, 10}}},
+		{`<div style="font-size: 28px">654321</div>`, "654321", []Span{{0, 6}}},
+		{`<table><tr><td style="color:#333;letter-spacing:6px">ABCDEF</td></tr></table>`, "ABCDEF", []Span{{0, 6}}},
+		{`<span style="font-size:12px">111111</span>`, "111111", nil},
+		{`<span style="font-size:1.5em">2</span><span style="font-size:16pt">3</span>`, "23", []Span{{0, 1}, {1, 2}}},
+		{`<p>x</p><h2>
+  Code
+</h2>`, "x\n\nCode", []Span{{3, 7}}},
+		{`<b>   </b>tail`, "tail", nil},
+	}
+	for _, c := range cases {
+		text, _, emph := renderHTML(c.src)
+		if text != c.text {
+			t.Errorf("renderHTML(%q) text = %q, want %q", c.src, text, c.text)
+		}
+		if !reflect.DeepEqual(emph, c.want) {
+			t.Errorf("renderHTML(%q) emphasis = %v, want %v", c.src, emph, c.want)
+		}
+	}
+}

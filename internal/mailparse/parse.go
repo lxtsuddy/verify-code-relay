@@ -20,6 +20,9 @@ type Address struct {
 	Addr string
 }
 
+// Span is a rune range [Start, End) of Message.Text.
+type Span struct{ Start, End int }
+
 type Link struct {
 	URL  string
 	Text string
