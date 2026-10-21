@@ -305,7 +305,9 @@ kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay config i
 
 ## 範本
 
-在 **規則與範本 → 訊息範本** 編輯全域範本，信箱頁的「進階設定」可以為單一信箱覆寫；編輯時可以即時預覽。使用 Go `html/template`（Telegram HTML 格式），郵件內容會自動跳脫。可用變數：`.Code` `.URL` `.Service` `.FromName` `.FromAddr` `.To` `.Subject` `.Mailbox` `.Date` `.Rule`。依結果使用 `code` / `link` / `both` 範本，查找順序：信箱範本 → 全域範本 → 內建。按鈕（複製驗證碼、開啟連結）自動產生。範本只能依序輸出，可用：欄位（含 `.Date.Format "15:04"` 這類方法）、`if`／`else if`／`else`、`with .欄位`、最多兩段的管線（例如 `{{.Subject | html}}`），以及函式 `and` `or` `not` `eq` `ne` `lt` `le` `gt` `ge` `len` `index` `slice` `html` `urlquery` `js` `print` `printf` `println`（每個動作最多 10 個參數；`printf` 的格式必須直接寫在範本裡，寬度與精確度最多 3 位數）。不支援 `range`、`template`、`define`／`block`、變數（`$`）與括號內的子運算。
+在 **規則與範本 → 訊息範本** 編輯全域範本，信箱頁的「進階設定」可以為單一信箱覆寫；編輯時可以即時預覽。使用 Go `html/template`（Telegram HTML 格式），郵件內容會自動跳脫。可用變數：`.Code` `.URL` `.LinkText`（信裡連結的文字，例如「Verify email」）`.Host`（連結網域）`.Service` `.FromName` `.FromAddr` `.To` `.Subject` `.Mailbox` `.Date` `.Rule`。依結果使用 `code` / `link` / `both` 範本，查找順序：信箱範本 → 全域範本 → 內建。
+
+內建範本不印完整網址，改用網域一行（`🌐 github.com`）讓你判斷連結去向，接著分行列出寄件者、收件者（附信箱顯示名稱）與主旨；欄位沒有值的行會省略。按鈕自動產生：「📋 複製驗證碼」，以及以信裡連結文字命名的連結按鈕（例如「🔗 重設密碼」，超過 32 字會截斷；連結沒有文字時顯示「🔗 開啟 網域」）。Telegram 不接受訊息的 HTML、改送純文字時沒有按鈕，連結會以「按鈕文字：網址」附在文末。自訂範本若用了 `{{.URL}}`，照樣印出完整網址。範本只能依序輸出，可用：欄位（含 `.Date.Format "15:04"` 這類方法）、`if`／`else if`／`else`、`with .欄位`、最多兩段的管線（例如 `{{.Subject | html}}`），以及函式 `and` `or` `not` `eq` `ne` `lt` `le` `gt` `ge` `len` `index` `slice` `html` `urlquery` `js` `print` `printf` `println`（每個動作最多 10 個參數；`printf` 的格式必須直接寫在範本裡，寬度與精確度最多 3 位數）。不支援 `range`、`template`、`define`／`block`、變數（`$`）與括號內的子運算。
 
 ## 健康檢查
 
@@ -342,4 +344,4 @@ RELAY_DATA_DIR=./data RELAY_ADMIN_PASSWORD='change-me-at-least-12-chars' ./relay
 - [ ] 落入垃圾郵件匣的驗證信也會轉發（Gmail 需在信箱的資料夾勾選 `[Gmail]/Spam`，並在標籤設定勾選「在 IMAP 中顯示」）。
 - [ ] 備援的命令列授權：`kubectl exec -it … /relay login <信箱>` 授權成功，重新啟動後仍有效。
 - [ ] 在 **規則與範本 → 辨識規則** 的「用信件測試」上傳一封真實驗證信（`.eml` 與貼上原始碼各試一次），結果與 Telegram 預覽符合預期。
-- [ ] `relay test --eml 信件.eml --send <目標>` 實際送出，Telegram 收到的訊息格式與按鈕（複製驗證碼、開啟連結）正常。
+- [ ] `relay test --eml 信件.eml --send <目標>` 實際送出，Telegram 收到的訊息格式與按鈕（複製驗證碼、以連結文字命名的連結按鈕）正常。

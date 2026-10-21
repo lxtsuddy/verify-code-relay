@@ -594,3 +594,22 @@ func TestUnconfirmedIsNotResent(t *testing.T) {
 		t.Errorf("result = %q, want sent", got[id])
 	}
 }
+
+// The plain-text retry sends no buttons, so it carries the link button's URL in its text.
+func TestPlainFallbackKeepsLinkURL(t *testing.T) {
+	d, st, fs, ck, _ := setup(t, &telegram.SendError{Kind: telegram.BadRequest}, nil)
+	_, err := st.RecordMessage(ctx, store.LogEntry{At: ck.t, Mailbox: "g", Folder: "INBOX", UID: 1, Kind: "link", Result: "pending"},
+		[]store.OutboxItem{{Target: "t", Bot: "main", ChatID: 1, Text: "🔗 <b>S</b> 認證連結",
+			ReplyMarkup: `{"inline_keyboard":[[{"text":"🔗 Confirm email","url":"https://x.test/v?t=1"}]]}`,
+			CreatedAt:   ck.t, ExpiresAt: ck.t.Add(15 * time.Minute), NextAttemptAt: ck.t}},
+		store.MailboxState{UIDValidity: 1, LastUID: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.RunOnce(ctx)
+	ck.t = ck.t.Add(time.Second)
+	d.RunOnce(ctx)
+	if len(fs.reqs) != 2 || fs.reqs[1].Text != "🔗 S 認證連結\n🔗 Confirm email：https://x.test/v?t=1" {
+		t.Fatalf("reqs = %+v", fs.reqs)
+	}
+}

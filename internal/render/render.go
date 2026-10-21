@@ -7,9 +7,14 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"net/url"
+	"regexp"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/net/idna"
 
 	"verify-code-relay/internal/config"
 	"verify-code-relay/internal/tglen"
@@ -21,16 +26,21 @@ const (
 	maxHeaderRunes = 1024 // Subject, FromName, FromAddr, To
 	maxNameRunes   = 256  // Service, Mailbox
 
-	maxCopyRunes = 256
-	maxInlineURL = 4000 // UTF-16 units of the escaped URL
-	kindCode     = "code"
-	kindLink     = "link"
-	kindBoth     = "both"
+	maxCopyRunes  = 256
+	maxLabelRunes = 32   // link text on the Telegram button
+	maxInlineURL  = 4000 // UTF-16 units of the escaped URL
+	kindCode      = "code"
+	kindLink      = "link"
+	kindBoth      = "both"
 )
 
 type Data struct {
-	Code     string
-	URL      string
+	Code string
+	URL  string
+	// LinkText is the visible text of the link in the mail ("Verify email"); it labels
+	// the Telegram button. Host is the URL's host name, set by Render.
+	LinkText string
+	Host     string
 	Service  string
 	FromName string
 	FromAddr string
@@ -53,7 +63,8 @@ type Renderer struct {
 	mailbox map[string]tset
 }
 
-var trialData = Data{Code: "123456", URL: "https://example.com/verify?token=abc", Service: "Example",
+var trialData = Data{Code: "123456", URL: "https://example.com/verify?token=abc", LinkText: "Verify",
+	Host: "example.com", Service: "Example",
 	FromName: "Example", FromAddr: "noreply@example.com", To: "me@example.com", Subject: "Subject",
 	Mailbox: "Mailbox", Rule: "builtin:code", Date: time.Unix(0, 0)}
 
@@ -123,6 +134,7 @@ func (r *Renderer) Render(mailbox string, d Data) (Rendered, error) {
 	d.Subject, d.FromName, d.FromAddr, d.To = clamp(d.Subject, maxHeaderRunes), clamp(d.FromName, maxHeaderRunes),
 		clamp(d.FromAddr, maxHeaderRunes), clamp(d.To, maxHeaderRunes)
 	d.Service, d.Mailbox = clamp(d.Service, maxNameRunes), clamp(d.Mailbox, maxNameRunes)
+	d.LinkText, d.Host = clamp(cleanLinkText(d.LinkText), maxNameRunes), hostOf(d.URL)
 	kind := kindCode
 	switch {
 	case d.Code != "" && d.URL != "":
@@ -245,13 +257,76 @@ type copyText struct {
 	Text string `json:"text"`
 }
 
+// hostOf returns the lower-cased host name of an http(s) URL, or "". A host with
+// non-ASCII letters also shows its ASCII (punycode) form, "аpple.com（xn--pple-43d.com）",
+// so a look-alike of a known domain stands out.
+func hostOf(raw string) string {
+	h, a := hostForms(raw)
+	if a != h {
+		return h + "（" + a + "）"
+	}
+	return h
+}
+
+// hostForms returns the lower-cased host name of an http(s) URL and its ASCII (punycode)
+// form, which equals the host when it is ASCII or has no valid ASCII form; "", "" when
+// the URL has none.
+func hostForms(raw string) (host, ascii string) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", ""
+	}
+	h := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	if a, err := idna.Lookup.ToASCII(h); err == nil && a != "" {
+		return h, a
+	}
+	return h, h
+}
+
+// domainTextRe matches link text that is just a domain or a domain and path
+// ("accounts.google.com", "github.com/login"): like a URL, it may differ from the target.
+var domainTextRe = regexp.MustCompile(`^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}(/\S*)?$`)
+
+// cleanLinkText collapses white space and drops invisible format characters (zero-width
+// spaces, direction overrides) from a link's text. Text that is itself a URL is dropped:
+// it names nothing and may differ from where the link goes.
+func cleanLinkText(s string) string {
+	s = strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)), " ")
+	if l := strings.ToLower(s); strings.Contains(l, "://") || strings.HasPrefix(l, "www.") || domainTextRe.MatchString(l) {
+		return ""
+	}
+	return s
+}
+
+// linkLabel is the link button's text: the link's own text from the mail, else the host
+// it opens, else a generic label.
+func linkLabel(d Data) string {
+	switch {
+	case d.LinkText != "":
+		return clamp(d.LinkText, maxLabelRunes)
+	case d.Host != "":
+		// the ASCII form: a cut label must not keep only a look-alike Unicode host
+		_, ascii := hostForms(d.URL)
+		if ascii == "" {
+			ascii = d.Host
+		}
+		return clamp("開啟 "+ascii, maxLabelRunes)
+	}
+	return "開啟連結"
+}
+
 func buttons(d Data) (string, error) {
 	var row []button
 	if n := utf8.RuneCountInString(d.Code); n >= 1 && n <= maxCopyRunes {
 		row = append(row, button{Text: "📋 複製驗證碼", CopyText: &copyText{Text: d.Code}})
 	}
 	if d.URL != "" {
-		row = append(row, button{Text: "🔗 開啟連結", URL: d.URL})
+		row = append(row, button{Text: "🔗 " + linkLabel(d), URL: d.URL})
 	}
 	if len(row) == 0 {
 		return "", nil

@@ -70,7 +70,7 @@ func cmdTest(args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 	res := t.Result
-	fmt.Fprintf(stdout, "規則：%s\n驗證碼：%s\n連結：%s\n服務：%s\n", res.Rule, res.Code, res.URL, res.Service)
+	fmt.Fprintf(stdout, "規則：%s\n驗證碼：%s\n連結：%s\n連結文字：%s\n服務：%s\n", res.Rule, res.Code, res.URL, res.LinkText, res.Service)
 	if err != nil {
 		return fail(stderr, err)
 	}

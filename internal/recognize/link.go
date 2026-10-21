@@ -98,6 +98,12 @@ func (f *linkFinder) containsKeyword(s string) (string, bool) {
 // found in the same message: account-recovery links (recoveryWords) are then left out,
 // as they accompany sign-in codes for when someone else signed in.
 func (f *linkFinder) find(msg *mailparse.Message, tr *Trace, withCode bool) string {
+	return f.pick(msg, tr, withCode).URL
+}
+
+// pick is find returning the whole chosen link (its visible text names the Telegram
+// button); the zero Link when there is none.
+func (f *linkFinder) pick(msg *mailparse.Message, tr *Trace, withCode bool) mailparse.Link {
 	kw, ok := f.containsKeyword(strings.ToLower(string(scanRunes(msg))))
 	if ok {
 		tr.Addf("連結：關鍵字 %q", kw)
@@ -117,14 +123,15 @@ func (f *linkFinder) find(msg *mailparse.Message, tr *Trace, withCode bool) stri
 	}
 	if !ok {
 		tr.Addf("連結：沒有找到連結關鍵字")
-		return ""
+		return mailparse.Link{}
 	}
 	senderLabel := ""
 	if at := strings.LastIndexByte(msg.From.Addr, '@'); at >= 0 {
 		senderLabel = MainLabel(msg.From.Addr[at+1:])
 	}
 	subject := strings.ToLower(msg.Subject)
-	best, bestScore := "", -1
+	var best mailparse.Link
+	bestScore := -1
 	for _, l := range msg.Links {
 		u, err := url.Parse(l.URL)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
@@ -181,14 +188,14 @@ func (f *linkFinder) find(msg *mailparse.Message, tr *Trace, withCode bool) stri
 		}
 		tr.Addf("  連結 %s（文字 %q%s）：分數 %d", l.URL, l.Text, note, score)
 		if score > bestScore {
-			best, bestScore = l.URL, score
+			best, bestScore = l, score
 		}
 	}
-	if best == "" || bestScore < linkThreshold {
+	if best.URL == "" || bestScore < linkThreshold {
 		tr.Addf("連結：沒有分數達到門檻 %d 的連結", linkThreshold)
-		return ""
+		return mailparse.Link{}
 	}
-	tr.Addf("連結：選擇 %s（分數 %d）", best, bestScore)
+	tr.Addf("連結：選擇 %s（分數 %d）", best.URL, bestScore)
 	return best
 }
 

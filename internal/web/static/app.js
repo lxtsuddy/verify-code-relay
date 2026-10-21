@@ -1732,7 +1732,7 @@
     var grid = el("div", "mt-result");
     var detail = el("div", "mt-detail");
     var facts = mtFacts([
-      ["驗證碼", boxed ? "" : res.code], ["連結", res.url], ["服務", res.service], ["判斷依據", ruleLabel(res.rule)]
+      ["驗證碼", boxed ? "" : res.code], ["連結", res.url], ["連結文字", res.link_text], ["服務", res.service], ["判斷依據", ruleLabel(res.rule)]
     ], { "驗證碼": 1, "連結": 1 });
     if (facts.firstChild) detail.appendChild(facts);
 

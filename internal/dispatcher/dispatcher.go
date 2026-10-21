@@ -147,7 +147,7 @@ func (d *Dispatcher) send(ctx context.Context, it store.OutboxItem) {
 	}
 	req := telegram.SendRequest{Token: token, ChatID: it.ChatID, Text: it.Text, HTML: true, ReplyMarkup: it.ReplyMarkup}
 	if it.PlainFallback {
-		req = telegram.SendRequest{Token: token, ChatID: it.ChatID, Text: telegram.PlainText(it.Text)}
+		req = telegram.SendRequest{Token: token, ChatID: it.ChatID, Text: telegram.PlainTextWithLinks(it.Text, it.ReplyMarkup)}
 	}
 	sendCtx, cancel := context.WithTimeout(ctx, sendTimeout)
 	err := d.o.Sender.Send(sendCtx, req)

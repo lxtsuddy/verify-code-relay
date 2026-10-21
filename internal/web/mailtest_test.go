@@ -213,3 +213,30 @@ func TestMailTestScriptChecksSize(t *testing.T) {
 		}
 	}
 }
+
+// The answer names the link's text from the mail, and the preview's button uses it.
+func TestMailTestLinkText(t *testing.T) {
+	e := newEnv(t, nil)
+	e.login()
+	mail := "From: Example <no-reply@example.com>\r\nSubject: Confirm your email\r\nContent-Type: text/html; charset=utf-8\r\n\r\n" +
+		`<p>Please confirm your email address.</p><a href="https://example.com/verify?token=Zx8_kq2LmN0pQr7sTuVwXy">Confirm email</a>` + "\r\n"
+	resp, body := e.postMultipart("/api/rules/test", nil, []byte(mail))
+	var a struct {
+		OK     bool
+		Result struct {
+			Kind     string
+			LinkText string `json:"link_text"`
+		}
+		Preview *struct {
+			HTML    string
+			Buttons []previewButton
+		}
+	}
+	if resp.StatusCode != 200 || json.Unmarshal([]byte(body), &a) != nil || !a.OK {
+		t.Fatalf("= %d %s", resp.StatusCode, body)
+	}
+	if a.Result.Kind != "link" || a.Result.LinkText != "Confirm email" || a.Preview == nil ||
+		len(a.Preview.Buttons) != 1 || a.Preview.Buttons[0].Text != "🔗 Confirm email" || !strings.Contains(a.Preview.HTML, "example.com") {
+		t.Fatalf("answer = %+v %+v", a.Result, a.Preview)
+	}
+}

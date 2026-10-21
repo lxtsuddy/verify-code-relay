@@ -10,7 +10,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
 	"time"
+	"verify-code-relay/internal/tglen"
 )
 
 func TestSendOKRequestShape(t *testing.T) {
@@ -252,5 +254,37 @@ func TestSendContextCancelled(t *testing.T) {
 	}
 	if hit.Load() {
 		t.Error("request reached the server after cancellation")
+	}
+}
+
+// The plain-text retry sends no buttons, so the URLs they held go into the text.
+func TestPlainTextWithLinks(t *testing.T) {
+	markup := `{"inline_keyboard":[[{"text":"📋 複製驗證碼","copy_text":{"text":"1"}},{"text":"🔗 重設密碼","url":"https://x.test/r?a=1&b=2"}]]}`
+	got := PlainTextWithLinks("🔐 <b>S</b>\n<code>1</code>", markup)
+	if want := "🔐 S\n1\n🔗 重設密碼：https://x.test/r?a=1&b=2"; got != want {
+		t.Errorf("got %q\nwant %q", got, want)
+	}
+	// a URL already in the text is not repeated; bad or empty markup adds nothing
+	if got := PlainTextWithLinks("go https://x.test/r", `{"inline_keyboard":[[{"text":"🔗 Go","url":"https://x.test/r"}]]}`); got != "go https://x.test/r" {
+		t.Errorf("got %q", got)
+	}
+	for _, m := range []string{"", "{", `{"inline_keyboard":[]}`} {
+		if got := PlainTextWithLinks("a &amp; b", m); got != "a & b" {
+			t.Errorf("markup %q: got %q", m, got)
+		}
+	}
+}
+
+// The retry text must stay within Telegram's limit: the body is cut to make room for the
+// link lines, and a link line that cannot fit on its own is left out.
+func TestPlainTextWithLinksFitsLimit(t *testing.T) {
+	link := `{"inline_keyboard":[[{"text":"🔗 Go","url":"https://x.test/v"}]]}`
+	got := PlainTextWithLinks(strings.Repeat("a", 5000), link)
+	if tglen.Len(got) > tglen.Max || !strings.HasSuffix(got, "\n🔗 Go：https://x.test/v") {
+		t.Errorf("len %d, tail %q", tglen.Len(got), got[len(got)-30:])
+	}
+	huge := `{"inline_keyboard":[[{"text":"🔗 Go","url":"https://x.test/` + strings.Repeat("b", 4100) + `"}]]}`
+	if got := PlainTextWithLinks("short", huge); got != "short" {
+		t.Errorf("an over-long link line must be left out, got %d units", tglen.Len(got))
 	}
 }

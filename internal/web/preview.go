@@ -29,8 +29,9 @@ import (
 // a stored secret nor a broken stored template can reach the answer.
 
 const (
-	sampleCode = "834291"
-	sampleURL  = "https://github.com/login/device?code=834291"
+	sampleCode     = "834291"
+	sampleURL      = "https://github.com/login/device?code=834291"
+	sampleLinkText = "驗證裝置"
 )
 
 type previewRequest struct {
@@ -61,7 +62,7 @@ func (s *Server) postAPITemplatePreview(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	data := render.Data{
-		Code: sampleCode, URL: sampleURL, Service: "GitHub", FromName: "GitHub", FromAddr: "noreply@github.com",
+		Code: sampleCode, URL: sampleURL, LinkText: sampleLinkText, Service: "GitHub", FromName: "GitHub", FromAddr: "noreply@github.com",
 		To: "me@example.com", Subject: "[GitHub] Please verify your device", Mailbox: "個人 Gmail", Rule: "builtin",
 		Date: s.now(),
 	}

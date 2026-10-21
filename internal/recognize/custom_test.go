@@ -88,3 +88,15 @@ func TestNewRuleFallsThroughToBuiltin(t *testing.T) {
 		t.Fatalf("res = %+v ignore=%v trace=%v", res, ignore, tr.Steps)
 	}
 }
+
+func TestCustomRuleKeepsLinkText(t *testing.T) {
+	c, err := NewCustom([]config.Rule{{Name: "lnk", From: "noreply@example.org", LinkRegex: `^https://example\.org/v`}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, _ := c.Run(&mailparse.Message{From: mailparse.Address{Addr: "noreply@example.org"},
+		Links: []mailparse.Link{{URL: "https://example.org/v?t=1", Text: "Confirm sign-in"}}}, &Trace{})
+	if res == nil || res.URL != "https://example.org/v?t=1" || res.LinkText != "Confirm sign-in" {
+		t.Fatalf("res = %+v", res)
+	}
+}

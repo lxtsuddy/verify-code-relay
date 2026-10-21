@@ -272,3 +272,24 @@ func TestBuiltinCodeSkipsRemedyLink(t *testing.T) {
 		})
 	}
 }
+
+func TestBuiltinKeepsLinkText(t *testing.T) {
+	b := NewBuiltin(configOpts(nil, nil))
+	cases := []struct {
+		name string
+		link mailparse.Link
+		want string
+	}{
+		{"button text", mailparse.Link{URL: "https://example.com/verify?t=abc", Text: "Verify email"}, "Verify email"},
+		{"bare URL has none", mailparse.Link{URL: "https://example.com/verify?t=abc", Before: "Verify your email:\n"}, ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			res, _ := b.Run(&mailparse.Message{From: mailparse.Address{Addr: "noreply@example.com"}, Subject: "Verify your email",
+				Text: "Please verify your email.", Links: []mailparse.Link{c.link}}, &Trace{})
+			if res == nil || res.URL != c.link.URL || res.LinkText != c.want {
+				t.Fatalf("res = %+v", res)
+			}
+		})
+	}
+}

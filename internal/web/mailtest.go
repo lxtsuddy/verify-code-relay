@@ -133,6 +133,7 @@ func mailTestReply(t *pipeline.Trial, renderErr error) map[string]any {
 	result := map[string]any{"kind": t.Kind}
 	if t.Result != nil {
 		result["code"], result["url"], result["service"], result["rule"] = t.Result.Code, t.Result.URL, t.Result.Service, t.Result.Rule
+		result["link_text"] = t.Result.LinkText
 	}
 	out := map[string]any{
 		"ok": true,

@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"verify-code-relay/internal/tglen"
 )
 
 type Client struct {
@@ -159,4 +161,34 @@ var tagRe = regexp.MustCompile(`<[^>]*>`)
 // PlainText converts Telegram HTML to plain text (used when Telegram rejects our HTML).
 func PlainText(htmlText string) string {
 	return html.UnescapeString(tagRe.ReplaceAllString(htmlText, ""))
+}
+
+// PlainTextWithLinks is PlainText for the plain-text retry, which sends no buttons: each
+// URL button of markup (an inline keyboard) not already in the text is appended as
+// "label：URL" on its own line, so the link is not lost.
+func PlainTextWithLinks(htmlText, markup string) string {
+	text := PlainText(htmlText)
+	var kb struct {
+		InlineKeyboard [][]struct {
+			Text string `json:"text"`
+			URL  string `json:"url"`
+		} `json:"inline_keyboard"`
+	}
+	if markup == "" || json.Unmarshal([]byte(markup), &kb) != nil {
+		return text
+	}
+	var tail string
+	for _, row := range kb.InlineKeyboard {
+		for _, b := range row {
+			line := "\n" + b.Text + "：" + b.URL
+			// a line that cannot fit with the text it follows is left out
+			if b.URL != "" && !strings.Contains(text, b.URL) && tglen.Len(tail+line) < tglen.Max {
+				tail += line
+			}
+		}
+	}
+	if tglen.Len(text)+tglen.Len(tail) > tglen.Max {
+		text = tglen.Cut(text, tglen.Max-tglen.Len(tail))
+	}
+	return text + tail
 }

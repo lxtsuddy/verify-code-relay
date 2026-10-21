@@ -16,14 +16,14 @@ func NewBuiltin(opts config.RecognizeOptions) *Builtin {
 
 func (b *Builtin) Run(msg *mailparse.Message, tr *Trace) (*Result, bool) {
 	code := b.code.find(msg, tr)
-	link := b.link.find(msg, tr, code != "")
+	link := b.link.pick(msg, tr, code != "")
 	switch {
-	case code != "" && link != "":
-		return &Result{Code: code, URL: link, Rule: "builtin:code+link"}, false
+	case code != "" && link.URL != "":
+		return &Result{Code: code, URL: link.URL, LinkText: link.Text, Rule: "builtin:code+link"}, false
 	case code != "":
 		return &Result{Code: code, Rule: "builtin:code"}, false
-	case link != "":
-		return &Result{URL: link, Rule: "builtin:link"}, false
+	case link.URL != "":
+		return &Result{URL: link.URL, LinkText: link.Text, Rule: "builtin:link"}, false
 	}
 	return nil, false
 }
