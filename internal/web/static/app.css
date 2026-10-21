@@ -697,8 +697,9 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; margin:
 
 /* ---------- modal ---------- */
 
+/* each kind of dialog sets its own --modal-w; on phones every dialog is a full-width sheet */
 dialog.modal {
-  width: min(520px, calc(100vw - 24px)); max-height: calc(100vh - 48px);
+  width: min(var(--modal-w, 520px), calc(100vw - 24px)); max-height: calc(100vh - 48px);
   padding: 0; border: 0; border-radius: 14px;
   background: var(--surface); color: var(--ink); box-shadow: var(--shadow-2);
 }
@@ -711,6 +712,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px;
   padding: 14px 22px; border-top: 1px solid var(--line); background: var(--surface-2);
 }
+.modal-confirm { --modal-w: 420px; }
 .modal-confirm .modal-body { padding-top: 4px; color: var(--ink-2); white-space: pre-line; }
 
 @media (max-width: 640px) {
@@ -1065,6 +1067,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 }
 
 /* forms in dialogs: the form is the dialog's column */
+.modal-form { --modal-w: 560px; }
 .modal-form > form { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .modal-form .modal-body { padding-top: 14px; }
 .modal-form .modal-body .callout { margin-bottom: 0; }
@@ -1081,6 +1084,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .getme-out .icon { display: inline-block; width: 15px; height: 15px; margin-right: 5px; vertical-align: -2.5px; }
 
 /* chat picker */
+.modal-chats { --modal-w: 540px; }
 .modal-chats .modal-body { padding: 8px 0 0; }
 .chats-hint {
   display: flex; align-items: flex-start; gap: 8px; margin: 0 22px 12px;
@@ -1390,6 +1394,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
    The user code is the hero, in red postcode boxes; once the sign-in is done a postmark
    cancels it like a used stamp, and an expired code turns grey. The time left drains
    along a thin meter (scaled through --left, set from script). */
+.modal-oauth { --modal-w: 540px; }
 .modal-oauth [hidden] { display: none !important; }
 .modal-oauth .modal-body { padding-top: 6px; }
 .modal-oauth .modal-foot { align-items: center; }
