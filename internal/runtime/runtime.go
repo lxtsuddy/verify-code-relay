@@ -336,21 +336,14 @@ func (r *Runtime) newService(b *Built) *service {
 	s := &service{built: b, alerter: alerter, disp: disp, pruner: st, log: log}
 	for _, name := range cfg.SortedMailboxNames() {
 		m := cfg.Mailboxes[name]
-		var targets []pipeline.Target
-		for _, tn := range m.Targets {
-			t := cfg.Targets[tn]
-			targets = append(targets, pipeline.Target{Name: tn, Bot: t.Bot, ChatID: t.ChatID})
-		}
 		var authn auth.Authenticator = auth.Password{Username: m.Username, Password: m.Auth.Password}
 		if m.Auth.Type == "microsoft_oauth" {
 			clientID, tenant := cfg.MicrosoftApp(m)
 			authn = &auth.Microsoft{Mailbox: name, Username: m.Username, ClientID: clientID, Tenant: tenant, Store: st, Log: log}
 		}
-		mb := pipeline.Mailbox{Name: name, DisplayName: m.DisplayName, Username: m.Username, Targets: targets,
-			MaxAge: m.MaxAge.Duration, TTL: m.TTL.Duration}
-		for _, folder := range m.Folders {
+		for _, folder := range m.WatchedFolders() {
 			w := watcher.New(watcher.Config{
-				Mailbox: mb, Folder: folder,
+				Mailbox: mailboxFor(cfg, name, folder), Folder: folder,
 				Dial:      r.opts.Dial(m.Host, m.Port),
 				Auth:      authn,
 				Processor: proc, State: st, Alert: alerter, Log: log,
@@ -360,6 +353,19 @@ func (r *Runtime) newService(b *Built) *service {
 		}
 	}
 	return s
+}
+
+// mailboxFor is mailbox name as the watcher of folder sees it: mail found there goes to
+// the targets the routes give that folder.
+func mailboxFor(cfg *config.Config, name, folder string) pipeline.Mailbox {
+	m := cfg.Mailboxes[name]
+	var targets []pipeline.Target
+	for _, tn := range m.TargetsOf(folder) {
+		t := cfg.Targets[tn]
+		targets = append(targets, pipeline.Target{Name: tn, Bot: t.Bot, ChatID: t.ChatID})
+	}
+	return pipeline.Mailbox{Name: name, DisplayName: m.DisplayName, Username: m.Username, Targets: targets,
+		MaxAge: m.MaxAge.Duration, TTL: m.TTL.Duration}
 }
 
 // start runs the watchers, the dispatcher and the log pruner until ctx is
