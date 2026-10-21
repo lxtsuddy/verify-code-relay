@@ -55,8 +55,8 @@ HTML 轉文字時，以下元素內的文字記為強調：
 
 `Link` 新增：
 
-- `Button bool`：`<a>` 本身或其唯一子元素帶有按鈕樣式——`style` 含 `background`／`background-color`（非 transparent／none）或 `padding`，或 `class`／`role` 含 `btn`／`button`。
-- `Before string`：連結開始位置之前、同一行與上一行的文字，最多 120 個 rune，空白壓縮。用於泛用連結字判斷（§4.4）。
+- `Button bool`：有按鈕樣式。`<a>` 本身：`class`／`role` 含 `btn`／`button`，或有背景色，或 `style` 含 `padding`。`<a>` 的唯一子元素，或以 `<a>` 為唯一子元素的父元素（郵件常把按鈕色放在外層 `<td>`）：`class`／`role` 含 `btn`／`button`，或有背景色。「有背景色」指 `style` 的 `background`／`background-color` 或 `bgcolor` 屬性，且不是 none、transparent、inherit、initial、白色（`#fff`、`#ffffff`、`white`）。
+- `Before string`：連結開始位置之前、同一行的文字，加上再往前最近一個非空白行，最多 120 個 rune，空白壓縮。用於泛用連結字判斷（§4.4）。（段落之間有空行，所以取「最近的非空白行」而不是字面上的上一行。）
 - 連結文字為空且內含 `<img>` 時，`Text` 改用第一個非空的 `alt`。（`<img>` 本身仍不輸出到內文。）
 
 裸網址（純文字中的 URL）沒有 `Button`；`Before` 取該網址在其所在內文中、前面同一行與上一行的文字（規則同上），以支援純文字信「Click the link below to verify:\nhttps://…」。同一 URL 同時有 HTML 連結與裸網址時，`Button`、`Before` 以 HTML 連結為準。
@@ -104,7 +104,7 @@ HTML 轉文字時，以下元素內的文字記為強調：
 
 ### 3.6 新增排除
 
-候選前 12 個 rune 內（小寫、去空白後比對）出現以下詞時排除：
+候選前 16 個 rune 內（小寫、去空白後比對）出現以下詞時排除（16 個 rune 才涵蓋「last 4 digits 1234」）：
 
 - 卡號：`末四碼`、`末4碼`、`末四码`、`末4码`、`尾號`、`尾号`、`endingin`、`endsin`、`last4`、`lastfour`——Trace 原因「卡號末碼」；
 - 郵遞區號：`郵遞區號`、`郵政編碼`、`邮编`、`邮政编码`、`zip`、`postal`、`postcode`——Trace 原因「郵遞區號」。
@@ -138,7 +138,7 @@ HTML 轉文字時，以下元素內的文字記為強調：
 
 ### 4.5 排除
 
-`linkExcludeWords` 加入：`opt-out`、`optout`、`contact`、`view in browser`、`view this email`、`在瀏覽器中檢視`、`在浏览器中查看`、`聯絡我們`、`联系我们`、`幫助`、`帮助`。
+`linkExcludeWords`（比對連結文字與完整網址）加入：`opt-out`、`optout`、`view in browser`、`view this email`、`在瀏覽器中檢視`、`在浏览器中查看`、`聯絡我們`、`联系我们`、`幫助`、`帮助`。`contact` 只比對連結文字與網址路徑（不含查詢字串），因為驗證網址的參數常帶收件地址，例如 `?email=contact%40company.com`。
 
 圖片副檔名排除擴充為靜態資源：`.png .jpg .jpeg .gif .webp .svg .bmp .ico .css .js .pdf`（Trace 原因「靜態資源」）。
 
@@ -178,7 +178,7 @@ HTML 轉文字時，以下元素內的文字記為強調：
 
 - 需登入（`authed`），沿用 Origin／Sec-Fetch-Site 檢查。
 - 這個路由的請求本文上限放寬為 6 MiB（全域 1 MiB）；信件原始碼超過 5 MiB（`pipeline.MaxMessageSize`）時回「信件超過 5 MiB，實際運作時也會略過不辨識」。
-- 信件只在記憶體中處理：不寫資料庫、不寫檔、不寫日誌。注意 Go 的 `ParseMultipartForm(maxMemory)` 會把超過 `maxMemory` 的部分寫到暫存檔——必須用 `r.MultipartReader()` 逐一讀取各部分到記憶體（每部分各自設上限），不可使用 `ParseMultipartForm`／`FormFile`；Trace 含驗證碼與連結，**不得**出現在任何 log。錯誤日誌只記錯誤類型，不記內容。
+- 信件只在記憶體中處理：不寫資料庫、不寫檔、不寫日誌。Go 的 `ParseMultipartForm(maxMemory)` 只在檔案部分合計超過 `maxMemory` 時才寫暫存檔；這個路由的請求本文上限（6 MiB）遠小於使用的 `maxMemory`（32 MiB），所以所有部分都留在記憶體。實作必須維持「本文上限 < maxMemory」，並以註解說明這個不變量；Trace 含驗證碼與連結，**不得**出現在任何 log。錯誤日誌只記錯誤類型，不記內容。
 - 不提供實際發送（CLI `relay test --send` 保留）。
 - 自訂規則的正規表示式由使用者輸入：沿用 Go `regexp`（RE2，線性時間），無回溯爆炸風險。
 
