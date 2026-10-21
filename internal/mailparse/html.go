@@ -86,10 +86,16 @@ func renderHTML(src string) (string, []Link, []Span) {
 	}
 	var b strings.Builder
 	var links []Link
-	var emph []span // byte spans of b
-	pre := 0        // depth of enclosing <pre> elements; whitespace is kept verbatim inside them
+	seen := map[string]int{} // index in links of each URL
+	var emph []span          // byte spans of b
+	pre := 0                 // depth of enclosing <pre> elements; whitespace is kept verbatim inside them
 	var verbatim []span
-	var linkAt []int // byte offset in b where each link starts
+	var linkAt, lineAt []int // byte offsets in b where each link, and its line, start
+	line := 0                // byte offset in b where the current line starts
+	newline := func() {
+		b.WriteByte('\n')
+		line = b.Len()
+	}
 	var walk func(n *html.Node)
 	walk = func(n *html.Node) {
 		if n.Type == html.ElementNode {
@@ -97,7 +103,7 @@ func renderHTML(src string) (string, []Link, []Span) {
 				return
 			}
 			if n.DataAtom == atom.Br {
-				b.WriteByte('\n')
+				newline()
 				return
 			}
 			if emphasized(n) {
@@ -109,24 +115,33 @@ func renderHTML(src string) (string, []Link, []Span) {
 				defer func() { pre-- }()
 			}
 			if blockAtoms[n.DataAtom] {
-				b.WriteByte('\n')
+				newline()
 			}
 			if n.DataAtom == atom.Td || n.DataAtom == atom.Th {
 				b.WriteByte(' ')
 			}
 			if n.DataAtom == atom.A {
-				start := b.Len()
+				start, startLine := b.Len(), line
 				for c := n.FirstChild; c != nil; c = c.NextSibling {
 					walk(c)
 				}
 				href := strings.TrimSpace(attr(n, "href"))
-				if isHTTP(href) {
-					text := collapseSpaces(b.String()[start:])
-					if text == "" {
-						text = imgAlt(n)
+				if !isHTTP(href) {
+					return
+				}
+				text := collapseSpaces(b.String()[start:])
+				if text == "" {
+					text = imgAlt(n)
+				}
+				// The first link to a URL stands (as in mergeLinks); a later one only fills an empty text.
+				if i, ok := seen[href]; ok {
+					if links[i].Text == "" {
+						links[i].Text = text
 					}
+				} else if len(links) < maxLinks {
+					seen[href] = len(links)
 					links = append(links, Link{URL: href, Text: text, Button: isButton(n)})
-					linkAt = append(linkAt, start)
+					linkAt, lineAt = append(linkAt, start), append(lineAt, startLine)
 				}
 				return
 			}
@@ -139,29 +154,56 @@ func renderHTML(src string) (string, []Link, []Span) {
 				verbatim = append(verbatim, span{b.Len(), b.Len() + len(s)})
 			}
 			b.WriteString(s)
+			if i := strings.LastIndexByte(s, '\n'); i >= 0 {
+				line = b.Len() - len(s) + i + 1
+			}
 		}
 		for c := n.FirstChild; c != nil; c = c.NextSibling {
 			walk(c)
 		}
 		if n.Type == html.ElementNode && blockAtoms[n.DataAtom] {
-			b.WriteByte('\n')
+			newline()
 		}
 	}
 	walk(doc)
 	text, pos := normalizeLinesMap(b.String(), verbatim)
 	for i := range links {
-		links[i].Before = textBefore(text, pos[linkAt[i]])
+		links[i].Before = textBefore(text, linkOffset(text, pos, lineAt[i], linkAt[i]))
 	}
 	return text, links, runeSpans(text, emph, pos)
 }
 
-const beforeRunes = 120
+// linkOffset maps the start of a link, at byte start of a line starting at byte line of
+// the text before normalisation, to text (pos as returned by normalizeLinesMap). Usually
+// that is pos[start]; but when nothing after start is kept on its line (an empty link
+// ending a paragraph), pos[start] is on the next line, so the end of the link's own
+// line is taken instead — unless nothing before start is kept on it either.
+func linkOffset(text string, pos []int32, line, start int) int {
+	o := int(pos[start])
+	if int(pos[line]) < o {
+		// Kept text before the link on its line: o is either inside that line (no
+		// newline before it) or past its end and any blank line.
+		return len(strings.TrimRight(text[:o], "\n"))
+	}
+	return o
+}
+
+const (
+	beforeRunes = 120
+	// beforeWindow is how many bytes before a link textBefore looks at.
+	beforeWindow = 1 << 10
+)
 
 // textBefore returns the text before byte offset off of text as "previous line\nsame
 // line": the same line runs from the line start to off, the previous line is the nearest
-// non-blank line above it. Each is space-collapsed and cut to its last 120 runes.
+// non-blank line above it. Each is space-collapsed and cut to its last 120 runes. Only
+// the beforeWindow bytes before off are read, starting on a rune boundary.
 func textBefore(text string, off int) string {
-	head := text[max(0, off-4096):off]
+	lo := max(0, off-beforeWindow)
+	for lo < off && !utf8.RuneStart(text[lo]) {
+		lo++
+	}
+	head := text[lo:off]
 	i := strings.LastIndexByte(head, '\n')
 	cur, prev := head[i+1:], ""
 	for rest := head[:max(i, 0)]; i >= 0; {
@@ -301,9 +343,10 @@ func normalizeLines(s string, verbatim []span) string {
 
 // normalizeLinesMap is normalizeLines that also maps positions: for every byte offset i
 // of s (0..len(s)), pos[i] is the offset in the result of the first byte kept from s[i:],
-// or len(result) when nothing after i is kept.
-func normalizeLinesMap(s string, verbatim []span) (string, []int) {
-	pos := make([]int, len(s)+1)
+// or len(result) when nothing after i is kept. Offsets are int32 to halve the map
+// (bodies are capped at maxPartBytes).
+func normalizeLinesMap(s string, verbatim []span) (string, []int32) {
+	pos := make([]int32, len(s)+1)
 	return normalize(s, verbatim, pos), pos
 }
 
@@ -315,7 +358,7 @@ const lineSpaces = " \t\r\f\v"
 // normalize implements normalizeLines, filling pos as normalizeLinesMap describes when
 // it is not nil. It streams: kept bytes go straight to the result, so the cost is the
 // result plus pos, whatever the line lengths.
-func normalize(s string, verbatim []span, pos []int) string {
+func normalize(s string, verbatim []span, pos []int32) string {
 	for i := range pos {
 		pos[i] = -1
 	}
@@ -366,7 +409,7 @@ func normalize(s string, verbatim []span, pos []int) string {
 			if !keep && strings.IndexByte(lineSpaces, c) >= 0 {
 				if !run {
 					if pos != nil {
-						pos[end-len(l)+i] = b.Len()
+						pos[end-len(l)+i] = int32(b.Len())
 					}
 					b.WriteByte(' ')
 				}
@@ -375,16 +418,16 @@ func normalize(s string, verbatim []span, pos []int) string {
 			}
 			run = false
 			if pos != nil {
-				pos[end-len(l)+i] = b.Len()
+				pos[end-len(l)+i] = int32(b.Len())
 			}
 			b.WriteByte(c)
 		}
 	}
 	// Lines are already trimmed and never start blank; TrimSpace would eat a <pre> indent.
 	text := strings.TrimRight(b.String(), "\n")
-	next := len(text)
+	next := int32(len(text))
 	for i := len(pos) - 1; i >= 0; i-- {
-		if pos[i] >= 0 && pos[i] < len(text) {
+		if pos[i] >= 0 && pos[i] < int32(len(text)) {
 			next = pos[i]
 		}
 		pos[i] = next
@@ -394,10 +437,10 @@ func normalize(s string, verbatim []span, pos []int) string {
 
 // runeSpans maps byte spans of the text before normalisation to rune spans of text
 // (pos as returned by normalizeLinesMap), trimmed of white space; empty ones are dropped.
-func runeSpans(text string, raw []span, pos []int) []Span {
+func runeSpans(text string, raw []span, pos []int32) []Span {
 	var bs []span
 	for _, sp := range raw {
-		s, e := pos[sp.start], pos[sp.end]
+		s, e := int(pos[sp.start]), int(pos[sp.end])
 		for s < e && (text[s] == ' ' || text[s] == '\n') {
 			s++
 		}
@@ -447,12 +490,21 @@ func ExtractURLs(text string) []string {
 	return out
 }
 
-// bareLinks returns the bare http(s) URLs of text, each with the text before it.
+// bareLinks returns the distinct bare http(s) URLs of text, at most maxLinks, each with
+// the text before its first occurrence.
 func bareLinks(text string) []Link {
 	var out []Link
-	for _, m := range urlRe.FindAllStringIndex(text, -1) {
-		if u := strings.TrimRight(text[m[0]:m[1]], ".,;:!?"); u != "" {
-			out = append(out, Link{URL: u, Before: textBefore(text, m[0])})
+	seen := map[string]bool{}
+	for i := 0; len(out) < maxLinks; {
+		m := urlRe.FindStringIndex(text[i:])
+		if m == nil {
+			break
+		}
+		start, end := i+m[0], i+m[1]
+		i = end
+		if u := strings.TrimRight(text[start:end], ".,;:!?"); u != "" && !seen[u] {
+			seen[u] = true
+			out = append(out, Link{URL: u, Before: textBefore(text, start)})
 		}
 	}
 	return out

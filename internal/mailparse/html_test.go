@@ -1,6 +1,7 @@
 package mailparse
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -140,7 +141,7 @@ func TestNormalizeLinesMapMatchesReference(t *testing.T) {
 			t.Fatalf("len(pos) = %d, want %d", len(pos), len(c.s)+1)
 		}
 		for i := 1; i < len(pos); i++ {
-			if pos[i] < pos[i-1] || pos[i] > len(got) {
+			if pos[i] < pos[i-1] || int(pos[i]) > len(got) {
 				t.Fatalf("pos not monotonic within [0,%d]: %v", len(got), pos)
 			}
 		}
@@ -150,7 +151,7 @@ func TestNormalizeLinesMapMatchesReference(t *testing.T) {
 func TestNormalizeLinesMapPositions(t *testing.T) {
 	// "a b\n\nc": a collapsed run maps to its single space, dropped bytes to the next kept one.
 	text, pos := normalizeLinesMap("a  b\n\n c", nil)
-	if want := []int{0, 1, 2, 2, 5, 5, 5, 5, 6}; text != "a b\n\nc" || !reflect.DeepEqual(pos, want) {
+	if want := []int32{0, 1, 2, 2, 5, 5, 5, 5, 6}; text != "a b\n\nc" || !reflect.DeepEqual(pos, want) {
 		t.Errorf("got %q %v, want %v", text, pos, want)
 	}
 }
@@ -212,6 +213,13 @@ func TestRenderHTMLLinkDetails(t *testing.T) {
 			Link{URL: "https://x.test/v", Text: "Click here", Before: "Please verify your email by clicking the link below.\n"}},
 		{"before: same line", `<p>Thanks.</p><p>To finish,   <a href="https://x.test/v">click here</a></p>`,
 			Link{URL: "https://x.test/v", Text: "click here", Before: "Thanks.\nTo finish,"}},
+		{"before: empty link ending its line", `<p>Intro</p><p>To verify, open <a href="https://x.test/v"></a></p><p>Thanks</p>`,
+			Link{URL: "https://x.test/v", Before: "Intro\nTo verify, open"}},
+		{"before: empty link alone on its line", `<p>To verify, open:</p><p><a href="https://x.test/v"> </a></p><p>Thanks</p>`,
+			Link{URL: "https://x.test/v", Before: "To verify, open:\n"}},
+		{"before: empty link ending a <pre> line", `<pre>Verify at <a href="https://x.test/v"></a>
+next</pre>`,
+			Link{URL: "https://x.test/v", Before: "\nVerify at"}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -220,6 +228,57 @@ func TestRenderHTMLLinkDetails(t *testing.T) {
 				t.Errorf("links = %+v, want [%+v]", links, c.want)
 			}
 		})
+	}
+}
+
+func TestRenderHTMLDuplicateLinks(t *testing.T) {
+	_, links, _ := renderHTML(`<p>First <a href="https://x.test/v"><img src="a.png"></a></p>` +
+		`<p>Second <a href="https://x.test/v" class="btn">Verify</a> <a href="https://x.test/w">Other</a></p>`)
+	want := []Link{
+		{URL: "https://x.test/v", Text: "Verify", Before: "\nFirst"},
+		{URL: "https://x.test/w", Text: "Other", Before: "First\nSecond Verify"},
+	}
+	if !reflect.DeepEqual(links, want) {
+		t.Errorf("links = %+v, want %+v", links, want)
+	}
+}
+
+func TestLinksAreCapped(t *testing.T) {
+	var plain, page strings.Builder
+	for i := 0; i < maxLinks+100; i++ {
+		fmt.Fprintf(&plain, "https://x.test/%d\n", i)
+		fmt.Fprintf(&page, `<a href="https://y.test/%d">%d</a>`, i, i)
+	}
+	if got := len(bareLinks(plain.String())); got != maxLinks {
+		t.Errorf("bareLinks kept %d, want %d", got, maxLinks)
+	}
+	if _, links, _ := renderHTML(page.String()); len(links) != maxLinks {
+		t.Errorf("renderHTML kept %d links, want %d", len(links), maxLinks)
+	}
+	var both []Link
+	for i := 0; i < maxLinks; i++ {
+		both = append(both, Link{URL: fmt.Sprintf("https://z.test/%d", i)})
+	}
+	if got := len(mergeLinks(both, bareLinks(plain.String()))); got != maxLinks {
+		t.Errorf("mergeLinks kept %d, want %d", got, maxLinks)
+	}
+}
+
+func TestBareLinksDuplicateKeepsFirst(t *testing.T) {
+	got := bareLinks("Verify here:\nhttps://x.test/v\nor again https://x.test/v")
+	if want := []Link{{URL: "https://x.test/v", Before: "Verify here:\n"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestTextBeforeWindowStartsOnARune(t *testing.T) {
+	// Whatever the window size, some line lengths put its edge inside a rune of the line above.
+	prev := "x" + strings.Repeat("驗", 2000) + "\n"
+	for n := 700; n < 4200; n++ {
+		text := prev + strings.Repeat("a", n)
+		if got := textBefore(text, len(text)); strings.ContainsRune(got, utf8.RuneError) {
+			t.Fatalf("textBefore split a rune (line of %d bytes): %q", n, got)
+		}
 	}
 }
 

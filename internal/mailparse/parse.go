@@ -189,8 +189,13 @@ func trimPartialRune(b []byte) []byte {
 	return b
 }
 
-// mergeLinks de-duplicates by URL. The first entry of a URL wins (HTML links come
-// first, so their Button and Before stand); a later entry only fills an empty Text.
+// maxLinks caps the distinct links kept per message (and per source before merging).
+// Verification mail has a handful; the cap bounds the work on a message made of URLs.
+const maxLinks = 500
+
+// mergeLinks de-duplicates by URL and keeps at most maxLinks. The first entry of a URL
+// wins (HTML links come first, so their Button and Before stand); a later entry only
+// fills an empty Text.
 func mergeLinks(htmlLinks []Link, bare ...[]Link) []Link {
 	idx := map[string]int{}
 	var out []Link
@@ -201,8 +206,10 @@ func mergeLinks(htmlLinks []Link, bare ...[]Link) []Link {
 			}
 			return
 		}
-		idx[l.URL] = len(out)
-		out = append(out, l)
+		if len(out) < maxLinks {
+			idx[l.URL] = len(out)
+			out = append(out, l)
+		}
 	}
 	for _, l := range htmlLinks {
 		add(l)
