@@ -568,3 +568,25 @@ func TestSettingsMicrosoftAppGroupsByDependence(t *testing.T) {
 		}
 	}
 }
+
+// Without a global client_id, mailboxes with their own client_id but a blank tenant still
+// follow the default tenant: changing it is accepted, asks first and clears their tokens.
+func TestSettingsMicrosoftDefaultTenantWithoutGlobalClient(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) {
+		c.Mailboxes["alpha"] = &config.Mailbox{Host: "outlook.office365.com", Username: "a@outlook.com",
+			Auth: config.Auth{Type: "microsoft_oauth", ClientID: "own-a"}, Targets: []string{"me"}}
+	})
+	e.login()
+	ctx := context.Background()
+	e.st.SaveOAuthToken(ctx, "alpha", store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)})
+	if _, body := e.get("/settings"); !strings.Contains(body, `data-confirm-tenant="將清除 1 個信箱的 Microsoft 授權，需要重新授權：alpha"`) {
+		t.Errorf("tenant confirmation missing:\n%s", confirmAttrs(body))
+	}
+	resp, _ := e.postForm("/settings/microsoft", url.Values{"ms_client_id": {""}, "ms_tenant": {"consumers"}})
+	if resp.StatusCode != 303 || !strings.Contains(e.flash(resp), "清除了信箱 alpha") {
+		t.Fatalf("save = %d %q", resp.StatusCode, e.flash(resp))
+	}
+	if _, ok, _ := e.st.GetOAuthToken(ctx, "alpha"); ok {
+		t.Error("token kept although the default tenant changed")
+	}
+}
