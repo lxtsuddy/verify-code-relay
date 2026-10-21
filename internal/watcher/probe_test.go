@@ -14,7 +14,7 @@ import (
 	"github.com/emersion/go-imap/v2/imapserver"
 	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
 
-	"verify-code-relay/internal/auth"
+	"github.com/lxtsuddy/verify-code-relay/internal/auth"
 )
 
 // noselectSession adds a \Noselect folder (like Gmail's "[Gmail]") to every LIST.

@@ -18,7 +18,7 @@ import (
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 
-	"verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
 )
 
 type memTokens struct {

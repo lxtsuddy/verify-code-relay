@@ -13,8 +13,8 @@ import (
 	"strings"
 	"testing"
 
-	"verify-code-relay/internal/pipeline"
-	"verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/pipeline"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
 )
 
 const recoveryMail = "From: Google <noreply@google.com>\r\nTo: bar@outlook.com\r\nSubject: Use 123456 to set up recovery email\r\n" +

@@ -3,7 +3,7 @@ package pipeline
 import (
 	"testing"
 
-	"verify-code-relay/internal/mailparse"
+	"github.com/lxtsuddy/verify-code-relay/internal/mailparse"
 )
 
 func TestRecipient(t *testing.T) {

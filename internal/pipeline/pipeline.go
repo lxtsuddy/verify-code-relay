@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"verify-code-relay/internal/mailparse"
-	"verify-code-relay/internal/recognize"
-	"verify-code-relay/internal/render"
-	"verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/mailparse"
+	"github.com/lxtsuddy/verify-code-relay/internal/recognize"
+	"github.com/lxtsuddy/verify-code-relay/internal/render"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
 )
 
 const MaxMessageSize = 5 << 20

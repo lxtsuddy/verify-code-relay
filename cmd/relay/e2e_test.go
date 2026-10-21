@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/store"
-	"verify-code-relay/internal/telegram"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/telegram"
 )
 
 // TestEndToEnd wires the real components the way `relay run` does — config,

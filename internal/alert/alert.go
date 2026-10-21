@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"verify-code-relay/internal/store"
-	"verify-code-relay/internal/tglen"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/tglen"
 )
 
 // Enqueuer stores an outgoing message; *store.Store implements it.

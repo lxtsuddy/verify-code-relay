@@ -10,9 +10,9 @@ import (
 	"slices"
 	"strings"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/render"
-	"verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/render"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
 )
 
 // Rules page: the ordered custom rules and the extra recognition keywords, saved together.

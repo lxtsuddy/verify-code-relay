@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/tglen"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/tglen"
 )
 
 func cfgWith(global config.Templates, perMailbox map[string]config.Templates) *config.Config {

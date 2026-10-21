@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
 )
 
 // Meta describes who saved a config version and why.

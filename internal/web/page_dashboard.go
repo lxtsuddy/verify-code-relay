@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/store"
-	"verify-code-relay/internal/watcher"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/watcher"
 )
 
 // The overview: system health, one card per mailbox with its folders' states, the

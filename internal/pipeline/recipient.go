@@ -3,7 +3,7 @@ package pipeline
 import (
 	"strings"
 
-	"verify-code-relay/internal/mailparse"
+	"github.com/lxtsuddy/verify-code-relay/internal/mailparse"
 )
 
 func splitAddr(a string) (local, domain string) {

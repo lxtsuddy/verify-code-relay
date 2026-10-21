@@ -10,10 +10,10 @@ import (
 
 	xhtml "golang.org/x/net/html"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/render"
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/tglen"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/render"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/tglen"
 )
 
 // Template preview: POST /api/templates/preview {"kind":"code|link|both","template":"…",

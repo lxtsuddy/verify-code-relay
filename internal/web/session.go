@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"verify-code-relay/internal/store"
-	"verify-code-relay/internal/websec"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/websec"
 )
 
 const sessionCookie = "__Host-relay_session"

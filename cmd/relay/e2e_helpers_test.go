@@ -19,8 +19,8 @@ import (
 	"github.com/emersion/go-imap/v2/imapserver"
 	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
 
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/watcher"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/watcher"
 )
 
 // Shared helpers for the end-to-end tests: an in-memory IMAP server whose client

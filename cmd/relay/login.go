@@ -8,7 +8,7 @@ import (
 	"os"
 	"os/signal"
 
-	"verify-code-relay/internal/auth"
+	"github.com/lxtsuddy/verify-code-relay/internal/auth"
 )
 
 func cmdLogin(args []string, stdout, stderr io.Writer) int {

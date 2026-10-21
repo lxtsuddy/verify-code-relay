@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"verify-code-relay/internal/tglen"
+	"github.com/lxtsuddy/verify-code-relay/internal/tglen"
 )
 
 type Client struct {

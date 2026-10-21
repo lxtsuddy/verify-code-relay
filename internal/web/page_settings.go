@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/store"
-	"verify-code-relay/internal/websec"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/websec"
 )
 
 // durationField is one of the five defaults on the settings form.

@@ -3,9 +3,9 @@ package pipeline
 import (
 	"fmt"
 
-	"verify-code-relay/internal/mailparse"
-	"verify-code-relay/internal/recognize"
-	"verify-code-relay/internal/render"
+	"github.com/lxtsuddy/verify-code-relay/internal/mailparse"
+	"github.com/lxtsuddy/verify-code-relay/internal/recognize"
+	"github.com/lxtsuddy/verify-code-relay/internal/render"
 )
 
 // Trial is what one message would do, worked out without storing or sending anything;

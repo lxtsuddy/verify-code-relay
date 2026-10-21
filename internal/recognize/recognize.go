@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"verify-code-relay/internal/mailparse"
+	"github.com/lxtsuddy/verify-code-relay/internal/mailparse"
 )
 
 type Result struct {

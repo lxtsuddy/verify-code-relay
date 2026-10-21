@@ -21,10 +21,10 @@ import (
 	"github.com/emersion/go-imap/v2/imapserver"
 	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/store"
-	"verify-code-relay/internal/watcher"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/watcher"
 )
 
 type nopIMAPLogger struct{}

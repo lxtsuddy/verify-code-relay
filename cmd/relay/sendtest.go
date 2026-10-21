@@ -6,7 +6,7 @@ import (
 	"html"
 	"io"
 
-	"verify-code-relay/internal/telegram"
+	"github.com/lxtsuddy/verify-code-relay/internal/telegram"
 )
 
 func cmdSendTest(args []string, stdout, stderr io.Writer) int {

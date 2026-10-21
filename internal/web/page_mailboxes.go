@@ -12,10 +12,10 @@ import (
 
 	"github.com/emersion/go-imap/v2"
 
-	"verify-code-relay/internal/auth"
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/runtime"
-	"verify-code-relay/internal/watcher"
+	"github.com/lxtsuddy/verify-code-relay/internal/auth"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/watcher"
 )
 
 // Mailbox pages: the list, one form page for creating and editing (the name is fixed once

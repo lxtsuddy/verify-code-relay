@@ -106,7 +106,13 @@ kubectl apply -k deploy/k3s
 
 ## 開發
 
-需要 Go 1.26 以上。
+需要 Go 1.26 以上。不用容器時，也可以直接安裝執行檔（Web 介面已內嵌，不需要 CGO）：
+
+```bash
+go install github.com/lxtsuddy/verify-code-relay/cmd/relay@latest
+```
+
+從原始碼開發：
 
 ```bash
 go test ./...                       # 單元與整合測試（含記憶體 IMAP 伺服器與經由 Web 的端對端測試）
@@ -124,7 +130,7 @@ GitHub Actions 在每次 push 與 pull request 時執行 `gofmt`、`go vet` 與 
 
 本專案受到以下專案啟發：
 
-- [XposedSmsCode](https://github.com/tianma8023/XposedSmsCode)：辨識簡訊驗證碼並複製到剪貼簿的 Xposed 模組。
+- [XposedSmsCode](https://github.com/magisk317/XposedSmsCode)：辨識簡訊驗證碼並複製到剪貼簿的 Xposed 模組。
 - [smtp_to_telegram](https://github.com/KostyaEsmukov/smtp_to_telegram)：接收 SMTP 郵件並轉發到 Telegram 的小程式。
 
 ## 授權

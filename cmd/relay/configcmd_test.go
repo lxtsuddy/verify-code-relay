@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
 )
 
 func TestConfigImportExport(t *testing.T) {

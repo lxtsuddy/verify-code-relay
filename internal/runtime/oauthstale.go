@@ -5,8 +5,8 @@ import (
 	"slices"
 	"strings"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
 )
 
 // Stored Microsoft OAuth tokens belong to one account, app and server. Every way of storing

@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/recognize"
-	"verify-code-relay/internal/render"
-	"verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/recognize"
+	"github.com/lxtsuddy/verify-code-relay/internal/render"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
 )
 
 var ctx = context.Background()

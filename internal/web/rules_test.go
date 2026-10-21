@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/render"
-	"verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/render"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
 )
 
 func TestRulesRoundTrip(t *testing.T) {

@@ -14,12 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/dispatcher"
-	"verify-code-relay/internal/store"
-	"verify-code-relay/internal/telegram"
-	"verify-code-relay/internal/tglen"
-	"verify-code-relay/internal/watcher"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/dispatcher"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/telegram"
+	"github.com/lxtsuddy/verify-code-relay/internal/tglen"
+	"github.com/lxtsuddy/verify-code-relay/internal/watcher"
 
 	"github.com/emersion/go-imap/v2/imapclient"
 )

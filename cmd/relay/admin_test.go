@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"verify-code-relay/internal/websec"
+	"github.com/lxtsuddy/verify-code-relay/internal/websec"
 )
 
 func TestAdminResetFromStdin(t *testing.T) {

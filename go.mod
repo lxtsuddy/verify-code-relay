@@ -1,4 +1,4 @@
-module verify-code-relay
+module github.com/lxtsuddy/verify-code-relay
 
 go 1.26.0
 

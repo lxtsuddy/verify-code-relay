@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"verify-code-relay/internal/store"
-	"verify-code-relay/internal/tglen"
+	"github.com/lxtsuddy/verify-code-relay/internal/store"
+	"github.com/lxtsuddy/verify-code-relay/internal/tglen"
 )
 
 type fakeQ struct{ items []store.OutboxItem }

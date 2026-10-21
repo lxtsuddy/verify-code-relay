@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/runtime"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/runtime"
 )
 
 // cmdConfig dispatches "config import|export|validate". configPath is the file given by

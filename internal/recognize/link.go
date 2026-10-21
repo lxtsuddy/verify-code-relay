@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"verify-code-relay/internal/mailparse"
+	"github.com/lxtsuddy/verify-code-relay/internal/mailparse"
 )
 
 var defaultLinkKeywords = []string{

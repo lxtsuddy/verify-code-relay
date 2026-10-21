@@ -1,6 +1,6 @@
 package render
 
-import "verify-code-relay/internal/config"
+import "github.com/lxtsuddy/verify-code-relay/internal/config"
 
 // The URL itself is not printed: the button opens it, labelled with the link's text from
 // the mail, and the host line shows where it goes. Lines whose fields are empty (missing

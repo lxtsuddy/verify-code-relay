@@ -4,7 +4,7 @@ import (
 	"slices"
 	"testing"
 
-	"verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
 )
 
 func withMailboxes(app config.Microsoft, m map[string]*config.Mailbox) *config.Config {

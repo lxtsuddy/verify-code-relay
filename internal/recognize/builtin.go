@@ -1,8 +1,8 @@
 package recognize
 
 import (
-	"verify-code-relay/internal/config"
-	"verify-code-relay/internal/mailparse"
+	"github.com/lxtsuddy/verify-code-relay/internal/config"
+	"github.com/lxtsuddy/verify-code-relay/internal/mailparse"
 )
 
 type Builtin struct {

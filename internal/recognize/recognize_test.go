@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"verify-code-relay/internal/mailparse"
+	"github.com/lxtsuddy/verify-code-relay/internal/mailparse"
 )
 
 type fakeStage struct {

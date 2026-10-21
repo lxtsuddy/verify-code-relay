@@ -7,7 +7,7 @@ import (
 	"math/rand/v2"
 	"time"
 
-	"verify-code-relay/internal/auth"
+	"github.com/lxtsuddy/verify-code-relay/internal/auth"
 )
 
 func jitter(d time.Duration) time.Duration {
