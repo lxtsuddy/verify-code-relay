@@ -61,8 +61,8 @@ func TestValidateErrors(t *testing.T) {
 		mutate func(c *Config)
 		want   string
 	}{
-		{"unknown target", func(c *Config) { c.Mailboxes["gmail"].Targets = []string{"me", "work_chanel"} }, `mailboxes.gmail.targets[1]: 找不到目標 "work_chanel"`},
-		{"no targets", func(c *Config) { c.Mailboxes["gmail"].Targets = nil }, "mailboxes.gmail.targets: 至少需要一個目標"},
+		{"unknown target", func(c *Config) { c.Mailboxes["gmail"].Routes = []Route{{"INBOX", "me"}, {"INBOX", "work_chanel"}} }, `mailboxes.gmail.routes[1].target: 找不到目標 "work_chanel"`},
+		{"no routes", func(c *Config) { c.Mailboxes["gmail"].Routes = nil }, "mailboxes.gmail.routes: 至少需要一條轉發路由"},
 		{"unknown bot", func(c *Config) { c.Targets["me"] = Target{Bot: "nope", ChatID: 1} }, `targets.me.bot: 找不到 Bot "nope"`},
 		{"zero chat", func(c *Config) { c.Targets["me"] = Target{Bot: "main"} }, "targets.me.chat_id: 不可為 0"},
 		{"empty token", func(c *Config) { c.Bots["main"] = Bot{} }, "bots.main.token: 不可為空"},
@@ -79,10 +79,9 @@ func TestValidateErrors(t *testing.T) {
 		{"rule no action", func(c *Config) { c.Rules[0].CodeRegex = "" }, "rules[0]: 需要 code_regex、link_regex 或 ignore: true 其中一項"},
 		{"dup rule", func(c *Config) { c.Rules = append(c.Rules, c.Rules[0]) }, `rules[1].name: 名稱 "gh" 重複`},
 		{"bad subject regex", func(c *Config) { c.Rules[0].Subject = "[" }, "rules[0].subject: "},
-		{"empty folder", func(c *Config) { c.Mailboxes["gmail"].Folders = []string{""} }, "mailboxes.gmail.folders[0]: 不可為空"},
+		{"empty folder", func(c *Config) { c.Mailboxes["gmail"].Routes = []Route{{"", "me"}} }, "mailboxes.gmail.routes[0].folder: 不可為空"},
 		{"bad log level", func(c *Config) { c.LogLevel = "loud" }, `log_level: 必須是 debug、info、warn 或 error`},
-		{"dup folder", func(c *Config) { c.Mailboxes["gmail"].Folders = []string{"INBOX", "INBOX"} }, `mailboxes.gmail.folders[1]: 資料夾 "INBOX" 重複`},
-		{"dup target", func(c *Config) { c.Mailboxes["gmail"].Targets = []string{"me", "me"} }, `mailboxes.gmail.targets[1]: 目標 "me" 重複`},
+		{"dup route", func(c *Config) { c.Mailboxes["gmail"].Routes = []Route{{"INBOX", "me"}, {"INBOX", "me"}} }, "mailboxes.gmail.routes[1]: 與第 1 條路由重複"},
 		{"negative default max_age", func(c *Config) { c.Defaults.MaxAge.Duration = -time.Minute }, "defaults.max_age: 必須大於 0"},
 		{"negative default ttl", func(c *Config) { c.Defaults.TTL.Duration = -time.Second }, "defaults.ttl: 必須大於 0"},
 		{"negative default alert_ttl", func(c *Config) { c.Defaults.AlertTTL.Duration = -time.Hour }, "defaults.alert_ttl: 必須大於 0"},

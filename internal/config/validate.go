@@ -111,30 +111,29 @@ func (c *Config) Validate() error {
 		default:
 			p.add(base+".auth.type", "未知的認證類型 %q（可用：password、microsoft_oauth）", m.Auth.Type)
 		}
-		seenFolder := map[string]bool{}
-		for i, f := range m.Folders {
-			path := fmt.Sprintf("%s.folders[%d]", base, i)
-			switch {
-			case f == "":
-				p.add(path, "不可為空")
-			case seenFolder[f]:
-				p.add(path, "資料夾 %q 重複", f)
-			}
-			seenFolder[f] = true
+		if len(m.Folders) > 0 || len(m.Targets) > 0 {
+			p.add(base+".routes", "routes 不能與舊的 folders／targets 同時使用")
 		}
-		if len(m.Targets) == 0 {
-			p.add(base+".targets", "至少需要一個目標")
+		if len(m.Routes) == 0 {
+			p.add(base+".routes", "至少需要一條轉發路由")
 		}
-		seenTarget := map[string]bool{}
-		for i, t := range m.Targets {
-			path := fmt.Sprintf("%s.targets[%d]", base, i)
-			if _, ok := c.Targets[t]; !ok {
-				p.add(path, "找不到目標 %q", t)
+		first := map[Route]int{}
+		for i, r := range m.Routes {
+			path := fmt.Sprintf("%s.routes[%d]", base, i)
+			if r.Folder == "" {
+				p.add(path+".folder", "不可為空")
 			}
-			if seenTarget[t] {
-				p.add(path, "目標 %q 重複", t)
+			switch _, ok := c.Targets[r.Target]; {
+			case r.Target == "":
+				p.add(path+".target", "不可為空")
+			case !ok:
+				p.add(path+".target", "找不到目標 %q", r.Target)
 			}
-			seenTarget[t] = true
+			if j, dup := first[r]; dup {
+				p.add(path, "與第 %d 條路由重複", j+1)
+			} else {
+				first[r] = i
+			}
 		}
 		positive(base+".max_age", m.MaxAge)
 		positive(base+".ttl", m.TTL)

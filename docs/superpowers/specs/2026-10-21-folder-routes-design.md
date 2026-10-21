@@ -44,11 +44,11 @@ mailboxes:
 
 在解析設定的共用步驟（`decodeNode` 之後；涵蓋 `Parse`、`Decode`、`LoadRawBytes`，也就是設定檔、資料庫目前的設定、版本歷史、匯入）對每個信箱執行：
 
-1. `routes` 不為空且 `folders`／`targets` 也有值 → 解析錯誤：「`mailboxes.X`：`routes` 不能與舊的 `folders`／`targets` 同時使用」。
+1. `routes` 不為空且 `folders`／`targets` 也有值 → 保留原樣，由驗證回報 `mailboxes.X.routes: routes 不能與舊的 folders／targets 同時使用`。（實作時修訂：原定為解析錯誤；但 `Clone` 以編碼再解碼複製設定，解析錯誤會讓 `Defaulted`／`Build` 對這種 Go 結構直接 panic，改由驗證回報，使用者看到的訊息相同。）
 2. `routes` 為空且 `targets` 不為空 → 產生配對：對 `folders`（為空時視為 `[INBOX]`，與舊的預設相同）中的每個資料夾，依序配上 `targets` 中的每個目標。轉換後清空 `folders`、`targets`。
 3. `routes` 為空且 `targets` 也為空 → 不轉換（驗證會報「至少需要一條路由」）；`folders` 一併清空。
 
-`applyDefaults` 中「`folders` 為空時補 `INBOX`」移除（已由轉換處理）。
+`applyDefaults` 中「`folders` 為空時補 `INBOX`」改為同樣的轉換（用 Go 結構組出的舊格式信箱也會轉換）。
 
 ## 3. 驗證
 

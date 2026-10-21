@@ -236,7 +236,7 @@ kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay config i
 | `admin` | 通知對象（目標名稱）：登入通知與系統告警（斷線、授權失效、發送失敗） |
 | `defaults` | `max_age`（收信時間超過多久就不轉發）、`ttl`（待發送訊息超過多久就丟棄）、`alert_ttl`、`poll_interval`（伺服器不支援 IDLE 時的輪詢間隔）、`alert_after`（連續斷線多久才告警） |
 | `microsoft` | Microsoft 信箱共用的 Azure 應用程式：`client_id`、`tenant`（選填，省略為 `common`；個人帳號用 `consumers`） |
-| `mailboxes.<名稱>` | `display_name`、`host`、`port`（預設 993）、`username`、`auth`、`folders`（預設 `INBOX`）、`targets`，以及覆寫用的 `max_age`、`ttl`、`poll_interval`、`templates` |
+| `mailboxes.<名稱>` | `display_name`、`host`、`port`（預設 993）、`username`、`auth`、`routes`（`folder` → `target` 配對，一列一組；監看的資料夾就是路由裡出現的資料夾。舊的 `folders`＋`targets` 仍可讀取，會轉成「每個資料夾 → 每個目標」），以及覆寫用的 `max_age`、`ttl`、`poll_interval`、`templates` |
 | `mailboxes.<名稱>.auth` | `{type: password, password: …}`，或 `{type: microsoft_oauth}`（匯入後在 Web 授權）；`client_id`、`tenant` 選填，寫了就覆寫 `microsoft` 的值 |
 | `templates` | 全域範本 `code`、`link`、`both`（見「範本」） |
 | `rules` | 自訂規則（見「辨識規則」） |
