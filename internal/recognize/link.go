@@ -58,8 +58,11 @@ var (
 		"若不是您", "若不是你", "如果不是您", "如果不是你",
 		"可能已外洩", "可能已洩漏", "可能已泄露", "可能已泄漏",
 		"心当たりがない", "心当たりのない", "ご本人でない"}
-	ignoreWords = []string{"ignore", "disregard", "safely", "no action", "no further action", "nothing to worry",
+	ignoreWords = []string{"ignore", "disregard", "no action", "no further action", "nothing to worry",
 		"忽略", "不用理會", "不必理會", "無需理會", "无需理会", "不用理会", "無需處理", "无需处理", "破棄", "無視", "削除"}
+	// negations right before an ignore word ("do not ignore this", "請勿忽略") keep the
+	// remedy reading.
+	negations = []string{"don't", "do not", "never", "不要", "請勿", "请勿", "切勿", "勿", "不可"}
 	// recoveryWords in a link's text or URL path mark account-recovery pages (password,
 	// account security, recent activity). Next to a code they are not the code's sign-in link.
 	recoveryWords = []string{"password", "passwd", "密碼", "密码", "パスワード", "secure", "security", "activity",
@@ -141,7 +144,8 @@ func (f *linkFinder) find(msg *mailparse.Message, tr *Trace, withCode bool) stri
 			if !ok {
 				// the path and fragment only: a query often carries a return address
 				// (?next=/settings/security) or tracking (utm_campaign=account-activity)
-				w, ok = containsAny(strings.ToLower(u.EscapedPath()+"#"+u.EscapedFragment()), recoveryWords)
+				// both forms: words run together in escaped ASCII paths, CJK only reads decoded
+				w, ok = containsAny(strings.ToLower(u.EscapedPath()+"#"+u.EscapedFragment()+" "+u.Path+"#"+u.Fragment), recoveryWords)
 			}
 			if ok {
 				tr.Addf("  連結 %s：排除（已有驗證碼，不搭配帳號救援連結，含 %q）", l.URL, w)
@@ -305,10 +309,37 @@ func remedyContext(before string) (string, bool) {
 	if end < 0 {
 		return "", false
 	}
-	if _, ok := containsAny(s[end:], ignoreWords); ok {
+	if ignoredAfter(s[end:]) {
 		return "", false
 	}
 	return word, true
+}
+
+// ignoredAfter reports whether s holds an ignoreWords phrase that is not negated by a
+// negations word just before it ("If this wasn't you, do not ignore this email").
+func ignoredAfter(s string) bool {
+	for _, w := range ignoreWords {
+		for from := 0; ; {
+			j := strings.Index(s[from:], w)
+			if j < 0 {
+				break
+			}
+			j += from
+			head := strings.TrimRight(s[max(0, j-12):j], " ")
+			negated := false
+			for _, n := range negations {
+				if strings.HasSuffix(head, n) {
+					negated = true
+					break
+				}
+			}
+			if !negated {
+				return true
+			}
+			from = j + len(w)
+		}
+	}
+	return false
 }
 
 // lastWordEnd returns the end offset of the last occurrence of w in s, where an ASCII

@@ -160,6 +160,17 @@ func TestLinkFinder(t *testing.T) {
 		{"a (not you?) greeting is not a remedy", "Sign in to Medium", "Sign in", []mailparse.Link{
 			{URL: "https://example.com/m/callback?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Sign in to Medium", Before: "Hi alice@example.com (not you?)\n"},
 		}, "https://example.com/m/callback?token=Zx8_kq2LmN0pQr7sTuVwXy"},
+		{"do not ignore keeps the exclusion", "Sign-in alert", "If this wasn't you, do not ignore this email.", []mailparse.Link{
+			{URL: "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Reset your password",
+				Before: "\nIf this wasn't you, do not ignore this email:"},
+		}, ""},
+		{"請勿忽略 keeps the exclusion", "登入通知", "若非本人操作，請勿忽略此信", []mailparse.Link{
+			{URL: "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "重設密碼", Before: "\n若非本人操作，請勿忽略此信，立即"},
+		}, ""},
+		{"safely is not ignore", "Sign-in alert", "If this wasn't you, you can safely reset your password.", []mailparse.Link{
+			{URL: "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "reset your password",
+				Before: "\nIf this wasn't you, you can safely"},
+		}, ""},
 		{"password-changed alert", "Your password was changed", "If you didn't make this change, reset your password.", []mailparse.Link{
 			{URL: "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "reset your password",
 				Before: "\nIf you didn't make this change, reset your password immediately."},
@@ -219,6 +230,7 @@ func TestLinkFinderWithCode(t *testing.T) {
 		{"secure your account", mailparse.Link{URL: "https://example.com/security/verify?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Verify and secure your account"}, false},
 		{"review activity", mailparse.Link{URL: "https://example.com/activity/confirm?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Confirm recent activity"}, false},
 		{"重設密碼", mailparse.Link{URL: "https://example.com/a/b?t=Zx8_kq2LmN0pQr7sTuVwXy", Text: "重設密碼"}, false},
+		{"CJK word in the URL path", mailparse.Link{URL: "https://example.com/密碼/重設?t=Zx8_kq2LmN0pQr7sTuVwXy", Text: "確認"}, false},
 		{"sign in", mailparse.Link{URL: "https://example.com/login?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Sign in to Example"}, true},
 		{"verify email", mailparse.Link{URL: "https://example.com/verify?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Verify email"}, true},
 		{"security in the query only", mailparse.Link{URL: "https://example.com/verify?token=Zx8_kq2LmN0pQr7sTuVwXy&next=%2Fsettings%2Fsecurity", Text: "Verify email"}, true},
