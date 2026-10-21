@@ -2,6 +2,7 @@ package recognize
 
 import (
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -233,25 +234,76 @@ func mergeSpans(list []span) []span {
 	return out
 }
 
+// subjectOrderWords in a subject mean its numbers are references, not codes.
+var subjectOrderWords = toRuneKeywords([]string{"訂單", "订单", "order", "orders", "invoice", "invoices",
+	"receipt", "receipts", "tracking", "shipment", "shipments", "包裹", "物流", "出貨", "出货", "發票", "发票"})
+
+// addKeyword adds k to the sorted keyword list.
+func (t *codeText) addKeyword(k span) {
+	i := sort.Search(len(t.kws), func(i int) bool { return t.kws[i].start >= k.start })
+	t.kws = slices.Insert(t.kws, i, k)
+	t.maxKwLen = max(t.maxKwLen, k.end-k.start)
+}
+
+// subjectEcho returns the subject's numbers that also stand alone on a body line, such
+// as "Use 123456 to set up …" over a body line "123456": the number in the subject is
+// then treated as a keyword. digits are the digit runs of the scanned text, by start.
+// Years, excluded numbers and subjects naming an order or shipment never qualify.
+func subjectEcho(t *codeText, digits []span, subjLen int) []span {
+	subjLen = min(subjLen, len(t.rs))
+	for i := 0; i < subjLen; i++ {
+		for _, w := range subjectOrderWords {
+			if i+len(w) <= subjLen && keywordAt(t.lower[:subjLen], w, i) {
+				return nil
+			}
+		}
+	}
+	var out []span
+	for _, s := range digits {
+		if s.start >= subjLen {
+			break
+		}
+		v := string(t.rs[s.start:s.end])
+		if y, _ := strconv.Atoi(v); len(v) == 4 && y >= 1900 && y <= 2099 {
+			continue
+		}
+		if excludeReason(codeCand{s, v, v}, t) != "" {
+			continue
+		}
+		for _, b := range digits {
+			if b.start > subjLen && string(t.rs[b.start:b.end]) == v && t.aloneOnLine(b) && excludeReason(codeCand{b, v, v}, t) == "" {
+				out = append(out, s)
+				break
+			}
+		}
+	}
+	return out
+}
+
 func (f *codeFinder) find(msg *mailparse.Message, tr *Trace) string {
 	rs := scanRunes(msg)
 	full := string(rs)
 	lower := lowerRunes(rs)
 	subjLen := len([]rune(msg.Subject))
+	b2r := byteToRune(full)
+	blocked := append(regexpSpans(urlLikeRe, full, b2r), regexpSpans(emailRe, full, b2r)...)
 	kws := findKeywords(lower, f.keywords)
-	if len(kws) == 0 {
+	t := newCodeText(rs, lower, kws, blocked)
+	digits := regexpSpans(digitsRe, full, b2r)
+	for _, s := range subjectEcho(t, digits, subjLen) {
+		tr.Addf("驗證碼：主旨的 %s 也獨佔內文一行，視為關鍵字", string(rs[s.start:s.end]))
+		t.addKeyword(s)
+	}
+	if len(t.kws) == 0 {
 		tr.Addf("驗證碼：沒有找到驗證碼關鍵字")
 		return ""
 	}
 	for _, k := range kws {
 		tr.Addf("驗證碼：關鍵字 %q 位於 %d", string(rs[k.start:k.end]), k.start)
 	}
-	b2r := byteToRune(full)
-	blocked := append(regexpSpans(urlLikeRe, full, b2r), regexpSpans(emailRe, full, b2r)...)
-	t := newCodeText(rs, lower, kws, blocked)
 
 	var cands []codeCand
-	for _, sp := range regexpSpans(digitsRe, full, b2r) {
+	for _, sp := range digits {
 		raw := string(rs[sp.start:sp.end])
 		cands = append(cands, codeCand{sp, raw, raw})
 	}

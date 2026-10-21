@@ -1,6 +1,7 @@
 package recognize
 
 import (
+	"strings"
 	"testing"
 
 	"verify-code-relay/internal/mailparse"
@@ -64,6 +65,13 @@ func TestCodeFinder(t *testing.T) {
 		{"cjk house number", "驗證碼", "請勿將驗證碼告訴他人。台北市中山路 1200 號", ""},
 		{"us zip", "Verification code", "Never share your verification code. Mountain View, CA 94043", ""},
 		{"by the way is fine", "Verification code", "Your verification code: 48213 by the way", "48213"},
+		{"subject echo", "Use 123456 to set up recovery email", "Finish setting up:\n123456\nExpires in 24 hours.", "123456"},
+		{"subject echo needs own line", "Use 123456 to sign in", "Your number 123456 was used today.", ""},
+		{"subject echo order word", "您的訂單已出貨：20261021", "出貨通知\n貨運單號\n20261021\n", ""},
+		{"subject echo orders", "Your orders 48213 shipped", "Package\n48213\n", ""},
+		{"subject echo year", "Annual report 2026", "Highlights\n2026\n", ""},
+		{"subject echo excluded in subject", "Payment $2500 received", "Total\n2500\n", ""},
+		{"subject echo excluded in body", "Ref 2500 update", "Total NT$\n2500\n", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -82,4 +90,12 @@ func longPad(n int) string {
 		b[i] = '.'
 	}
 	return string(b)
+}
+
+func TestSubjectEchoTrace(t *testing.T) {
+	tr := &Trace{}
+	got := newCodeFinder(nil).find(&mailparse.Message{Subject: "Use 123456 now", Text: "x\n123456\n"}, tr)
+	if got != "123456" || !strings.Contains(strings.Join(tr.Steps, "\n"), "主旨的 123456 也獨佔內文一行，視為關鍵字") {
+		t.Fatalf("got %q trace %q", got, tr.Steps)
+	}
 }
