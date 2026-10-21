@@ -128,11 +128,58 @@ func TestLinkFinder(t *testing.T) {
 			{URL: "https://example.com/v/verify-123", Text: "View in browser"},
 			{URL: "https://example.com/verify?t=1", Text: "Verify"},
 		}, "https://example.com/verify?t=1"},
+		{"not-you remedy excluded", "New sign-in to your account", "If this wasn't you, reset your password now.", []mailparse.Link{
+			{URL: "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "reset your password",
+				Before: "We noticed a new sign-in to your Example account.\nIf this was you, ignore this email. If this wasn't you,"},
+		}, ""},
+		{"not-you with a curly apostrophe", "New sign-in", "If this wasn’t you, secure your account.", []mailparse.Link{
+			{URL: "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Reset password", Before: "\nIf this wasn’t you,"},
+		}, ""},
+		{"didn't try to sign in", "Sign-in attempt", "Someone may know your password.", []mailparse.Link{
+			{URL: "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Reset your password",
+				Before: "\nIf you didn't try to sign in, someone may know your password."},
+		}, ""},
+		{"若非本人 remedy excluded", "登入通知", "若非本人操作，您的密碼可能已外洩，請立即重設密碼。", []mailparse.Link{
+			{URL: "https://www.example.com.tw/account/reset-password?t=Qm9yZWFsaXNEaWdpdGFsQWJj", Text: "重設密碼", Before: "\n若非本人操作，您的密碼可能已外洩，請立即"},
+		}, ""},
+		{"a requested reset is kept", "Reset your password", "We received a request to reset your password.", []mailparse.Link{
+			{URL: "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Reset password",
+				Before: "We received a request to reset your password.\n"},
+		}, "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy"},
+		{"not-you then ignore keeps a sign-in link", "Sign in to Example", "Sign in", []mailparse.Link{
+			{URL: "https://example.com/login?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Sign in",
+				Before: "\nIf you didn't try to sign in, you can safely ignore this email. Otherwise click the button below:"},
+		}, "https://example.com/login?token=Zx8_kq2LmN0pQr7sTuVwXy"},
+		{"若非本人請忽略 keeps a sign-in link", "登入連結", "點擊以下連結登入", []mailparse.Link{
+			{URL: "https://example.com/login?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "登入", Before: "\n點擊以下連結登入，若非本人操作請忽略："},
+		}, "https://example.com/login?token=Zx8_kq2LmN0pQr7sTuVwXy"},
+		{"a requested reset that says ignore if not you", "Password reset", "Someone requested a password reset.", []mailparse.Link{
+			{URL: "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Reset password",
+				Before: "Someone requested a password reset for your account.\nIf this was not you, ignore this email."},
+		}, "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy"},
+		{"a (not you?) greeting is not a remedy", "Sign in to Medium", "Sign in", []mailparse.Link{
+			{URL: "https://example.com/m/callback?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Sign in to Medium", Before: "Hi alice@example.com (not you?)\n"},
+		}, "https://example.com/m/callback?token=Zx8_kq2LmN0pQr7sTuVwXy"},
+		{"do not ignore keeps the exclusion", "Sign-in alert", "If this wasn't you, do not ignore this email.", []mailparse.Link{
+			{URL: "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Reset your password",
+				Before: "\nIf this wasn't you, do not ignore this email:"},
+		}, ""},
+		{"請勿忽略 keeps the exclusion", "登入通知", "若非本人操作，請勿忽略此信", []mailparse.Link{
+			{URL: "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "重設密碼", Before: "\n若非本人操作，請勿忽略此信，立即"},
+		}, ""},
+		{"safely is not ignore", "Sign-in alert", "If this wasn't you, you can safely reset your password.", []mailparse.Link{
+			{URL: "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "reset your password",
+				Before: "\nIf this wasn't you, you can safely"},
+		}, ""},
+		{"password-changed alert", "Your password was changed", "If you didn't make this change, reset your password.", []mailparse.Link{
+			{URL: "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "reset your password",
+				Before: "\nIf you didn't make this change, reset your password immediately."},
+		}, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			tr := &Trace{}
-			got := f.find(&mailparse.Message{From: from, Subject: c.subject, Text: c.text, Links: c.links}, tr)
+			got := f.find(&mailparse.Message{From: from, Subject: c.subject, Text: c.text, Links: c.links}, tr, false)
 			if got != c.want {
 				t.Errorf("got %q want %q\ntrace: %v", got, c.want, tr.Steps)
 			}
@@ -161,10 +208,67 @@ func TestLinkFinderExtraKeywords(t *testing.T) {
 		Text:    "Bitte klicken",
 		Links:   []mailparse.Link{{URL: "https://other.test/a", Text: "Anmelden"}},
 	}
-	if got := newLinkFinder(nil).find(msg, &Trace{}); got != "" {
+	if got := newLinkFinder(nil).find(msg, &Trace{}, false); got != "" {
 		t.Fatalf("without extra keyword: got %q", got)
 	}
-	if got := newLinkFinder([]string{" Anmelden "}).find(msg, &Trace{}); got != "https://other.test/a" {
+	if got := newLinkFinder([]string{" Anmelden "}).find(msg, &Trace{}, false); got != "https://other.test/a" {
 		t.Fatalf("with extra keyword: got %q", got)
+	}
+}
+
+func TestLinkFinderWithCode(t *testing.T) {
+	f := newLinkFinder(nil)
+	from := mailparse.Address{Addr: "no-reply@example.com"}
+	cases := []struct {
+		name string
+		link mailparse.Link
+		want bool // forwarded next to a code
+	}{
+		{"reset password", mailparse.Link{URL: "https://example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Reset your password"}, false},
+		{"change password", mailparse.Link{URL: "https://example.com/account/change?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Change password"}, false},
+		{"password in the URL only", mailparse.Link{URL: "https://example.com/account/password?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Confirm"}, false},
+		{"secure your account", mailparse.Link{URL: "https://example.com/security/verify?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Verify and secure your account"}, false},
+		{"review activity", mailparse.Link{URL: "https://example.com/activity/confirm?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Confirm recent activity"}, false},
+		{"重設密碼", mailparse.Link{URL: "https://example.com/a/b?t=Zx8_kq2LmN0pQr7sTuVwXy", Text: "重設密碼"}, false},
+		{"CJK word in the URL path", mailparse.Link{URL: "https://example.com/密碼/重設?t=Zx8_kq2LmN0pQr7sTuVwXy", Text: "確認"}, false},
+		{"sign in", mailparse.Link{URL: "https://example.com/login?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Sign in to Example"}, true},
+		{"verify email", mailparse.Link{URL: "https://example.com/verify?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Verify email"}, true},
+		{"security in the query only", mailparse.Link{URL: "https://example.com/verify?token=Zx8_kq2LmN0pQr7sTuVwXy&next=%2Fsettings%2Fsecurity", Text: "Verify email"}, true},
+		{"securely is not secure", mailparse.Link{URL: "https://example.com/login?token=Zx8_kq2LmN0pQr7sTuVwXy", Text: "Securely sign in"}, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			msg := &mailparse.Message{From: from, Subject: "Your verification code", Text: "Code 482913", Links: []mailparse.Link{c.link}}
+			tr := &Trace{}
+			if got := f.find(msg, tr, true); (got != "") != c.want {
+				t.Errorf("with a code: got %q, want forwarded=%v\ntrace: %v", got, c.want, tr.Steps)
+			}
+			if c.link.Text == "Reset your password" {
+				if got := f.find(msg, &Trace{}, false); got == "" {
+					t.Errorf("without a code a reset link must still be found")
+				}
+			}
+		})
+	}
+}
+
+// TestBuiltinCodeSkipsRemedyLink checks whole messages: a sign-in code with a "reset your
+// password if this wasn't you" link forwards the code alone.
+func TestBuiltinCodeSkipsRemedyLink(t *testing.T) {
+	cases := map[string]string{
+		"en": `<p>Your sign-in verification code is</p><p><b>482913</b></p><p>If you didn't try to sign in, someone may know your password. <a href="https://account.example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy">Reset your password</a></p>`,
+		"zh": `<p>您的登入驗證碼為 <b>604217</b>，10 分鐘內有效。</p><p>若非本人操作，您的密碼可能已外洩，請立即 <a href="https://www.example.com.tw/account/reset-password?t=Qm9yZWFsaXNEaWdpdGFsQWJj">重設密碼</a>。</p>`,
+		"no not-you wording": `<p>Your sign-in code is <b>739201</b>.</p><p><a href="https://account.example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy">Reset your password</a></p>`,
+	}
+	b := NewBuiltin(configOpts(nil, nil))
+	for name, h := range cases {
+		t.Run(name, func(t *testing.T) {
+			text, links := mailparse.HTMLToText(h)
+			tr := &Trace{}
+			res, _ := b.Run(&mailparse.Message{From: mailparse.Address{Addr: "no-reply@example.com"}, Subject: "Sign-in code", Text: text, Links: links}, tr)
+			if res == nil || res.Code == "" || res.URL != "" || res.Rule != "builtin:code" {
+				t.Fatalf("res = %+v\ntrace: %v", res, tr.Steps)
+			}
+		})
 	}
 }

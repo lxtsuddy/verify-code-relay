@@ -1,0 +1,11 @@
+From: Example <security@example.com>
+To: me@gmail.com
+Subject: Your Example sign-in code
+Date: Mon, 19 Oct 2026 08:00:00 +0800
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PHA+WW91ciBzaWduLWluIGNvZGUgaXMgPGI+NzM5MjAxPC9iPi48L3A+PHA+PGEgaHJlZj0iaHR0
+cHM6Ly9hY2NvdW50LmV4YW1wbGUuY29tL3Bhc3N3b3JkL3Jlc2V0P3Rva2VuPVp4OF9rcTJMbU4w
+cFFyN3NUdVZ3WHkiPlJlc2V0IHlvdXIgcGFzc3dvcmQ8L2E+PC9wPg==

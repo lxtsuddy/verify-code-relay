@@ -1,0 +1,13 @@
+From: Example <security@example.com>
+To: me@gmail.com
+Subject: New sign-in to your account
+Date: Mon, 19 Oct 2026 08:00:00 +0800
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PHA+V2Ugbm90aWNlZCBhIG5ldyBzaWduLWluIHRvIHlvdXIgRXhhbXBsZSBhY2NvdW50IG9uIFdp
+bmRvd3MuPC9wPjxwPklmIHRoaXMgd2FzIHlvdSwgeW91IGNhbiBpZ25vcmUgdGhpcyBlbWFpbC4g
+SWYgdGhpcyB3YXNuJ3QgeW91LCA8YSBocmVmPSJodHRwczovL2FjY291bnQuZXhhbXBsZS5jb20v
+cGFzc3dvcmQvcmVzZXQ/dG9rZW49Wng4X2txMkxtTjBwUXI3c1R1VndYeSI+cmVzZXQgeW91ciBw
+YXNzd29yZDwvYT4gbm93LjwvcD4=

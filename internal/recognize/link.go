@@ -43,6 +43,32 @@ var (
 		"連結", "链接", "按鈕", "按钮", "點擊", "点击"}
 )
 
+var (
+	// notYouWords before a link mark it as the remedy offered when someone else used the
+	// account ("If this wasn't you, reset your password"), never a sign-in link — unless
+	// an ignoreWords phrase follows the last of them ("若非本人操作請忽略：[登入]"), which
+	// is how genuine sign-in and requested-reset mails word it.
+	notYouWords = []string{"wasn't you", "was not you", "weren't you", "were not you", "isn't you", "is not you",
+		"'s not you", "didn't try", "did not try", "didn't attempt", "did not attempt", "didn't sign in",
+		"did not sign in", "didn't log in", "did not log in", "didn't make", "did not make", "didn't do this",
+		"didn't authorize", "did not authorize", "didn't initiate", "did not initiate",
+		"don't recognize", "do not recognize", "didn't recognize", "did not recognize", "unrecognized",
+		"someone may", "compromised",
+		"若非本人", "如非本人", "非本人操作", "不是本人", "並非本人", "并非本人", "不是您本人", "不是你本人",
+		"若不是您", "若不是你", "如果不是您", "如果不是你",
+		"可能已外洩", "可能已洩漏", "可能已泄露", "可能已泄漏",
+		"心当たりがない", "心当たりのない", "ご本人でない"}
+	ignoreWords = []string{"ignore", "disregard", "no action", "no further action", "nothing to worry",
+		"忽略", "不用理會", "不必理會", "無需理會", "无需理会", "不用理会", "無需處理", "无需处理", "破棄", "無視", "削除"}
+	// negations right before an ignore word ("do not ignore this", "請勿忽略") keep the
+	// remedy reading.
+	negations = []string{"don't", "do not", "never", "不要", "請勿", "请勿", "切勿", "勿", "不可"}
+	// recoveryWords in a link's text or URL path mark account-recovery pages (password,
+	// account security, recent activity). Next to a code they are not the code's sign-in link.
+	recoveryWords = []string{"password", "passwd", "密碼", "密码", "パスワード", "secure", "security", "activity",
+		"安全", "活動", "活动", "保護", "保护", "セキュリティ", "アクティビティ"}
+)
+
 const buttonBonus = 10
 
 const linkThreshold = 50
@@ -68,7 +94,10 @@ func (f *linkFinder) containsKeyword(s string) (string, bool) {
 	return "", false
 }
 
-func (f *linkFinder) find(msg *mailparse.Message, tr *Trace) string {
+// find returns the best verification link of msg, or "". withCode says a code was
+// found in the same message: account-recovery links (recoveryWords) are then left out,
+// as they accompany sign-in codes for when someone else signed in.
+func (f *linkFinder) find(msg *mailparse.Message, tr *Trace, withCode bool) string {
 	kw, ok := f.containsKeyword(strings.ToLower(string(scanRunes(msg))))
 	if ok {
 		tr.Addf("連結：關鍵字 %q", kw)
@@ -105,6 +134,23 @@ func (f *linkFinder) find(msg *mailparse.Message, tr *Trace) string {
 		if reason := linkExcludeReason(u, lu, lt); reason != "" {
 			tr.Addf("  連結 %s：排除（%s）", l.URL, reason)
 			continue
+		}
+		if w, ok := remedyContext(l.Before); ok {
+			tr.Addf("  連結 %s：排除（非本人時的補救連結，前文含 %q）", l.URL, w)
+			continue
+		}
+		if withCode {
+			w, ok := containsAnyWord(lt, recoveryWords)
+			if !ok {
+				// the path and fragment only: a query often carries a return address
+				// (?next=/settings/security) or tracking (utm_campaign=account-activity)
+				// both forms: words run together in escaped ASCII paths, CJK only reads decoded
+				w, ok = containsAny(strings.ToLower(u.EscapedPath()+"#"+u.EscapedFragment()+" "+u.Path+"#"+u.Fragment), recoveryWords)
+			}
+			if ok {
+				tr.Addf("  連結 %s：排除（已有驗證碼，不搭配帳號救援連結，含 %q）", l.URL, w)
+				continue
+			}
 		}
 		score, note := 0, ""
 		textKeyword := false
@@ -246,4 +292,86 @@ func linkExcludeReason(u *url.URL, lu, lt string) string {
 		return "靜態資源"
 	}
 	return ""
+}
+
+// remedyContext returns the notYouWords phrase that makes the text before a link
+// (Link.Before) introduce a remedy for someone else using the account. It is false when
+// an ignoreWords phrase follows the last such phrase ("If you didn't try to sign in,
+// you can safely ignore this email. Otherwise click below:").
+func remedyContext(before string) (string, bool) {
+	s := normalizeApostrophes(strings.ToLower(before))
+	word, end := "", -1
+	for _, w := range notYouWords {
+		if e := lastWordEnd(s, w); e > end {
+			word, end = w, e
+		}
+	}
+	if end < 0 {
+		return "", false
+	}
+	if ignoredAfter(s[end:]) {
+		return "", false
+	}
+	return word, true
+}
+
+// ignoredAfter reports whether s holds an ignoreWords phrase that is not negated by a
+// negations word just before it ("If this wasn't you, do not ignore this email").
+func ignoredAfter(s string) bool {
+	for _, w := range ignoreWords {
+		for from := 0; ; {
+			j := strings.Index(s[from:], w)
+			if j < 0 {
+				break
+			}
+			j += from
+			head := strings.TrimRight(s[max(0, j-12):j], " ")
+			negated := false
+			for _, n := range negations {
+				if strings.HasSuffix(head, n) {
+					negated = true
+					break
+				}
+			}
+			if !negated {
+				return true
+			}
+			from = j + len(w)
+		}
+	}
+	return false
+}
+
+// lastWordEnd returns the end offset of the last occurrence of w in s, where an ASCII
+// letter at either end of w must not touch another ASCII letter (as in containsWord), or -1.
+func lastWordEnd(s, w string) int {
+	for e := len(s); e > 0; {
+		j := strings.LastIndex(s[:e], w)
+		if j < 0 {
+			return -1
+		}
+		end := j + len(w)
+		if (!isASCIILetter(rune(w[0])) || j == 0 || !isASCIILetter(rune(s[j-1]))) &&
+			(!isASCIILetter(rune(w[len(w)-1])) || end == len(s) || !isASCIILetter(rune(s[end]))) {
+			return end
+		}
+		e = end - 1
+	}
+	return -1
+}
+
+// normalizeApostrophes turns typographic apostrophes into ASCII ones ("wasn’t" → "wasn't").
+func normalizeApostrophes(s string) string {
+	return strings.NewReplacer("’", "'", "‘", "'", "ʼ", "'").Replace(s)
+}
+
+// containsAny returns the first of words that s contains anywhere (URLs run words
+// together: "resetpassword").
+func containsAny(s string, words []string) (string, bool) {
+	for _, w := range words {
+		if strings.Contains(s, w) {
+			return w, true
+		}
+	}
+	return "", false
 }

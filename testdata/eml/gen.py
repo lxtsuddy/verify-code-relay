@@ -206,4 +206,43 @@ write("footer-zip-en",
       [("text/html", "utf-8", "<p>We will never ask for your verification code by phone or email.</p><p>Example Inc., 1600 Main Street, Mountain View, CA 94043</p>")],
       "none: true")
 
+# A sign-in code (or alert) with a "reset your password if this wasn't you" link:
+# the link is a remedy for someone else signing in, never the code's sign-in link.
+write("code-with-reset-link-en",
+      [("From", "Example <security@example.com>"), ("To", "me@gmail.com"), ("Subject", "Your Example sign-in code"), DATE],
+      [("text/html", "utf-8", "<p>Your sign-in verification code is</p><p><b>482913</b></p><p>If you didn't try to sign in, someone may know your password. <a href=\"https://account.example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy\">Reset your password</a></p>")],
+      'code: "482913"')
+
+write("code-with-reset-link-zh",
+      [("From", word("範例服務", "utf-8") + " <security@example.com.tw>"), ("To", "me@example.com"), ("Subject", word("登入驗證碼", "utf-8")), DATE],
+      [("text/html", "utf-8", "<p>您的登入驗證碼為 <b>604217</b>，10 分鐘內有效。</p><p>若非本人操作，您的密碼可能已外洩，請立即 <a href=\"https://www.example.com.tw/account/reset-password?t=Qm9yZWFsaXNEaWdpdGFsQWJj\">重設密碼</a>。</p>")],
+      'code: "604217"')
+
+write("signin-alert-reset-en",
+      [("From", "Example <security@example.com>"), ("To", "me@gmail.com"), ("Subject", "New sign-in to your account"), DATE],
+      [("text/html", "utf-8", "<p>We noticed a new sign-in to your Example account on Windows.</p><p>If this was you, you can ignore this email. If this wasn't you, <a href=\"https://account.example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy\">reset your password</a> now.</p>")],
+      "none: true")
+
+# Genuine sign-in / reset mails that say "if this wasn't you, ignore this" before the
+# button keep their link; an alert without that ignore wording does not.
+write("magic-link-ignore-en",
+      [("From", "Example <no-reply@example.com>"), ("To", "me@gmail.com"), ("Subject", "Sign in to Example"), DATE],
+      [("text/html", "utf-8", "<p>If you didn't try to sign in, you can safely ignore this email. Otherwise click the button below:</p><p><a href=\"https://example.com/login/magic?token=Zx8_kq2LmN0pQr7sTuVwXy\" style=\"background:#111;color:#fff;padding:12px\">Sign in</a></p>")],
+      'url: "https://example.com/login/magic?token=Zx8_kq2LmN0pQr7sTuVwXy"')
+
+write("login-link-ignore-zh",
+      [("From", word("範例服務", "utf-8") + " <noreply@example.com.tw>"), ("To", "me@example.com"), ("Subject", word("登入連結", "utf-8")), DATE],
+      [("text/html", "utf-8", "<p>點擊以下連結登入，若非本人操作請忽略：</p><p><a href=\"https://www.example.com.tw/login?token=Qm9yZWFsaXNEaWdpdGFsQWJj\">登入</a></p>")],
+      'url: "https://www.example.com.tw/login?token=Qm9yZWFsaXNEaWdpdGFsQWJj"')
+
+write("password-changed-alert-en",
+      [("From", "Example <security@example.com>"), ("To", "me@gmail.com"), ("Subject", "Your password was changed"), DATE],
+      [("text/html", "utf-8", "<p>The password for your Example account was just changed.</p><p>If you didn't make this change, <a href=\"https://account.example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy\">reset your password</a> immediately.</p>")],
+      "none: true")
+
+write("code-with-reset-plain-en",
+      [("From", "Example <security@example.com>"), ("To", "me@gmail.com"), ("Subject", "Your Example sign-in code"), DATE],
+      [("text/html", "utf-8", "<p>Your sign-in code is <b>739201</b>.</p><p><a href=\"https://account.example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy\">Reset your password</a></p>")],
+      'code: "739201"')
+
 print("ok")

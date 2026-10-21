@@ -163,6 +163,13 @@ HTML 轉文字時，以下元素內的文字記為強調：
 
 圖片副檔名排除擴充為靜態資源：`.png .jpg .jpeg .gif .webp .svg .bmp .ico .css .js .pdf`（Trace 原因「靜態資源」）。
 
+### 4.6 帳號救援連結（v0.2.4 增補）
+
+登入驗證碼信常附「若非本人操作，請重設密碼」的連結，那是帳號被他人登入時的補救手段，不是登入連結。
+
+- **非本人情境**：連結的 `Before`（上一行與同一行，小寫、彎引號視同直引號）含 `notYouWords`（wasn't you、isn't you、didn't try／attempt、didn't sign in、didn't make、didn't do this、don't recognize、unrecognized、someone may、compromised、若非本人、非本人操作、如果不是您、可能已外洩 …；英文整字比對）時排除，Trace 原因「非本人時的補救連結」。例外：最後一個此類說法之後出現 `ignoreWords`（ignore、disregard、no action、忽略、不用理會、無需處理、破棄、無視 …），且前面沒有否定字（don't、do not、never、不要、請勿、勿 …，例如「do not ignore this」「請勿忽略」）時不排除——「若非本人操作請忽略：[登入]」「If you didn't try to sign in, you can safely ignore this email. Otherwise click below:」是本人申請的登入或重設信。不用單獨的「not you」，避免「Hi alice (not you?)」問候語。
+- **有驗證碼時不搭配救援連結**：同一輪已找到驗證碼時，連結文字（英文整字）或網址路徑與片段（不含主機與查詢字串——查詢常帶 `next=/settings/security`、`utm_campaign=account-activity`；子字串比對，因路徑常把字連在一起）（同時比對編碼與解碼後的路徑，讓 `/密碼/重設` 這類中日文路徑也比對得到）含 `recoveryWords`（password、passwd、密碼、密码、パスワード、secure、security、activity、安全、活動、保護、セキュリティ、アクティビティ …）的連結排除，結果只轉發驗證碼。沒有驗證碼時不套用，所以真正的重設密碼信照常轉發連結。
+
 ## 5. Web 信件測試
 
 ### 5.1 介面
