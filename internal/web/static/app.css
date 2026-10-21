@@ -352,7 +352,10 @@ b, strong { font-weight: 700; }
 
 /* ---------- cards ---------- */
 
+/* every card is a "card" container: what sits inside a card (the template editor and its
+   preview, the mail test result, the settings rows) follows the card's own width */
 .card {
+  container: card / inline-size;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -776,6 +779,9 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   display: grid; grid-template-columns: minmax(0, 1fr) minmax(180px, 220px); gap: 8px 32px; align-items: start;
   padding: 16px 20px; border-bottom: 1px solid var(--line);
 }
+@container card (max-width: 520px) {
+  .setting-row { grid-template-columns: minmax(0, 1fr); padding: 14px 16px; }
+}
 .setting-text .hint { margin-top: 2px; max-width: 54ch; }
 .setting-control { display: grid; gap: 4px; }
 .setting-default { font-size: var(--fs-xs); color: var(--faint); }
@@ -884,12 +890,11 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .ms-guide[open] .ms-guide-chevron { transform: rotate(-135deg); }
 .ms-guide .mini-steps li { color: #174f7c; font-size: var(--fs-sm); }
 .ms-guide .mini-steps li::before { background: #fff; color: var(--blue); }
-@media (max-width: 860px) {
+@container card (max-width: 759px) {
   .ms-app-body { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 640px) {
-  .setting-row { grid-template-columns: minmax(0, 1fr); padding: 14px 16px; }
   .setting-note { padding-left: 16px; padding-right: 16px; }
   .card-section { padding: 16px; }
   .foot-note { flex-basis: 100%; }
@@ -1721,7 +1726,8 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   border: 1px solid var(--line); border-radius: 6px; background: #fff; white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--fs-xs);
 }
 
-@media (max-width: 1100px) {
+/* editor and phone side by side while the card has room for both */
+@container card (max-width: 859px) {
   .tpl-grid { grid-template-columns: minmax(0, 1fr); }
   .tg-phone { border-left: 0; border-top: 1px solid var(--line); border-radius: 0 0 var(--radius) var(--radius); }
   .tg-chat { min-height: 220px; }
@@ -1906,7 +1912,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .mt-errors .btn { flex: none; color: var(--red-700); }
 .mt-errors .btn:hover { background: var(--red-50); }
 
-@media (max-width: 760px) {
+@container card (max-width: 719px) {
   /* one column: the verdict, what was found, the message, then the details */
   .mt-result.has-preview { grid-template-columns: minmax(0, 1fr); }
   .mt-detail { display: contents; }
@@ -1945,7 +1951,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .live-note.is-off { color: var(--amber-ink); }
 .live-note.is-off .live-dot { background: var(--amber); animation: none; }
 
-.board { --tone: var(--green-800); --tone-soft: var(--green-50); --tone-line: var(--green-100); }
+.board { container: board / inline-size; --tone: var(--green-800); --tone-soft: var(--green-50); --tone-line: var(--green-100); }
 .board[data-state="info"] { --tone: var(--blue); --tone-soft: var(--blue-50); --tone-line: var(--blue-100); }
 .board[data-state="warn"] { --tone: var(--amber-ink); --tone-soft: var(--amber-50); --tone-line: var(--amber-100); }
 .board[data-state="err"] { --tone: var(--red); --tone-soft: var(--red-50); --tone-line: var(--red-100); }
@@ -2181,15 +2187,15 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .pager-pos { display: none; font-size: var(--fs-md); font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .pager [aria-disabled="true"] { opacity: 0.45; pointer-events: none; }
 
-@media (max-width: 860px) {
+/* the seal and the figures follow the board's own width (the "board" container) */
+@container board (max-width: 800px) {
   .health { grid-template-columns: 132px minmax(0, 1fr); gap: 8px 20px; padding: 18px; }
   .health .health-mark { width: 124px; height: 124px; }
   .setup-steps { grid-template-columns: minmax(0, 1fr); gap: 10px; }
   .setup-step + .setup-step::before { left: 33px; top: -11px; width: 0; height: 12px; border-top: 0; border-left: 1.5px dashed var(--line-2); }
 }
 
-@media (max-width: 640px) {
-  .page-head .live-note { order: -1; }
+@container board (max-width: 600px) {
   /* seal beside the verdict, then the text and figures across the full width */
   .health { grid-template-columns: 96px minmax(0, 1fr); align-items: center; gap: 0 14px; padding: 16px; }
   .health-body { display: contents; }
@@ -2209,7 +2215,10 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .health-facts .fact-time dd { line-height: 1.5; }
   .health-facts dd { font-size: 20px; }
   .dash-cards { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+}
 
+@media (max-width: 640px) {
+  .page-head .live-note { order: -1; }
   .log-filter { padding: 14px 16px; }
   .log-filter .field { max-width: none; }
   .log-filter-actions { width: 100%; }
