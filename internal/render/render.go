@@ -10,7 +10,10 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
+
+	"golang.org/x/net/idna"
 
 	"verify-code-relay/internal/config"
 	"verify-code-relay/internal/tglen"
@@ -130,7 +133,7 @@ func (r *Renderer) Render(mailbox string, d Data) (Rendered, error) {
 	d.Subject, d.FromName, d.FromAddr, d.To = clamp(d.Subject, maxHeaderRunes), clamp(d.FromName, maxHeaderRunes),
 		clamp(d.FromAddr, maxHeaderRunes), clamp(d.To, maxHeaderRunes)
 	d.Service, d.Mailbox = clamp(d.Service, maxNameRunes), clamp(d.Mailbox, maxNameRunes)
-	d.LinkText, d.Host = clamp(strings.Join(strings.Fields(d.LinkText), " "), maxNameRunes), hostOf(d.URL)
+	d.LinkText, d.Host = clamp(cleanLinkText(d.LinkText), maxNameRunes), hostOf(d.URL)
 	kind := kindCode
 	switch {
 	case d.Code != "" && d.URL != "":
@@ -253,13 +256,35 @@ type copyText struct {
 	Text string `json:"text"`
 }
 
-// hostOf returns the lower-cased host name of an http(s) URL, or "".
+// hostOf returns the lower-cased host name of an http(s) URL, or "". A host with
+// non-ASCII letters also shows its ASCII (punycode) form, "аpple.com（xn--pple-43d.com）",
+// so a look-alike of a known domain stands out.
 func hostOf(raw string) string {
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return ""
 	}
-	return strings.ToLower(u.Hostname())
+	h := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	if a, err := idna.Lookup.ToASCII(h); err == nil && a != h {
+		return h + "（" + a + "）"
+	}
+	return h
+}
+
+// cleanLinkText collapses white space and drops invisible format characters (zero-width
+// spaces, direction overrides) from a link's text. Text that is itself a URL is dropped:
+// it names nothing and may differ from where the link goes.
+func cleanLinkText(s string) string {
+	s = strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1
+		}
+		return r
+	}, s)), " ")
+	if l := strings.ToLower(s); strings.Contains(l, "://") || strings.HasPrefix(l, "www.") {
+		return ""
+	}
+	return s
 }
 
 // linkLabel is the link button's text: the link's own text from the mail, else the host
@@ -269,7 +294,7 @@ func linkLabel(d Data) string {
 	case d.LinkText != "":
 		return clamp(d.LinkText, maxLabelRunes)
 	case d.Host != "":
-		return "開啟 " + d.Host
+		return clamp("開啟 "+d.Host, maxLabelRunes)
 	}
 	return "開啟連結"
 }

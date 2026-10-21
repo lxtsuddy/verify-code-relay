@@ -41,7 +41,7 @@
         </div>
 
         <textarea class="textarea input-mono tpl-text" id="{{.ID}}" name="{{.Field}}" rows="9" spellcheck="false" autocapitalize="none" placeholder="{{.Builtin}}" data-tpl-source="{{.Key}}" aria-describedby="{{.ID}}-hint{{if .Err}} {{.ID}}-err{{end}}"{{if .Err}} aria-invalid="true"{{end}}>{{.Value}}</textarea>
-        <p class="hint" id="{{.ID}}-hint">留空時使用灰字顯示的內建範本。Go <code>html/template</code> 語法，郵件內容會自動跳脫。複製驗證碼、開啟連結的按鈕會自動加上，不用寫在範本裡。範本只能依序輸出：不支援 range、變數（$）與呼叫其他範本。</p>
+        <p class="hint" id="{{.ID}}-hint">留空時使用灰字顯示的內建範本。Go <code>html/template</code> 語法，郵件內容會自動跳脫。複製驗證碼與連結按鈕會自動加上（連結按鈕以信裡的連結文字命名），不用寫在範本裡。範本只能依序輸出：不支援 range、變數（$）與呼叫其他範本。</p>
         <div id="{{.ID}}-err">{{template "field-error" .Err}}</div>
         <div class="tpl-actions">
           <button type="button" class="btn btn-sm" data-tpl-builtin="{{.Builtin}}" data-for="{{.ID}}">{{template "icon" "copy"}}<span>以內建範本為起點</span></button>

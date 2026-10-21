@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"verify-code-relay/internal/tglen"
 )
 
 type Client struct {
@@ -175,12 +177,18 @@ func PlainTextWithLinks(htmlText, markup string) string {
 	if markup == "" || json.Unmarshal([]byte(markup), &kb) != nil {
 		return text
 	}
+	var tail string
 	for _, row := range kb.InlineKeyboard {
 		for _, b := range row {
-			if b.URL != "" && !strings.Contains(text, b.URL) {
-				text += "\n" + b.Text + "：" + b.URL
+			line := "\n" + b.Text + "：" + b.URL
+			// a line that cannot fit with the text it follows is left out
+			if b.URL != "" && !strings.Contains(text, b.URL) && tglen.Len(tail+line) < tglen.Max {
+				tail += line
 			}
 		}
 	}
-	return text
+	if tglen.Len(text)+tglen.Len(tail) > tglen.Max {
+		text = tglen.Cut(text, tglen.Max-tglen.Len(tail))
+	}
+	return text + tail
 }

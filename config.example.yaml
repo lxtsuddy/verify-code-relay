@@ -50,7 +50,7 @@ mailboxes:
         💼 <b>{{.Service}}</b>：<code>{{.Code}}</code>
         📧 {{.Mailbox}}{{with .Subject}} · {{.}}{{end}}
 
-# 全域範本（選填）。可用變數：.Code .URL .Service .FromName .FromAddr .To .Subject .Mailbox .Date .Rule
+# 全域範本（選填）。可用變數：.Code .URL .LinkText（信裡連結的文字）.Host（連結網域）.Service .FromName .FromAddr .To .Subject .Mailbox .Date .Rule
 # templates:
 #   code: |
 #     🔐 <b>{{.Service}}</b> 驗證碼

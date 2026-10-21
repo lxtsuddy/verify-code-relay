@@ -10,7 +10,9 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
 	"time"
+	"verify-code-relay/internal/tglen"
 )
 
 func TestSendOKRequestShape(t *testing.T) {
@@ -270,5 +272,19 @@ func TestPlainTextWithLinks(t *testing.T) {
 		if got := PlainTextWithLinks("a &amp; b", m); got != "a & b" {
 			t.Errorf("markup %q: got %q", m, got)
 		}
+	}
+}
+
+// The retry text must stay within Telegram's limit: the body is cut to make room for the
+// link lines, and a link line that cannot fit on its own is left out.
+func TestPlainTextWithLinksFitsLimit(t *testing.T) {
+	link := `{"inline_keyboard":[[{"text":"🔗 Go","url":"https://x.test/v"}]]}`
+	got := PlainTextWithLinks(strings.Repeat("a", 5000), link)
+	if tglen.Len(got) > tglen.Max || !strings.HasSuffix(got, "\n🔗 Go：https://x.test/v") {
+		t.Errorf("len %d, tail %q", tglen.Len(got), got[len(got)-30:])
+	}
+	huge := `{"inline_keyboard":[[{"text":"🔗 Go","url":"https://x.test/` + strings.Repeat("b", 4100) + `"}]]}`
+	if got := PlainTextWithLinks("short", huge); got != "short" {
+		t.Errorf("an over-long link line must be left out, got %d units", tglen.Len(got))
 	}
 }

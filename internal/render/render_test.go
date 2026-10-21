@@ -442,3 +442,58 @@ func TestLinkTextAndHostFields(t *testing.T) {
 		t.Errorf("text = %q", out.Text)
 	}
 }
+
+// The host line must not hide a look-alike domain: a non-ASCII host also shows its
+// ASCII (punycode) form; a trailing dot is dropped.
+func TestHostShowsPunycode(t *testing.T) {
+	r := mustNew(t, cfgWith(config.Templates{Link: "{{.Host}}"}, nil))
+	for url, want := range map[string]string{
+		"https://аpple.com/x":         "аpple.com（xn--pple-43d.com）",
+		"https://evil.com./x":         "evil.com",
+		"https://github.com@evil.com": "evil.com",
+	} {
+		d := sample
+		d.Code, d.URL = "", url
+		if out := mustRender(t, r, "", d); out.Text != want {
+			t.Errorf("%s: host %q, want %q", url, out.Text, want)
+		}
+	}
+}
+
+func TestButtonLabelFallbacks(t *testing.T) {
+	r := mustNew(t, cfgWith(config.Templates{}, nil))
+	for _, tc := range []struct{ text, url, want string }{
+		// a URL shown as the link text names nothing (and may differ from the real target)
+		{"https://github.com/login/verify?token=abc", "https://evil.example/x", "🔗 開啟 evil.example"},
+		{"www.github.com/login", "https://evil.example/x", "🔗 開啟 evil.example"},
+		// invisible format characters (zero-width space, right-to-left override) are dropped
+		{"Ver​ify‮", "https://x.test/r", "🔗 Verify"},
+		// the host fallback is cut like any label
+		{"", "https://" + strings.Repeat("a", 60) + ".test/", "🔗 開啟 " + strings.Repeat("a", 28) + "…"},
+	} {
+		d := sample
+		d.Code, d.URL, d.LinkText = "", tc.url, tc.text
+		out := mustRender(t, r, "", d)
+		var mk struct {
+			InlineKeyboard [][]struct{ Text string } `json:"inline_keyboard"`
+		}
+		if err := json.Unmarshal([]byte(out.ReplyMarkup), &mk); err != nil {
+			t.Fatal(err)
+		}
+		if got := mk.InlineKeyboard[0][0].Text; got != tc.want {
+			t.Errorf("label %q, want %q", got, tc.want)
+		}
+	}
+}
+
+// The new built-in layout still fits: a long subject is shortened and the rest kept.
+func TestBuiltinFitsLongSubject(t *testing.T) {
+	r := mustNew(t, cfgWith(config.Templates{}, nil))
+	d := sample
+	d.Subject = strings.Repeat("長", 5000)
+	out := mustRender(t, r, "", d)
+	checkFits(t, out.Text)
+	if !strings.Contains(out.Text, "<code>123456</code>") || !strings.Contains(out.Text, "👤 寄件者：GitHub") || !strings.HasSuffix(out.Text, "…") {
+		t.Errorf("text tail %q", out.Text[len(out.Text)-40:])
+	}
+}
