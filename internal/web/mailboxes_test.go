@@ -676,3 +676,31 @@ func TestMailboxServerChangeDropsOAuthToken(t *testing.T) {
 		saveRaw(e, raw)
 	}
 }
+
+// The connection test compares the effective app: a mailbox using the microsoft section
+// tests with blank overrides (or ones equal to the global values), and a differing override
+// is refused.
+func TestProbeMicrosoftUsesEffectiveApp(t *testing.T) {
+	e := newEnvWithIMAP(t, withGlobalMicrosoftApp)
+	e.login()
+	ctx := context.Background()
+	e.st.SaveOAuthToken(ctx, "outlook", store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)})
+	probe := func(clientID, tenant string) string {
+		_, body := e.postJSON("/api/mailboxes/probe", map[string]string{"name": "outlook", "host": "outlook.office365.com", "username": "me@outlook.com",
+			"auth_type": "microsoft_oauth", "client_id": clientID, "tenant": tenant})
+		return body
+	}
+	for _, in := range [][2]string{{"", ""}, {"global-app", ""}, {"", "organizations"}} {
+		// a fresh token each time: the refused XOAUTH2 login marks the stored one as failed
+		e.st.SaveOAuthToken(ctx, "outlook", store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)})
+		if body := probe(in[0], in[1]); !strings.Contains(body, "登入失敗") { // the in-memory server refuses XOAUTH2
+			t.Errorf("probe %v = %s, want a login attempt", in, body)
+		}
+		<-e.imap.hosts
+	}
+	for _, in := range [][2]string{{"other-app", ""}, {"", "consumers"}} {
+		if body := probe(in[0], in[1]); !strings.Contains(body, "與已儲存的不同") {
+			t.Errorf("probe %v = %s, want refused", in, body)
+		}
+	}
+}

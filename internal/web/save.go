@@ -35,7 +35,8 @@ type saved struct {
 // saveConfig is mutate with another version source (e.g. "restore") that also reports
 // the OAuth tokens it dropped. Which tokens no longer fit is decided here, for every
 // change alike, by comparing each mailbox before and after (runtime.StaleOAuthTokens: a
-// removed mailbox always loses its token, one that just became Microsoft any leftover).
+// removed mailbox always loses its token, one that just became Microsoft any leftover, and
+// a change to the microsoft section those of the mailboxes that use it).
 // They are deleted only once the new version is stored, so a failed save never loses a
 // token, and while neither the old nor the new service runs (Runtime.ApplyWith), so no
 // watcher can write one back or send one to a new server.
@@ -47,13 +48,7 @@ func (s *Server) saveConfig(r *http.Request, source, summary string, fn func(raw
 	if err != nil {
 		return saved{}, nil, err
 	}
-	before := map[string]*config.Mailbox{} // copies: fn may change the mailboxes in place
-	for name, m := range raw.Mailboxes {
-		if m != nil {
-			c := *m
-			before[name] = &c
-		}
-	}
+	before := raw.Clone() // fn may change raw in place; raw is not defaulted, so Clone is faithful
 	if err := fn(raw); err != nil {
 		var fe FieldErrors
 		if errors.As(err, &fe) {
@@ -71,7 +66,7 @@ func (s *Server) saveConfig(r *http.Request, source, summary string, fn func(raw
 	if err != nil {
 		return saved{}, nil, err
 	}
-	stale := runtime.StaleOAuthTokens(before, raw.Mailboxes)
+	stale := runtime.StaleOAuthTokens(before, raw)
 	s.cancelStaleFlows(raw) // before any token is deleted
 	var res saved
 	dctx := context.WithoutCancel(ctx) // the version is stored: finish even if the client went away

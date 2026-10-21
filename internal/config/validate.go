@@ -74,6 +74,11 @@ func (c *Config) Validate() error {
 	positive("defaults.alert_ttl", c.Defaults.AlertTTL)
 	positive("defaults.poll_interval", c.Defaults.PollInterval)
 	positive("defaults.alert_after", c.Defaults.AlertAfter)
+	for path, v := range map[string]string{"microsoft.client_id": c.Microsoft.ClientID, "microsoft.tenant": c.Microsoft.Tenant} {
+		if v != strings.TrimSpace(v) {
+			p.add(path, "前後不可有空白")
+		}
+	}
 	if c.Admin != "" {
 		if _, ok := c.Targets[c.Admin]; !ok {
 			p.add("admin", "找不到目標 %q", c.Admin)
@@ -100,8 +105,8 @@ func (c *Config) Validate() error {
 				p.add(base+".auth.password", "不可為空")
 			}
 		case "microsoft_oauth":
-			if m.Auth.ClientID == "" {
-				p.add(base+".auth.client_id", "不可為空")
+			if id, _ := c.MicrosoftApp(m); id == "" {
+				p.add(base+".auth.client_id", "未設定：請在系統設定填寫 Microsoft 應用程式，或在信箱進階設定覆寫")
 			}
 		default:
 			p.add(base+".auth.type", "未知的認證類型 %q（可用：password、microsoft_oauth）", m.Auth.Type)

@@ -45,6 +45,7 @@ type Config struct {
 	Targets    map[string]Target   `yaml:"targets,omitempty"`
 	Admin      string              `yaml:"admin,omitempty"`
 	Defaults   Defaults            `yaml:"defaults,omitempty"`
+	Microsoft  Microsoft           `yaml:"microsoft,omitempty"`
 	Mailboxes  map[string]*Mailbox `yaml:"mailboxes,omitempty"`
 	Templates  Templates           `yaml:"templates,omitempty"`
 	Rules      []Rule              `yaml:"rules,omitempty"`
@@ -68,6 +69,40 @@ type Defaults struct {
 	AlertAfter   Duration `yaml:"alert_after,omitempty"`
 }
 
+// Microsoft is the Azure app registration that Microsoft (microsoft_oauth) mailboxes sign
+// in with, unless a mailbox sets its own auth.client_id or auth.tenant (MicrosoftApp).
+type Microsoft struct {
+	ClientID string `yaml:"client_id,omitempty"`
+	Tenant   string `yaml:"tenant,omitempty"`
+}
+
+// DefaultTenant is the tenant used when neither the mailbox nor the microsoft section sets
+// one. It stays "common", what a mailbox without a tenant always meant, so stored configs
+// keep signing in the same way; personal accounts usually want "consumers".
+const DefaultTenant = "common"
+
+// MicrosoftApp returns the client_id and tenant mailbox m signs in with: its own auth
+// value when set, else the microsoft section's, else (tenant only) DefaultTenant. A
+// client_id may come out empty; Validate rejects that for a Microsoft mailbox.
+func (c *Config) MicrosoftApp(m *Mailbox) (clientID, tenant string) {
+	return c.Microsoft.For(m.Auth)
+}
+
+// For is MicrosoftApp for a mailbox's auth settings a.
+func (g Microsoft) For(a Auth) (clientID, tenant string) {
+	clientID, tenant = a.ClientID, a.Tenant
+	if clientID == "" {
+		clientID = g.ClientID
+	}
+	if tenant == "" {
+		tenant = g.Tenant
+	}
+	if tenant == "" {
+		tenant = DefaultTenant
+	}
+	return clientID, tenant
+}
+
 type Mailbox struct {
 	Name         string    `yaml:"-"`
 	DisplayName  string    `yaml:"display_name,omitempty"`
@@ -86,8 +121,8 @@ type Mailbox struct {
 type Auth struct {
 	Type     string `yaml:"type,omitempty"`
 	Password string `yaml:"password,omitempty"`
-	ClientID string `yaml:"client_id,omitempty"`
-	Tenant   string `yaml:"tenant,omitempty"`
+	ClientID string `yaml:"client_id,omitempty"` // overrides microsoft.client_id
+	Tenant   string `yaml:"tenant,omitempty"`    // overrides microsoft.tenant
 }
 
 type Templates struct {
@@ -197,9 +232,6 @@ func (c *Config) applyDefaults() {
 		}
 		if len(m.Folders) == 0 {
 			m.Folders = []string{"INBOX"}
-		}
-		if m.Auth.Type == "microsoft_oauth" && m.Auth.Tenant == "" {
-			m.Auth.Tenant = "common"
 		}
 		orDur(&m.MaxAge, c.Defaults.MaxAge.Duration)
 		orDur(&m.TTL, c.Defaults.TTL.Duration)

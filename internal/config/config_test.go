@@ -65,8 +65,11 @@ func TestParse(t *testing.T) {
 		t.Errorf("gmail effective durations wrong: %+v", g)
 	}
 	o := c.Mailboxes["outlook"]
-	if o.Port != 1993 || o.MaxAge.Duration != 5*time.Minute || o.Auth.Tenant != "common" {
+	if o.Port != 1993 || o.MaxAge.Duration != 5*time.Minute || o.Auth.Tenant != "" {
 		t.Errorf("outlook wrong: %+v", o)
+	}
+	if id, tenant := c.MicrosoftApp(o); id != "abc" || tenant != "common" {
+		t.Errorf("outlook effective app = %q %q, want abc common", id, tenant)
 	}
 	if o.Templates.Code != "X {{.Code}}" {
 		t.Errorf("template override lost")

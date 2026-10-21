@@ -73,7 +73,7 @@ func TestValidateErrors(t *testing.T) {
 		{"no username", func(c *Config) { c.Mailboxes["gmail"].Username = "" }, "mailboxes.gmail.username: 不可為空"},
 		{"bad auth type", func(c *Config) { c.Mailboxes["gmail"].Auth.Type = "magic" }, `mailboxes.gmail.auth.type: 未知的認證類型 "magic"`},
 		{"no password", func(c *Config) { c.Mailboxes["gmail"].Auth.Password = "" }, "mailboxes.gmail.auth.password: 不可為空"},
-		{"oauth no client", func(c *Config) { c.Mailboxes["gmail"].Auth = Auth{Type: "microsoft_oauth"} }, "mailboxes.gmail.auth.client_id: 不可為空"},
+		{"oauth no client", func(c *Config) { c.Mailboxes["gmail"].Auth = Auth{Type: "microsoft_oauth"} }, "mailboxes.gmail.auth.client_id: 未設定：請在系統設定填寫 Microsoft 應用程式，或在信箱進階設定覆寫"},
 		{"bad regex", func(c *Config) { c.Rules[0].CodeRegex = "(" }, "rules[0].code_regex: "},
 		{"rule no matcher", func(c *Config) { c.Rules[0].From = "" }, "rules[0]: 至少需要 from 或 subject"},
 		{"rule no action", func(c *Config) { c.Rules[0].CodeRegex = "" }, "rules[0]: 需要 code_regex、link_regex 或 ignore: true 其中一項"},

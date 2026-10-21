@@ -55,7 +55,10 @@ type deviceFlow struct {
 // msAccount is what a Microsoft token belongs to (runtime.MSAccount).
 type msAccount = runtime.MSAccount
 
-func accountOf(m *config.Mailbox) msAccount { return runtime.MSAccountOf(m) }
+// accountOf is the account a token of mailbox m of config c is for (its effective app).
+func accountOf(c *config.Config, m *config.Mailbox) msAccount {
+	return runtime.MSAccountOf(c.Microsoft, m)
+}
 
 var errFlowStale = errors.New("信箱設定已變更或已刪除，這次授權作廢，請重新授權")
 
@@ -88,7 +91,7 @@ func (fs flowStore) SaveOAuthToken(ctx context.Context, mailbox string, t store.
 		return err
 	}
 	m := raw.Mailboxes[fs.name]
-	if m == nil || m.Auth.Type != authMicrosoft || accountOf(m) != fs.f.acct {
+	if m == nil || m.Auth.Type != authMicrosoft || accountOf(raw, m) != fs.f.acct {
 		return errFlowStale
 	}
 	return s.o.Store.SaveOAuthToken(ctx, mailbox, t)
@@ -118,7 +121,7 @@ func (ps probeStore) SaveOAuthToken(ctx context.Context, mailbox string, t store
 	if err != nil {
 		return err
 	}
-	if m := raw.Mailboxes[ps.name]; m == nil || m.Auth.Type != authMicrosoft || accountOf(m) != ps.acct {
+	if m := raw.Mailboxes[ps.name]; m == nil || m.Auth.Type != authMicrosoft || accountOf(raw, m) != ps.acct {
 		s.o.Log.Info("連線測試期間信箱設定已變更，不儲存測試時更新的 Microsoft 授權", "mailbox", ps.name)
 		return nil
 	}
@@ -147,7 +150,7 @@ func (s *Server) cancelStaleFlows(raw *config.Config) {
 		if f.State != statePending {
 			continue
 		}
-		if m := raw.Mailboxes[name]; m == nil || m.Auth.Type != authMicrosoft || accountOf(m) != f.acct {
+		if m := raw.Mailboxes[name]; m == nil || m.Auth.Type != authMicrosoft || accountOf(raw, m) != f.acct {
 			f.cancel()
 			delete(s.flows, name)
 			s.o.Log.Info("信箱設定已變更，取消 Microsoft 授權流程", "mailbox", name)
@@ -196,30 +199,31 @@ func (s *Server) Close() {
 	s.flowWG.Wait()
 }
 
-// storedMailbox returns the stored mailbox name, answering 404 when there is none.
-func (s *Server) storedMailbox(w http.ResponseWriter, r *http.Request, name string) (*config.Mailbox, bool) {
+// storedMailbox returns the stored config and its mailbox name, answering 404 when there is
+// no such mailbox.
+func (s *Server) storedMailbox(w http.ResponseWriter, r *http.Request, name string) (*config.Config, *config.Mailbox, bool) {
 	raw, _, err := runtime.LoadConfig(r.Context(), s.o.Store)
 	if err != nil {
 		s.serverError(w, r, err)
-		return nil, false
+		return nil, nil, false
 	}
 	m := raw.Mailboxes[name]
 	if m == nil {
 		s.fail(w, r, http.StatusNotFound, "找不到信箱 "+name+"，可能已被刪除；請重新整理頁面")
-		return nil, false
+		return nil, nil, false
 	}
-	return m, true
+	return raw, m, true
 }
 
 // microsoftMailbox is storedMailbox that also answers 400 unless the mailbox uses Microsoft
 // authorisation.
-func (s *Server) microsoftMailbox(w http.ResponseWriter, r *http.Request, name string) (*config.Mailbox, bool) {
-	m, ok := s.storedMailbox(w, r, name)
+func (s *Server) microsoftMailbox(w http.ResponseWriter, r *http.Request, name string) (*config.Config, *config.Mailbox, bool) {
+	raw, m, ok := s.storedMailbox(w, r, name)
 	if ok && m.Auth.Type != authMicrosoft {
 		s.fail(w, r, http.StatusBadRequest, "信箱 "+name+" 使用密碼登入，不需要 Microsoft 授權")
-		return nil, false
+		return nil, nil, false
 	}
-	return m, ok
+	return raw, m, ok
 }
 
 func (s *Server) flowAnswer(f *deviceFlow) map[string]any {
@@ -237,11 +241,11 @@ func (s *Server) postOAuthStart(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	unlock := s.lockStart(name) // one start per mailbox at a time; status keeps answering
 	defer unlock()
-	m, ok := s.microsoftMailbox(w, r, name) // after waiting: the mailbox may have changed
+	stored, m, ok := s.microsoftMailbox(w, r, name) // after waiting: the mailbox may have changed
 	if !ok {
 		return
 	}
-	acct := accountOf(m)
+	acct := accountOf(stored, m)
 
 	s.flowMu.Lock()
 	if s.closed {
@@ -263,7 +267,7 @@ func (s *Server) postOAuthStart(w http.ResponseWriter, r *http.Request) {
 	s.flowMu.Unlock()
 
 	f := &deviceFlow{State: statePending, acct: acct}
-	ms := &auth.Microsoft{Mailbox: name, Username: m.Username, ClientID: m.Auth.ClientID, Tenant: m.Auth.Tenant,
+	ms := &auth.Microsoft{Mailbox: name, Username: m.Username, ClientID: acct.ClientID, Tenant: acct.Tenant,
 		Store: flowStore{s, name, f}, Authority: s.o.MSAuthority, Log: s.o.Log, PollInterval: s.o.MSPollInterval}
 	ctx, cancel := context.WithTimeout(r.Context(), flowStartTimeout)
 	dc, err := ms.StartDeviceLogin(ctx)
@@ -292,7 +296,7 @@ func (s *Server) postOAuthStart(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, r, err)
 		return
 	}
-	if cur := raw.Mailboxes[name]; cur == nil || cur.Auth.Type != authMicrosoft || accountOf(cur) != acct {
+	if cur := raw.Mailboxes[name]; cur == nil || cur.Auth.Type != authMicrosoft || accountOf(raw, cur) != acct {
 		s.saveMu.Unlock()
 		stop()
 		s.fail(w, r, http.StatusConflict, "信箱 "+name+" 的設定剛被修改，請重新整理頁面後再授權")
@@ -376,7 +380,7 @@ func flowError(err error) string {
 // started, cancelled, forgotten after a restart, or reported over a minute ago).
 func (s *Server) getOAuthStatus(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if _, ok := s.storedMailbox(w, r, name); !ok {
+	if _, _, ok := s.storedMailbox(w, r, name); !ok {
 		return
 	}
 	now := s.now()

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -26,6 +27,7 @@ type fakeMicrosoft struct {
 	devCalls int
 	polls    int
 	tenants  []string
+	clients  []string                  // client_id of every request
 	devBody  string                    // devicecode reply (200)
 	devGate  map[string]chan struct{}  // by tenant: devicecode answers once the channel is closed
 	token    func(n int) (int, string) // n = 1 for the first poll
@@ -59,6 +61,7 @@ func (f *fakeMicrosoft) serve(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	f.mu.Lock()
 	f.tenants = append(f.tenants, parts[0])
+	f.clients = append(f.clients, r.PostForm.Get("client_id"))
 	var status int
 	var body string
 	var token func(int) (int, string)
@@ -94,6 +97,13 @@ func (f *fakeMicrosoft) deviceCodeCalls() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.devCalls
+}
+
+// seen returns the tenants and client_ids of the requests so far.
+func (f *fakeMicrosoft) seen() (tenants, clients []string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.tenants...), append([]string(nil), f.clients...)
 }
 
 func (f *fakeMicrosoft) setToken(fn func(n int) (int, string)) {
@@ -612,5 +622,87 @@ func TestEditPageKeepsStoredAccountForAuthorisation(t *testing.T) {
 	}
 	if !strings.Contains(page, `data-stored-tenant="consumers"`) || !strings.Contains(page, `value="organizations"`) {
 		t.Error("the sent-back form must keep the stored tenant on the authorisation box")
+	}
+}
+
+// withGlobalMicrosoftApp sets the microsoft section and makes mailbox "outlook" use it.
+func withGlobalMicrosoftApp(c *config.Config) {
+	withOutlookMailbox(c)
+	c.Microsoft = config.Microsoft{ClientID: "global-app", Tenant: "organizations"}
+	c.Mailboxes["outlook"].Auth = config.Auth{Type: "microsoft_oauth"}
+}
+
+// A mailbox without its own client_id and tenant signs in with the microsoft section.
+func TestDeviceFlowUsesGlobalMicrosoftApp(t *testing.T) {
+	ms := newFakeMicrosoft(t)
+	e := newEnv(t, withGlobalMicrosoftApp, withFakeMicrosoft(ms))
+	e.login()
+	if _, body := e.postJSON("/api/mailboxes/outlook/oauth/start", nil); !strings.Contains(body, "ABCD-EFGH") {
+		t.Fatalf("start = %s", body)
+	}
+	e.waitOAuthState("outlook", "done")
+	tenants, clients := ms.seen()
+	for i := range tenants {
+		if tenants[i] != "organizations" || clients[i] != "global-app" {
+			t.Fatalf("request %d went to tenant %q with client_id %q, want the global app", i, tenants[i], clients[i])
+		}
+	}
+	if _, ok, _ := e.st.GetOAuthToken(context.Background(), "outlook"); !ok {
+		t.Fatal("token not stored")
+	}
+}
+
+// A mailbox's own client_id wins over the microsoft section.
+func TestDeviceFlowUsesMailboxOverride(t *testing.T) {
+	ms := newFakeMicrosoft(t)
+	e := newEnv(t, func(c *config.Config) {
+		withGlobalMicrosoftApp(c)
+		c.Mailboxes["outlook"].Auth.ClientID = "own-app"
+	}, withFakeMicrosoft(ms))
+	e.login()
+	e.postJSON("/api/mailboxes/outlook/oauth/start", nil)
+	e.waitOAuthState("outlook", "done")
+	tenants, clients := ms.seen()
+	if len(clients) == 0 || clients[0] != "own-app" || tenants[0] != "organizations" {
+		t.Fatalf("tenants %v clients %v, want own-app on the global tenant", tenants, clients)
+	}
+}
+
+// Changing the microsoft section while a flow of a mailbox that uses it is pending cancels
+// the flow (its token would be for the old app) and leaves other mailboxes' flows alone.
+func TestGlobalAppChangeCancelsFlowsAndDropsTokens(t *testing.T) {
+	ms := newFakeMicrosoft(t)
+	polled, release := blockedGrant(ms)
+	defer close(release)
+	e := newEnv(t, func(c *config.Config) {
+		withGlobalMicrosoftApp(c)
+		c.Mailboxes["own"] = &config.Mailbox{Host: "outlook.office365.com", Username: "own@outlook.com",
+			Auth: config.Auth{Type: "microsoft_oauth", ClientID: "own-app", Tenant: "consumers"}, Targets: []string{"me"}}
+		c.Mailboxes["team"] = &config.Mailbox{Host: "outlook.office365.com", Username: "team@outlook.com",
+			Auth: config.Auth{Type: "microsoft_oauth"}, Targets: []string{"me"}}
+	}, withFakeMicrosoft(ms))
+	e.login()
+	ctx := context.Background()
+	for _, name := range []string{"own", "team"} {
+		e.st.SaveOAuthToken(ctx, name, store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)})
+	}
+	e.postJSON("/api/mailboxes/outlook/oauth/start", nil)
+	<-polled
+	req, _ := http.NewRequest("POST", "/", nil)
+	res, fe, err := e.srv.saveConfig(req.WithContext(ctx), "web", "test", func(raw *config.Config) error {
+		raw.Microsoft.ClientID = "global-app-2"
+		return nil
+	})
+	if err != nil || len(fe) > 0 {
+		t.Fatalf("save: %v %v", err, fe)
+	}
+	if !slices.Equal(res.Dropped, []string{"team"}) {
+		t.Errorf("dropped = %v, want only team", res.Dropped)
+	}
+	if st := e.waitOAuthState("outlook", "none"); st["state"] != "none" {
+		t.Fatalf("flow of a mailbox using the global app survived: %v", st)
+	}
+	if _, ok, _ := e.st.GetOAuthToken(ctx, "own"); !ok {
+		t.Fatal("a mailbox with its own app lost its token")
 	}
 }

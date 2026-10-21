@@ -218,3 +218,38 @@ func TestConfigImportOverUnreadableConfigDropsTokens(t *testing.T) {
 		t.Errorf("out = %q", out)
 	}
 }
+
+// The microsoft section is imported like the rest; changing its client_id drops the tokens
+// of exactly the mailboxes that use it, and re-importing an old per-mailbox YAML unchanged
+// drops nothing.
+func TestConfigImportGlobalMicrosoftApp(t *testing.T) {
+	keepUmask(t)
+	t.Setenv("RELAY_DATA_DIR", t.TempDir())
+	legacy := importBase + "mailboxes:\n  own: " + msBox("outlook.office365.com", "a@outlook.com") + "\n"
+	importYAML(t, legacy)
+	st, err := openDB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	tok := store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)}
+	st.SaveOAuthToken(ctx, "own", tok)
+	if out := importYAML(t, legacy); strings.Contains(out, "已清除") {
+		t.Fatalf("re-importing the same per-mailbox YAML dropped a token: %q", out)
+	}
+	shared := "{ host: outlook.office365.com, username: b@outlook.com, auth: { type: microsoft_oauth }, targets: [me] }"
+	importYAML(t, importBase+"microsoft: { client_id: app-1, tenant: consumers }\nmailboxes:\n  own: "+msBox("outlook.office365.com", "a@outlook.com")+"\n  shared: "+shared+"\n")
+	st.SaveOAuthToken(ctx, "shared", tok)
+	out := importYAML(t, importBase+"microsoft: { client_id: app-2, tenant: consumers }\nmailboxes:\n  own: "+msBox("outlook.office365.com", "a@outlook.com")+"\n  shared: "+shared+"\n")
+	if _, ok, _ := st.GetOAuthToken(ctx, "shared"); ok || !strings.Contains(out, "信箱 shared 的 Microsoft 授權已清除") {
+		t.Errorf("global client_id change kept the token of a mailbox using it: %q", out)
+	}
+	if _, ok, _ := st.GetOAuthToken(ctx, "own"); !ok || strings.Contains(out, "信箱 own") {
+		t.Errorf("a mailbox with its own client_id lost its token: %q", out)
+	}
+	code, stdout, _ := run("config", "export")
+	if code != 0 || !strings.Contains(stdout, "microsoft:\n  client_id: app-2\n  tenant: consumers\n") {
+		t.Errorf("export = %d %q", code, stdout)
+	}
+}

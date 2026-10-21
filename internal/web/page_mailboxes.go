@@ -587,14 +587,6 @@ func keepOrder(old, next []string) []string {
 	return old
 }
 
-// effectiveTenant is the tenant a Microsoft login uses (config defaults blank to common).
-func effectiveTenant(t string) string {
-	if t == "" {
-		return "common"
-	}
-	return t
-}
-
 // effectivePort is the port a mailbox connects to (config defaults 0 to 993).
 func effectivePort(p int) int {
 	if p == 0 {
@@ -699,14 +691,15 @@ func (s *Server) postAPIProbe(w http.ResponseWriter, r *http.Request) {
 			bad("主機、埠號或帳號與已儲存的不同：授權只會用在原本的伺服器，請先儲存再測試")
 			return
 		}
-		if in.ClientID != stored.Auth.ClientID || effectiveTenant(in.Tenant) != effectiveTenant(stored.Auth.Tenant) {
+		acct := accountOf(raw, stored)
+		if id, tenant := raw.Microsoft.For(config.Auth{ClientID: in.ClientID, Tenant: in.Tenant}); id != acct.ClientID || tenant != acct.Tenant {
 			bad("應用程式識別碼或 tenant 與已儲存的不同：授權屬於原本的應用程式，請先儲存（需要重新授權）再測試")
 			return
 		}
 		// only the stored settings ever drive the stored token, and a refreshed token is only
 		// saved while they still hold (probeStore)
-		authn = &auth.Microsoft{Mailbox: in.Name, Username: stored.Username, ClientID: stored.Auth.ClientID, Tenant: stored.Auth.Tenant,
-			Store: probeStore{s, in.Name, accountOf(stored)}, Authority: s.o.MSAuthority, Log: s.o.Log}
+		authn = &auth.Microsoft{Mailbox: in.Name, Username: stored.Username, ClientID: acct.ClientID, Tenant: acct.Tenant,
+			Store: probeStore{s, in.Name, acct}, Authority: s.o.MSAuthority, Log: s.o.Log}
 	case authPassword:
 		pw := in.Password
 		if pw == "" {

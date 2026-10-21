@@ -31,7 +31,8 @@ func cmdLogin(args []string, stdout, stderr io.Writer) int {
 	if m.Auth.Type != "microsoft_oauth" {
 		return fail(stderr, fmt.Errorf("信箱 %s 的 auth.type 是 %q，只有 microsoft_oauth 需要 login", name, m.Auth.Type))
 	}
-	ms := &auth.Microsoft{Mailbox: name, Username: m.Username, ClientID: m.Auth.ClientID, Tenant: m.Auth.Tenant, Store: st,
+	clientID, tenant := b.Config.MicrosoftApp(m)
+	ms := &auth.Microsoft{Mailbox: name, Username: m.Username, ClientID: clientID, Tenant: tenant, Store: st,
 		Log: slog.New(slog.NewTextHandler(stderr, nil))}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
