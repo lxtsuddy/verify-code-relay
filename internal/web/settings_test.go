@@ -590,3 +590,38 @@ func TestSettingsMicrosoftDefaultTenantWithoutGlobalClient(t *testing.T) {
 		t.Error("token kept although the default tenant changed")
 	}
 }
+
+// A version from before routes (folders and targets) restores, forwards as it did, and is
+// stored in the new shape.
+func TestRestoreVersionWithOldFoldersAndTargets(t *testing.T) {
+	e := newEnv(t, nil)
+	e.login()
+	old := `bots: { main: { token: "1:SECRET-TOKEN" } }
+targets: { me: { bot: main, chat_id: 42 }, fam: { bot: main, chat_id: 7 } }
+admin: me
+mailboxes:
+  gmail:
+    host: imap.gmail.com
+    username: me@gmail.com
+    auth: { type: password, password: p }
+    folders: [INBOX, Spam]
+    targets: [me, fam]
+`
+	id, err := e.st.SaveConfigVersion(context.Background(), storeVersion(old))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp, _ := e.postForm(fmt.Sprintf("/settings/versions/%d/restore", id), nil); resp.StatusCode != 303 || !strings.Contains(e.flash(resp), "已還原") {
+		t.Fatalf("restore = %d %q", resp.StatusCode, e.flash(resp))
+	}
+	latest, _, _ := e.st.LatestConfigVersion(context.Background())
+	if !strings.Contains(latest.YAML, "routes:") || strings.Contains(latest.YAML, "folders:") {
+		t.Errorf("restored version not in the routes shape:\n%s", latest.YAML)
+	}
+	if n := len(e.rt.Snapshot().Watchers); n != 2 {
+		t.Errorf("watchers = %d, want INBOX and Spam", n)
+	}
+	if _, body := e.get("/mailboxes/gmail"); strings.Count(body, `name="route_folder" value="Spam"`) != 2 {
+		t.Error("edit page lacks Spam → me and Spam → fam")
+	}
+}
