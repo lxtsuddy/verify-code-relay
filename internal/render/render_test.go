@@ -451,6 +451,7 @@ func TestHostShowsPunycode(t *testing.T) {
 		"https://аpple.com/x":         "аpple.com（xn--pple-43d.com）",
 		"https://evil.com./x":         "evil.com",
 		"https://github.com@evil.com": "evil.com",
+		"https://xn--/x":              "xn--",
 	} {
 		d := sample
 		d.Code, d.URL = "", url
@@ -466,6 +467,12 @@ func TestButtonLabelFallbacks(t *testing.T) {
 		// a URL shown as the link text names nothing (and may differ from the real target)
 		{"https://github.com/login/verify?token=abc", "https://evil.example/x", "🔗 開啟 evil.example"},
 		{"www.github.com/login", "https://evil.example/x", "🔗 開啟 evil.example"},
+		{"github.com/login/verify", "https://evil.example/x", "🔗 開啟 evil.example"},
+		{"accounts.google.com", "https://evil.example/x", "🔗 開啟 evil.example"},
+		// the button names a look-alike host by its ASCII form
+		{"", "https://аpple.com/x", "🔗 開啟 xn--pple-43d.com"},
+		// ordinary text with a dot stays
+		{"Verify v2.0", "https://x.test/r", "🔗 Verify v2.0"},
 		// invisible format characters (zero-width space, right-to-left override) are dropped
 		{"Ver​ify‮", "https://x.test/r", "🔗 Verify"},
 		// the host fallback is cut like any label

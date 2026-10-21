@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/url"
+	"regexp"
 	"strings"
 	"time"
 	"unicode"
@@ -260,16 +261,31 @@ type copyText struct {
 // non-ASCII letters also shows its ASCII (punycode) form, "аpple.com（xn--pple-43d.com）",
 // so a look-alike of a known domain stands out.
 func hostOf(raw string) string {
-	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return ""
-	}
-	h := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
-	if a, err := idna.Lookup.ToASCII(h); err == nil && a != h {
+	h, a := hostForms(raw)
+	if a != h {
 		return h + "（" + a + "）"
 	}
 	return h
 }
+
+// hostForms returns the lower-cased host name of an http(s) URL and its ASCII (punycode)
+// form, which equals the host when it is ASCII or has no valid ASCII form; "", "" when
+// the URL has none.
+func hostForms(raw string) (host, ascii string) {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return "", ""
+	}
+	h := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	if a, err := idna.Lookup.ToASCII(h); err == nil && a != "" {
+		return h, a
+	}
+	return h, h
+}
+
+// domainTextRe matches link text that is just a domain or a domain and path
+// ("accounts.google.com", "github.com/login"): like a URL, it may differ from the target.
+var domainTextRe = regexp.MustCompile(`^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}(/\S*)?$`)
 
 // cleanLinkText collapses white space and drops invisible format characters (zero-width
 // spaces, direction overrides) from a link's text. Text that is itself a URL is dropped:
@@ -281,7 +297,7 @@ func cleanLinkText(s string) string {
 		}
 		return r
 	}, s)), " ")
-	if l := strings.ToLower(s); strings.Contains(l, "://") || strings.HasPrefix(l, "www.") {
+	if l := strings.ToLower(s); strings.Contains(l, "://") || strings.HasPrefix(l, "www.") || domainTextRe.MatchString(l) {
 		return ""
 	}
 	return s
@@ -294,7 +310,12 @@ func linkLabel(d Data) string {
 	case d.LinkText != "":
 		return clamp(d.LinkText, maxLabelRunes)
 	case d.Host != "":
-		return clamp("開啟 "+d.Host, maxLabelRunes)
+		// the ASCII form: a cut label must not keep only a look-alike Unicode host
+		_, ascii := hostForms(d.URL)
+		if ascii == "" {
+			ascii = d.Host
+		}
+		return clamp("開啟 "+ascii, maxLabelRunes)
 	}
 	return "開啟連結"
 }
