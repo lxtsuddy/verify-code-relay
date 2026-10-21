@@ -68,7 +68,49 @@
     <button type="submit" class="btn btn-primary" data-busy-text="驗證並套用中…">{{template "icon" "check"}}<span>儲存並套用</span></button>
   </div>
 </form>
-<select name="mailbox" form="mailtest" hidden>{{range .Data.Mailboxes}}<option value="{{.Name}}">{{.Label}}</option>{{end}}</select>
+
+{{/* Mail test: a form of its own (outside data-rules-form, so saving the rules never sends
+a mail); app.js posts it together with the rules form's current fields. */}}
+<form class="card mailtest" id="mailtest" data-mailtest novalidate aria-labelledby="mt-title">
+  <header class="card-head">
+    <div>
+      <h2 class="card-title" id="mt-title">用信件測試</h2>
+      <p class="card-desc">上傳一封信，看它會被怎麼辨識。使用本頁目前填寫的規則與關鍵字（尚未儲存也會套用）；不會儲存信件，也不會發送到 Telegram。</p>
+    </div>
+  </header>
+  <div class="card-body mt-form">
+    <div class="mt-source" role="tablist" aria-label="信件來源">
+      <button type="button" class="mt-tab" role="tab" id="mt-tab-file" aria-selected="true" aria-controls="mt-file" data-mt-mode="file">{{template "icon" "mail"}}<span>上傳 .eml</span></button>
+      <button type="button" class="mt-tab" role="tab" id="mt-tab-paste" aria-selected="false" aria-controls="mt-paste" tabindex="-1" data-mt-mode="paste">{{template "icon" "copy"}}<span>貼上原始碼</span></button>
+    </div>
+    <div id="mt-file" class="mt-drop" role="tabpanel" aria-labelledby="mt-tab-file" data-mt-drop>
+      <input class="sr-only" type="file" id="mt-eml" name="eml" accept=".eml,message/rfc822" aria-describedby="mt-eml-hint">
+      <label for="mt-eml" class="mt-drop-label">
+        <span class="mt-drop-mark">{{template "icon" "inbox"}}</span>
+        <span class="mt-drop-text"><b data-mt-file-label>拖放 .eml 檔到這裡，或點此選擇</b><span class="mt-drop-sub" id="mt-eml-hint">Gmail：信件右上「⋮」→「下載郵件」。上限 5 MiB。</span></span>
+      </label>
+    </div>
+    <div id="mt-paste" class="field mt-paste" role="tabpanel" aria-labelledby="mt-tab-paste" hidden>
+      <label class="label" for="mt-text">信件原始碼</label>
+      <textarea class="textarea input-mono" id="mt-text" name="eml_text" rows="8" spellcheck="false" autocapitalize="none" placeholder="From: …&#10;Subject: …&#10;&#10;…" aria-describedby="mt-text-hint"></textarea>
+      <p class="hint" id="mt-text-hint">Gmail：信件右上「⋮」→「顯示原始郵件」→「複製到剪貼簿」（不要全選整頁）。Outlook：「⋯」→「檢視」→「檢視訊息原始碼」。</p>
+    </div>
+    <div class="mt-run">
+      <div class="field">
+        <label class="label" for="mt-mailbox">預覽訊息使用的信箱</label>
+        <select class="select" id="mt-mailbox" name="mailbox">
+          <option value="">（不指定，用全域範本）</option>
+          {{range .Data.Mailboxes}}<option value="{{.Name}}">{{.Label}}</option>{{end}}
+        </select>
+      </div>
+      <div class="mt-actions">
+        <button type="submit" class="btn btn-primary" data-busy-text="測試中…">{{template "icon" "check"}}<span>測試</span></button>
+      </div>
+    </div>
+    <noscript><p class="hint">信件測試需要啟用 JavaScript。</p></noscript>
+    <div class="mt-out" data-mt-out aria-live="polite"></div>
+  </div>
+</form>
 
 <template id="rule-new">{{template "rule-row" (dict "I" -1 "ID" "rule-new" "R" .Data.NewRule "E" .Errors)}}</template>
 {{end}}

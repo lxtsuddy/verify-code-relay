@@ -39,6 +39,8 @@
     標籤    <div class="field kw-field" data-tags><textarea data-tags-source>一行一個</textarea></div>，app.js 轉成 .tags-box。
     未儲存  form[data-dirty-watch] 內放 <p class="save-note" data-dirty-note hidden>…</p>（通常在 .save-bar 裡）。
     預覽    figure.tg-phone：Telegram 對話的樣子（.tg-bar／.tg-chat 裡的 .tg-bubble 與 .tg-kb／.tg-meta）。
+    信件測試 form.card.mailtest（規則頁，獨立於規則表單）：.mt-source 分段切換、.mt-drop 拖放區；結果 .mt-verdict
+            （.is-ok｜.is-warn｜.is-muted｜.is-err，驗證碼用 .postcode）＋ .mt-result（細節與 .tg-chat 預覽）。
     健康    總覽頁首的 section.health：郵戳（.health-mark）的顏色與中間字是整體狀態，底弧是最近一次更新時間；
             顏色來自外層 [data-state]（ok｜info｜warn｜err｜idle），信箱卡片 .dash-card[data-state] 為 ok｜busy｜bad。
     紀錄    table.table.log-table，每列用 {{template "log-row" …}}（_logs.html）；640px 以下每列變成一張小卡。
@@ -1481,6 +1483,197 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .tpl-editor { padding: 16px; }
   .tpl-tab { padding-left: 12px; font-size: 14px; }
   .tg-msg { max-width: 100%; }
+}
+
+/* rules: mail test
+   A mail goes through the rules as filled in and comes back as a routing slip: the verdict
+   carries the outcome in its tone (green forwarded, amber nothing found, grey discarded, red
+   could not test), a found code sits in red postcode boxes, a discarded mail wears the same
+   「略過」 stamp as the rule that dropped it, and beside it the message lands in Telegram. */
+
+.mailtest { max-width: 980px; margin-top: 28px; }
+.mailtest .card-head > div { flex: 1 1 360px; }
+.mt-form { display: grid; gap: 16px; }
+
+/* mail source: a two-way segmented switch */
+.mt-source { display: inline-flex; justify-self: start; gap: 2px; padding: 3px; border-radius: 9px; background: var(--sunken); }
+.mt-tab {
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; padding: 0 14px;
+  border: 0; border-radius: 7px; background: transparent; color: var(--muted);
+  font: inherit; font-size: 14px; font-weight: 600; letter-spacing: 0.03em; cursor: pointer;
+  transition: background-color 0.15s, box-shadow 0.15s;
+}
+.mt-tab .icon { width: 16px; height: 16px; }
+.mt-tab:hover { color: var(--ink); }
+.mt-tab[aria-selected="true"] { background: #fff; color: var(--green-800); box-shadow: 0 0 0 1px var(--line), var(--shadow-1); }
+
+.mt-drop[hidden], .mt-paste[hidden] { display: none; }
+.mt-drop-label {
+  display: flex; align-items: center; gap: 14px; min-height: 96px; padding: 18px 20px;
+  border: 1.5px dashed var(--line-2); border-radius: var(--radius); background: var(--surface-2); cursor: pointer;
+  transition: border-color 0.15s, background-color 0.15s, box-shadow 0.15s;
+}
+.mt-drop-label > * { pointer-events: none; } /* drag events stay on the label, so no flicker */
+.mt-drop-label:hover { border-color: var(--green-300); background: var(--green-50); }
+.mt-drop:has(input:focus-visible) .mt-drop-label { outline: 2.5px solid var(--green-600); outline-offset: 2px; }
+.mt-drop.is-over .mt-drop-label { border-style: solid; border-color: var(--green-600); background: var(--green-50); box-shadow: var(--ring); }
+.mt-drop.is-filled .mt-drop-label { border-style: solid; border-color: var(--green-200); background: #fff; }
+.mt-drop-mark {
+  display: grid; place-items: center; width: 44px; height: 44px; flex: none;
+  border: 1px solid var(--line); border-radius: 50%; background: #fff; color: var(--green-700);
+  transition: background-color 0.15s, color 0.15s, transform 0.2s var(--ease);
+}
+.mt-drop.is-over .mt-drop-mark { transform: translateY(2px); }
+.mt-drop.is-filled .mt-drop-mark { border-color: var(--green-700); background: var(--green-700); color: #fff; }
+.mt-drop-text { display: grid; gap: 2px; min-width: 0; }
+.mt-drop-text b { font-size: 15px; color: var(--ink); overflow-wrap: anywhere; }
+.mt-drop-sub { font-size: 13px; line-height: 1.5; color: var(--muted); }
+.mt-paste .textarea { min-height: 180px; font-size: 13.5px; }
+
+.mt-run { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 14px; }
+.mt-run .field { flex: 1 1 260px; max-width: 420px; }
+.mt-actions { display: flex; }
+.mt-actions .btn { min-width: 128px; min-height: 42px; }
+
+/* the result, under a perforation */
+.mt-out {
+  display: grid; gap: 14px; padding-top: 20px; border-top: 1.5px dashed var(--line-2);
+  scroll-margin-top: 96px; transition: opacity 0.2s;
+}
+.mt-out:empty { display: none; }
+.mt-out.is-stale { opacity: 0.5; }
+
+.mt-verdict {
+  --tone: var(--green-700); --tint: var(--green-50); --edge: var(--green-100);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 12px 14px; padding: 14px 16px;
+  border: 1px solid var(--edge); border-radius: var(--radius); background: var(--tint);
+  animation: rise-in 0.3s var(--ease);
+}
+.mt-verdict.is-warn { --tone: var(--amber-ink); --tint: var(--amber-50); --edge: var(--amber-100); }
+.mt-verdict.is-muted { --tone: var(--ink-2); --tint: var(--surface-2); --edge: var(--line); }
+.mt-verdict.is-err { --tone: var(--red-700); --tint: var(--red-50); --edge: var(--red-100); }
+.mt-verdict-mark { display: grid; place-items: center; width: 38px; height: 38px; flex: none; border-radius: 50%; background: var(--tone); color: #fff; }
+.mt-verdict.is-warn .mt-verdict-mark { background: var(--amber); }
+.mt-verdict-main { flex: 1 1 200px; min-width: 0; }
+.mt-verdict-text { font-size: 17px; font-weight: 800; line-height: 1.35; letter-spacing: 0.03em; color: var(--tone); white-space: pre-line; }
+.mt-verdict-sub { margin-top: 1px; font-size: 13.5px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt-code { flex: none; }
+.mt-code .postcode { font-size: 20px; }
+.mt-code .postcode span { animation: pop-in 0.25s var(--ease) backwards; }
+.mt-code .postcode span:nth-child(2) { animation-delay: 0.04s; }
+.mt-code .postcode span:nth-child(3) { animation-delay: 0.08s; }
+.mt-code .postcode span:nth-child(4) { animation-delay: 0.12s; }
+.mt-code .postcode span:nth-child(5) { animation-delay: 0.16s; }
+.mt-code .postcode span:nth-child(n + 6) { animation-delay: 0.2s; }
+.mt-stamp {
+  flex: none; margin-right: 6px; padding: 1px 8px 1px 14px; border: 2px solid var(--amber-ink); border-radius: 5px;
+  color: var(--amber-ink); font-size: 17px; font-weight: 800; letter-spacing: 0.4em; transform: rotate(-5deg);
+  box-shadow: inset 0 0 0 1.5px #fff, inset 0 0 0 2.5px rgba(131, 82, 0, 0.45);
+  animation: stamp 0.3s var(--ease) 0.15s backwards;
+}
+.mt-next { margin-top: -4px; }
+
+.mt-result { display: grid; gap: 16px 22px; }
+.mt-result.has-preview { grid-template-columns: minmax(0, 1fr) 340px; align-items: start; }
+.mt-detail { display: grid; gap: 12px; align-content: start; min-width: 0; }
+
+.mt-facts { display: grid; border: 1px solid var(--line); border-radius: var(--radius-sm); background: #fff; }
+.mt-facts > div { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: 12px; padding: 8px 12px; border-top: 1px solid var(--line); }
+.mt-facts > div:first-child { border-top: 0; }
+.mt-facts dt { font-size: 13px; font-weight: 700; color: var(--muted); line-height: 1.7; }
+.mt-facts dd { font-size: 14px; color: var(--ink); overflow-wrap: anywhere; }
+.mt-facts dd.mono { font-size: 13px; line-height: 1.75; }
+
+.mt-trace, .mt-mail { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
+.mt-trace > summary, .mt-mail > summary {
+  display: flex; align-items: center; gap: 10px; padding: 9px 14px;
+  font-size: 14px; font-weight: 600; color: var(--green-700); cursor: pointer; list-style: none;
+}
+.mt-trace > summary::-webkit-details-marker, .mt-mail > summary::-webkit-details-marker { display: none; }
+.mt-trace > summary::before, .mt-mail > summary::before {
+  content: ""; width: 7px; height: 7px; flex: none; margin-left: 2px;
+  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: rotate(-45deg); transition: transform 0.2s var(--ease);
+}
+.mt-trace[open] > summary::before, .mt-mail[open] > summary::before { transform: rotate(45deg); }
+.mt-trace > summary:hover, .mt-mail > summary:hover { color: var(--green-600); }
+
+/* the trace: a timeline; sub-steps (candidates) hang off the step above, the step that
+   decided is green */
+.mt-steps { margin: 0; padding: 2px 14px 14px; list-style: none; font-size: 12.5px; line-height: 1.55; }
+.mt-steps li { position: relative; padding: 3px 0 3px 20px; color: var(--ink-2); overflow-wrap: anywhere; }
+.mt-steps li::before { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 1px; background: var(--line-2); }
+.mt-steps li:first-child::before { top: 0.9em; }
+.mt-steps li:last-child::before { bottom: auto; height: 0.9em; }
+.mt-steps li::after {
+  content: ""; position: absolute; left: 1px; top: calc(3px + 0.775em - 3.5px); width: 7px; height: 7px;
+  border-radius: 50%; background: var(--surface-2); box-shadow: inset 0 0 0 1.5px var(--faint);
+}
+.mt-steps li.is-sub { padding-left: 34px; color: var(--muted); }
+.mt-steps li.is-sub::after { left: 16px; top: calc(3px + 0.775em); width: 10px; height: 1px; border-radius: 0; background: var(--line-2); box-shadow: none; }
+.mt-steps li.is-round { font-weight: 700; color: var(--ink); }
+.mt-steps li.is-round::after { background: var(--ink-2); box-shadow: none; }
+.mt-steps li.is-pick { font-weight: 700; color: var(--green-800); }
+.mt-steps li.is-pick::after { background: var(--green-600); box-shadow: 0 0 0 3px var(--green-100); }
+
+.mt-mail-body { display: grid; gap: 10px; padding: 2px 14px 14px; }
+.mt-body {
+  max-height: 240px; margin: 0; padding: 10px 12px; overflow: auto;
+  border: 1px solid var(--line); border-radius: 6px; background: #fff;
+  font-family: var(--font); font-size: 13.5px; line-height: 1.6; color: var(--ink-2);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.mt-section-title { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; color: var(--muted); }
+.mt-links { display: grid; gap: 6px; max-height: 260px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.mt-links li { display: grid; gap: 1px; min-width: 0; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.mt-link-text { font-size: 13.5px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.mt-link-url { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.mt-warn {
+  padding: 6px 10px; border: 1px solid var(--amber-100); border-radius: 6px; background: var(--amber-50);
+  font-size: 13px; line-height: 1.5; color: var(--amber-ink); overflow-wrap: anywhere;
+}
+
+.mt-section { display: grid; gap: 8px; min-width: 0; }
+.mt-chat { min-height: 150px; padding: 18px 14px 16px 18px; border: 1px solid var(--line); border-radius: var(--radius); }
+.mt-chat .tg-msg { max-width: 100%; }
+.mt-preview-meta { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 12px; font-size: 12.5px; color: var(--muted); }
+.mt-preview .callout { margin: 0; }
+
+.mt-errors { display: grid; margin: 0; padding: 0; list-style: none; border: 1px solid var(--red-100); border-radius: var(--radius-sm); background: #fff; }
+.mt-errors li { display: flex; align-items: center; justify-content: space-between; gap: 6px 12px; padding: 9px 8px 9px 14px; border-top: 1px solid var(--red-100); }
+.mt-errors li:first-child { border-top: 0; }
+.mt-error-text { display: grid; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.mt-error-text b { font-size: 13.5px; color: var(--red-700); }
+.mt-error-text span { white-space: pre-line; }
+.mt-errors .btn { flex: none; color: var(--red-700); }
+.mt-errors .btn:hover { background: var(--red-50); }
+
+@media (max-width: 760px) {
+  /* one column: the verdict, what was found, the message, then the details */
+  .mt-result.has-preview { grid-template-columns: minmax(0, 1fr); }
+  .mt-detail { display: contents; }
+  .mt-detail > .mt-facts { order: 1; }
+  .mt-preview { order: 2; }
+  .mt-trace { order: 3; }
+  .mt-mail { order: 4; }
+}
+
+@media (max-width: 640px) {
+  .mailtest { margin-top: 22px; }
+  .mt-source { display: flex; justify-self: stretch; }
+  .mt-tab { flex: 1; padding: 0 10px; }
+  .mt-drop-label { min-height: 84px; padding: 14px; gap: 12px; }
+  .mt-drop-mark { width: 38px; height: 38px; }
+  .mt-run .field { flex-basis: 100%; max-width: none; }
+  .mt-actions { flex: 1; }
+  .mt-actions .btn { flex: 1; }
+  .mt-verdict { padding: 12px 14px; }
+  .mt-verdict-sub { white-space: normal; }
+  .mt-code { flex-basis: 100%; padding-left: 52px; } /* under the verdict text */
+  .mt-code .postcode { font-size: 18px; }
+  .mt-facts > div { grid-template-columns: 4.8em minmax(0, 1fr); gap: 10px; }
+  .mt-steps { padding-left: 10px; padding-right: 10px; }
+  .mt-errors li { flex-wrap: wrap; }
 }
 
 /* ---------- overview ----------

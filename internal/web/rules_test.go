@@ -340,3 +340,17 @@ func TestBuiltinTemplatesCompile(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestRulesPageHasMailTest(t *testing.T) {
+	e := newEnv(t, withSample)
+	e.login()
+	_, body := e.get("/rules")
+	for _, want := range []string{`data-mailtest`, `name="eml"`, `name="eml_text"`, `name="mailbox"`, `value="gmail"`, `data-mt-out`, `尚未儲存也會套用`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rules page lacks %q", want)
+		}
+	}
+	if strings.Contains(body, " style=") || strings.Contains(body, "<script>") {
+		t.Errorf("inline style or script breaks the CSP")
+	}
+}

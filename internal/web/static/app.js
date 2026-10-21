@@ -21,7 +21,8 @@
   伺服器退回表單時（欄位有 aria-invalid="true"），頁面載入後焦點會移到第一個出錯的欄位。
 
   頁面程式請使用 window.relay：
-    relay.fetchJSON(url, body?)    有 body 時以 JSON POST，否則 GET；自動帶 X-CSRF-Token。
+    relay.fetchJSON(url, body?)    有 body 時 POST：FormData 原樣送出（multipart），其他以 JSON 編碼；
+                                   沒有 body 時 GET。自動帶 X-CSRF-Token。
                                    回傳解析後的 JSON（呼叫端檢查 ok／error）；網路失敗、非 JSON
                                    回應時 reject（Error.message 為中文說明）；401 會導向登入頁。
     relay.toast(text, kind?)       kind：success（預設）| error | info
@@ -90,7 +91,9 @@
       credentials: "same-origin",
       headers: { "Accept": "application/json", "X-CSRF-Token": csrfToken() }
     };
-    if (body !== undefined) {
+    if (body instanceof FormData) {
+      init.body = body; // the browser sets the multipart Content-Type with its boundary
+    } else if (body !== undefined) {
       init.headers["Content-Type"] = "application/json";
       init.body = JSON.stringify(body === null ? {} : body);
     }
@@ -1558,6 +1561,377 @@
       if (first) selectTab(form, first.dataset.tplPanel, false);
     });
     document.querySelectorAll("[data-tpl-preview]").forEach(runPreview);
+  });
+
+  /* ---------- rules page: mail test ----------
+
+    form[data-mailtest]                獨立於規則表單；送出時把 form[data-rules-form] 目前的欄位
+                                       （不含 csrf）連同信件以 multipart POST /api/rules/test。
+      [data-mt-mode="file|paste"]      切換信件來源（只送出目前來源的欄位；←→ Home End 切換）。
+      [data-mt-drop]                   拖放區（內含 input[name=eml]）。
+      [data-mt-out]                    結果（空的時候不顯示）。規則錯誤時把對應欄位標成
+                                       aria-invalid（data-mt-invalid），清單上的項目可跳到該欄位。
+
+    伺服器回來的字串（信件內容、錯誤訊息）一律以 textContent 放進畫面；訊息預覽的 HTML 只經 showSafeHTML。
+  */
+
+  var MT_FILE_HINT = "拖放 .eml 檔到這裡，或點此選擇";
+
+  function mtMode(form) {
+    var tab = form.querySelector('[data-mt-mode][aria-selected="true"]');
+    return tab ? tab.dataset.mtMode : "file";
+  }
+
+  function setMtMode(form, mode, focus) {
+    form.querySelectorAll("[data-mt-mode]").forEach(function (t) {
+      var on = t.dataset.mtMode === mode;
+      t.setAttribute("aria-selected", on ? "true" : "false");
+      t.tabIndex = on ? 0 : -1;
+      byId(t.getAttribute("aria-controls")).hidden = !on;
+      if (on && focus) t.focus();
+    });
+  }
+
+  function keptRuleRows(rulesForm) {
+    var rows = [];
+    rulesForm.querySelectorAll("[data-rule-list] [data-rule]").forEach(function (li) {
+      var filled = false;
+      li.querySelectorAll("input[name^='rule_']").forEach(function (i) { if (i.value.trim()) filled = true; });
+      var act = li.querySelector("select[name='rule_ignore']");
+      if (act && act.value !== "0") filled = true;
+      if (filled) rows.push(li); // the server drops blank rows before numbering them
+    });
+    return rows;
+  }
+
+  function clearMtMarks() {
+    document.querySelectorAll("[data-mt-invalid]").forEach(function (n) {
+      n.removeAttribute("aria-invalid");
+      n.removeAttribute("data-mt-invalid");
+    });
+    document.querySelectorAll("[data-mt-invalid-row]").forEach(function (li) {
+      li.classList.remove("is-invalid");
+      li.removeAttribute("data-mt-invalid-row");
+    });
+  }
+
+  var MT_RULE_FIELDS = { name: "名稱", ignore: "處理方式", from: "寄件者", subject: "主旨", code_regex: "驗證碼", link_regex: "連結" };
+
+  // mtErrorItems turns {path: message} into what the page shows: the field's name as it
+  // reads on the page, and the field itself (marked aria-invalid) to jump to.
+  function mtErrorItems(rulesForm, errors) {
+    var rows = rulesForm ? keptRuleRows(rulesForm) : [];
+    return Object.keys(errors).map(function (k) {
+      var item = { label: "", text: errors[k], node: null };
+      var m = /^rules\[(\d+)\](?:\.(\w+))?$/.exec(k);
+      if (m) {
+        var li = rows[+m[1]];
+        var name = li ? li.querySelector("[name='rule_name']").value.trim() : "";
+        item.label = "第 " + (+m[1] + 1) + " 條規則" + (name ? "「" + name + "」" : "") +
+          (m[2] ? "的" + (MT_RULE_FIELDS[m[2]] || m[2]) : "");
+        if (li) {
+          item.node = li.querySelector("[name='rule_" + (m[2] || "name") + "']");
+          if (!li.classList.contains("is-invalid")) {
+            li.classList.add("is-invalid"); // keeps the row open in the compact view
+            li.setAttribute("data-mt-invalid-row", "");
+          }
+        }
+      } else if (k === "recognize.extra_code_keywords" || k === "recognize.extra_link_keywords") {
+        var id = k === "recognize.extra_code_keywords" ? "kw-code" : "kw-link";
+        item.label = id === "kw-code" ? "驗證碼關鍵字" : "連結關鍵字";
+        item.node = byId(id + "-input") || byId(id); // the tags input once the textarea is enhanced
+      } else {
+        item.label = k;
+      }
+      var n = item.node;
+      if (n && n.getAttribute("aria-invalid") !== "true") {
+        n.setAttribute("aria-invalid", "true");
+        n.setAttribute("data-mt-invalid", "");
+      }
+      return item;
+    });
+  }
+
+  function ruleLabel(rule) {
+    if (!rule) return "";
+    if (rule.indexOf("builtin:") === 0) return "內建辨識";
+    if (rule.indexOf("custom:") === 0) return "自訂規則「" + rule.slice(7) + "」";
+    return rule;
+  }
+
+  function mtSection(cls, title) {
+    var s = el("section", "mt-section " + cls);
+    s.appendChild(el("h3", "mt-section-title", title));
+    return s;
+  }
+
+  function mtFacts(rows, mono) {
+    var dl = el("dl", "mt-facts");
+    rows.forEach(function (f) {
+      if (!f[1]) return;
+      var row = el("div");
+      row.appendChild(el("dt", "", f[0]));
+      row.appendChild(el("dd", mono && mono[f[0]] ? "mono" : "", f[1]));
+      dl.appendChild(row);
+    });
+    return dl;
+  }
+
+  var MT_VERDICT = {
+    code: ["ok", "會轉發驗證碼"], link: ["ok", "會轉發連結"], both: ["ok", "會轉發驗證碼與連結"],
+    ignored: ["muted", "被規則略過，不轉發"], none: ["warn", "不符合任何規則，不轉發"]
+  };
+
+  function showMailTest(out, d, where) {
+    out.textContent = "";
+    var res = d.result || {};
+    var msg = d.message || {};
+    var trace = d.trace || [];
+    var v = MT_VERDICT[res.kind] || MT_VERDICT.none;
+
+    // the verdict: what happens to this mail, with the code in postcode boxes when it fits
+    var head = el("div", "mt-verdict is-" + v[0]);
+    var mark = el("span", "mt-verdict-mark");
+    mark.appendChild(icon(v[0] === "ok" ? "check" : v[0] === "warn" ? "alert" : "info"));
+    head.appendChild(mark);
+    var main = el("div", "mt-verdict-main");
+    main.appendChild(el("p", "mt-verdict-text", v[1]));
+    main.appendChild(el("p", "mt-verdict-sub", msg.subject || "（無主旨）"));
+    head.appendChild(main);
+    var boxed = res.code && res.code.length <= 8;
+    if (boxed) {
+      var pc = el("p", "mt-code");
+      pc.appendChild(el("span", "sr-only", "驗證碼 " + res.code));
+      var boxes = el("span", "postcode");
+      boxes.setAttribute("aria-hidden", "true");
+      Array.prototype.forEach.call(res.code, function (ch) { boxes.appendChild(el("span", "", ch)); });
+      pc.appendChild(boxes);
+      head.appendChild(pc);
+    } else if (res.kind === "ignored") {
+      head.appendChild(el("span", "mt-stamp", "略過"));
+    }
+    out.appendChild(head);
+    if (res.kind === "none") {
+      out.appendChild(el("p", "hint mt-next", "這封信若該轉發：為寄件者加一條自訂規則，或把信中說明驗證碼、連結的詞加進辨識關鍵字，再測一次。"));
+    }
+
+    var grid = el("div", "mt-result");
+    var detail = el("div", "mt-detail");
+    var facts = mtFacts([
+      ["驗證碼", boxed ? "" : res.code], ["連結", res.url], ["服務", res.service], ["判斷依據", ruleLabel(res.rule)]
+    ], { "驗證碼": 1, "連結": 1 });
+    if (facts.firstChild) detail.appendChild(facts);
+
+    var tr = el("details", "mt-trace");
+    tr.appendChild(el("summary", "", "辨識過程（" + trace.length + " 步）"));
+    var ol = el("ol", "mt-steps mono");
+    trace.forEach(function (s) {
+      var cls = /^\s/.test(s) ? "is-sub" : /^第.輪/.test(s) ? "is-round" : /：(選擇|命中|明確略過)/.test(s) ? "is-pick" : "";
+      ol.appendChild(el("li", cls, s.trim()));
+    });
+    tr.appendChild(ol);
+    detail.appendChild(tr);
+
+    var mail = el("details", "mt-mail");
+    mail.appendChild(el("summary", "", "信件內容"));
+    var mailBody = el("div", "mt-mail-body");
+    mailBody.appendChild(mtFacts([["寄件者", msg.from || "（無）"], ["主旨", msg.subject || "（無）"]]));
+    (msg.warnings || []).forEach(function (w) { mailBody.appendChild(el("p", "mt-warn", "警告：" + w)); });
+    mailBody.appendChild(el("pre", "mt-body", msg.text || "（沒有內文）"));
+    var links = msg.links || [];
+    mailBody.appendChild(el("p", "mt-section-title", links.length ? "連結 " + links.length + " 個" : "信裡沒有連結"));
+    if (links.length) {
+      var ul = el("ul", "mt-links");
+      links.forEach(function (l) {
+        var li = el("li");
+        if (l.text) li.appendChild(el("span", "mt-link-text", l.text));
+        li.appendChild(el("span", "mono mt-link-url", l.url));
+        ul.appendChild(li);
+      });
+      mailBody.appendChild(ul);
+    }
+    mail.appendChild(mailBody);
+    detail.appendChild(mail);
+    grid.appendChild(detail);
+
+    if (d.preview) {
+      var p = d.preview;
+      var pv = mtSection("mt-preview", "Telegram 訊息預覽");
+      var chat = el("div", "tg-chat mt-chat");
+      var tgmsg = el("div", "tg-msg");
+      var bubble = el("div", "tg-bubble");
+      var text = el("div", "tg-text");
+      showSafeHTML(text, p.html || "");
+      bubble.appendChild(text);
+      bubble.appendChild(el("span", "tg-time", nowHM()));
+      tgmsg.appendChild(bubble);
+      if (p.buttons && p.buttons.length) {
+        var kb = el("div", "tg-kb");
+        p.buttons.forEach(function (b) {
+          var k = el("span", "tg-key" + (b.url ? " tg-key-url" : " tg-key-copy"), b.text);
+          k.title = b.url ? "開啟 " + b.url : "複製「" + (b.copy || "") + "」";
+          kb.appendChild(k);
+        });
+        tgmsg.appendChild(kb);
+      }
+      chat.appendChild(tgmsg);
+      pv.appendChild(chat);
+      var meta = el("p", "mt-preview-meta");
+      meta.appendChild(el("span", "", where));
+      var len = el("span", "tg-len", "長度 " + p.length + " / " + p.max);
+      len.classList.toggle("is-near", p.length > p.max * 0.85);
+      meta.appendChild(len);
+      pv.appendChild(meta);
+      if (p.unsupported && p.unsupported.length) {
+        pv.appendChild(el("p", "mt-warn", "Telegram 不支援 " + p.unsupported.map(function (t) { return "<" + t + ">"; }).join("、") +
+          "：送出時訊息會改以純文字重送。"));
+      }
+      grid.appendChild(pv);
+      grid.classList.add("has-preview");
+    } else if (d.preview_error) {
+      var pe = mtSection("mt-preview", "Telegram 訊息預覽");
+      var co = el("div", "callout callout-error");
+      co.appendChild(icon("alert"));
+      co.appendChild(el("p", "", "範本無法產生訊息：" + d.preview_error));
+      pe.appendChild(co);
+      grid.appendChild(pe);
+      grid.classList.add("has-preview");
+    }
+    out.appendChild(grid);
+  }
+
+  function showMailTestError(out, text, items) {
+    out.textContent = "";
+    var head = el("div", "mt-verdict is-err");
+    var mark = el("span", "mt-verdict-mark");
+    mark.appendChild(icon("alert"));
+    head.appendChild(mark);
+    var main = el("div", "mt-verdict-main");
+    main.appendChild(el("p", "mt-verdict-text", text));
+    head.appendChild(main);
+    out.appendChild(head);
+    if (items && items.length) {
+      var ul = el("ul", "mt-errors");
+      items.forEach(function (it) {
+        var li = el("li");
+        var what = el("p", "mt-error-text");
+        if (it.label) what.appendChild(el("b", "", it.label));
+        what.appendChild(el("span", "", it.text));
+        li.appendChild(what);
+        if (it.node) {
+          var go = el("button", "btn btn-sm btn-ghost", "前往修正");
+          go.type = "button";
+          go.addEventListener("click", function () {
+            it.node.focus();
+            it.node.scrollIntoView({ block: "center", behavior: reducedMotion() ? "auto" : "smooth" });
+          });
+          li.appendChild(go);
+        }
+        ul.appendChild(li);
+      });
+      out.appendChild(ul);
+    }
+  }
+
+  // bring a fresh result into view when it starts below most of the screen
+  function revealMailTest(out) {
+    if (out.getBoundingClientRect().top > window.innerHeight * 0.7) {
+      out.scrollIntoView({ block: "start", behavior: reducedMotion() ? "auto" : "smooth" });
+    }
+  }
+
+  document.addEventListener("submit", function (e) {
+    var form = e.target.closest ? e.target.closest("form[data-mailtest]") : null;
+    if (!form || e.defaultPrevented) return; // the shared handler blocks a second click while busy
+    e.preventDefault();
+    // The shared submit handler (registered earlier) has already marked the form as
+    // submitting and the button busy; undo both when done, as the page stays.
+    var rulesForm = document.querySelector("form[data-rules-form]");
+    var out = form.querySelector("[data-mt-out]");
+    var btn = form.querySelector("button[type=submit]");
+    function done() { delete form.dataset.submitting; setBusy(btn, false); out.classList.remove("is-stale"); }
+    function fail(text, items) { showMailTestError(out, text, items); revealMailTest(out); }
+    var fd = new FormData();
+    if (rulesForm) new FormData(rulesForm).forEach(function (v, k) { if (k !== "csrf") fd.append(k, v); });
+    // only the active source is sent: an empty file part would otherwise win over pasted text
+    if (mtMode(form) === "file") {
+      var file = byId("mt-eml").files[0];
+      if (!file) { fail("請先選擇 .eml 檔"); done(); return; }
+      fd.append("eml", file);
+    } else {
+      var paste = byId("mt-text").value;
+      if (!paste.trim()) { fail("請先貼上信件原始碼"); done(); return; }
+      fd.append("eml_text", paste);
+    }
+    var box = byId("mt-mailbox");
+    fd.append("mailbox", box.value);
+    var where = box.value ? "以「" + box.selectedOptions[0].textContent + "」的範本" : "以全域範本";
+    clearMtMarks();
+    out.classList.add("is-stale");
+    fetchJSON("/api/rules/test", fd).then(function (d) {
+      if (d.ok) { showMailTest(out, d, where); revealMailTest(out); return; }
+      fail(d.error || "測試失敗", d.errors ? mtErrorItems(rulesForm, d.errors) : []);
+    }).then(done, function (err) {
+      done();
+      fail(err.message);
+    });
+  });
+
+  document.addEventListener("click", function (e) {
+    var tab = e.target instanceof Element ? e.target.closest("[data-mt-mode]") : null;
+    if (tab) setMtMode(tab.closest("form"), tab.dataset.mtMode, false);
+  });
+
+  document.addEventListener("keydown", function (e) {
+    var tab = e.target instanceof Element ? e.target.closest("[data-mt-mode]") : null;
+    if (!tab) return;
+    var tabs = Array.prototype.slice.call(tab.parentNode.querySelectorAll("[data-mt-mode]"));
+    var i = tabs.indexOf(tab);
+    var to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: tabs.length - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    setMtMode(tab.closest("form"), tabs[(to + tabs.length) % tabs.length].dataset.mtMode, true);
+  });
+
+  document.addEventListener("change", function (e) {
+    if (e.target.id !== "mt-eml") return;
+    var f = e.target.files[0];
+    var label = document.querySelector("[data-mt-file-label]");
+    if (label) label.textContent = f ? f.name + "（" + Math.ceil(f.size / 1024) + " KB）" : MT_FILE_HINT;
+    var drop = e.target.closest("[data-mt-drop]");
+    if (drop) drop.classList.toggle("is-filled", !!f);
+  });
+
+  // editing a field the test marked clears the mark
+  document.addEventListener("input", function (e) {
+    var n = e.target;
+    if (n instanceof Element && n.hasAttribute("data-mt-invalid")) {
+      n.removeAttribute("aria-invalid");
+      n.removeAttribute("data-mt-invalid");
+    }
+  });
+
+  ["dragenter", "dragover"].forEach(function (type) {
+    document.addEventListener(type, function (e) {
+      var drop = e.target instanceof Element ? e.target.closest("[data-mt-drop]") : null;
+      if (!drop) return;
+      e.preventDefault();
+      drop.classList.add("is-over");
+    });
+  });
+  ["dragleave", "drop"].forEach(function (type) {
+    document.addEventListener(type, function (e) {
+      var drop = e.target instanceof Element ? e.target.closest("[data-mt-drop]") : null;
+      if (!drop) return;
+      e.preventDefault();
+      if (type === "dragleave" && drop.contains(e.relatedTarget)) return; // moving between its children
+      drop.classList.remove("is-over");
+      if (type === "drop" && e.dataTransfer.files.length) {
+        var input = byId("mt-eml");
+        input.files = e.dataTransfer.files;
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    });
   });
 
   /* ---------- overview ----------
