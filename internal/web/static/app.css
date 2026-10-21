@@ -2078,8 +2078,8 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   display: flex; align-items: center; justify-content: space-between; gap: 6px 12px;
   padding: 7px 0; border-top: 1px dashed var(--line);
 }
-.dash-folder-name { min-width: 0; font-size: var(--fs-sm); color: var(--ink-2); overflow-wrap: anywhere; }
-.dash-folder .badge { font-size: var(--fs-xs); line-height: 18px; }
+.dash-folder-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-sm); color: var(--ink-2); }
+.dash-folder .badge { flex: none; font-size: var(--fs-xs); line-height: 18px; }
 .dash-foot { display: grid; gap: 10px; margin-top: auto; padding-top: 12px; border-top: 1px solid var(--line); }
 .dash-foot[hidden] { display: none; }
 .dash-card[data-state="bad"] .dash-foot { border-top-color: var(--red-100); }

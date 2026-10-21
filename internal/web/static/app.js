@@ -393,17 +393,22 @@
       box.classList.toggle("is-invalid", input.getAttribute("aria-invalid") === "true");
     }
     function later() { requestAnimationFrame(paint); }
-    // digits are always added and removed at the end, like the cells read
-    function toEnd() {
+    // digits are added and removed at the end, as the cells read; a selection (select all)
+    // is left alone so typing replaces it, and a full code is selected when the field is
+    // entered, so a wrong one is retyped rather than erased digit by digit
+    function toEnd(selectFull) {
       var n = input.value.length;
-      if (input.selectionStart !== n || input.selectionEnd !== n) input.setSelectionRange(n, n);
+      if (input.selectionStart !== input.selectionEnd) return;
+      if (selectFull && n === 6) input.select();
+      else if (input.selectionStart !== n) input.setSelectionRange(n, n);
     }
+    function enter() { toEnd(true); }
     input.addEventListener("input", later);
     input.addEventListener("change", later);
-    input.addEventListener("focus", function () { toEnd(); paint(); });
+    input.addEventListener("focus", function () { enter(); paint(); });
     input.addEventListener("blur", paint);
-    input.addEventListener("click", toEnd);
-    input.addEventListener("keyup", toEnd);
+    input.addEventListener("click", enter);
+    input.addEventListener("keyup", function () { toEnd(false); });
     if (input.form) input.form.addEventListener("reset", later);
     new MutationObserver(paint).observe(input, { attributes: true, attributeFilter: ["aria-invalid"] });
     paint();
@@ -2161,12 +2166,21 @@
     return changed;
   }
 
+  // a cell of the log table; the rows are grids, so the table states its roles (as _logs.html)
+  function logCell(cls) {
+    var td = document.createElement("td");
+    td.setAttribute("role", "cell");
+    td.className = cls;
+    return td;
+  }
+
   function recentRow(r) {
     var tr = document.createElement("tr");
-    var time = el("td", "c-time");
+    tr.setAttribute("role", "row");
+    var time = logCell("c-time");
     if (r.at) time.appendChild(timeEl(r.at));
     tr.appendChild(time);
-    var mb = el("td", "c-mb");
+    var mb = logCell("c-mb");
     var label = r.mailbox_label || r.mailbox;
     var name = mb.appendChild(el("span", "log-mb", label));
     name.title = label;
@@ -2174,7 +2188,7 @@
     var folder = mb.appendChild(el("span", "log-folder mono", r.folder));
     folder.title = r.folder;
     tr.appendChild(mb);
-    var msg = el("td", "c-msg");
+    var msg = logCell("c-msg");
     var subj = el("span", "log-subject", r.subject ? r.subject : null);
     if (r.subject) subj.title = r.subject;
     else subj.appendChild(el("span", "muted", "（沒有主旨）"));
@@ -2182,10 +2196,10 @@
     var from = msg.appendChild(el("span", "log-from mono", r.from));
     from.title = r.from;
     tr.appendChild(msg);
-    var kind = el("td", "c-kind");
+    var kind = logCell("c-kind");
     kind.appendChild(el("span", "tag" + (r.hit ? " tag-hit" : ""), r.kind_label));
     tr.appendChild(kind);
-    var res = el("td", "c-result");
+    var res = logCell("c-result");
     res.appendChild(badge(r.result_class, r.live, r.result_label));
     tr.appendChild(res);
     return tr;

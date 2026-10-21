@@ -448,3 +448,21 @@ func TestLogRowTitles(t *testing.T) {
 		t.Error("/logs: the table with a rule column should say so")
 	}
 }
+
+// The log rows are laid out as grids, which drops table semantics in some browsers, so
+// the table spells its structure out in ARIA roles.
+func TestLogTableRoles(t *testing.T) {
+	e := newEnv(t, withSample)
+	e.login()
+	e.st.RecordMessage(context.Background(), store.LogEntry{At: time.Now(), Mailbox: "gmail", Folder: "INBOX", UID: 1,
+		FromAddr: "a@b", Subject: "s", Kind: "code", Result: "sent"}, nil, store.MailboxState{UIDValidity: 1, LastUID: 1})
+	for _, path := range []string{"/", "/logs"} {
+		_, body := e.get(path)
+		for _, want := range []string{`<table role="table"`, `<thead role="rowgroup">`, `<tr role="row">`,
+			`<th role="columnheader" scope="col" class="c-time">`, `<tbody role="rowgroup"`, `<td role="cell" class="c-time">`} {
+			if !strings.Contains(body, want) {
+				t.Errorf("%s: missing %s", path, want)
+			}
+		}
+	}
+}
