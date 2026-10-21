@@ -172,8 +172,8 @@
         <span class="probe-icon">{{template "icon" "info"}}</span>
         <p class="probe-text">「測試連線」會用上面填的資料實際登入，列出伺服器上的資料夾，可在路由的資料夾欄位挑選；不會儲存任何東西。</p>
       </div>
-      {{if $d.Targets}}
       <div id="f-routes-err">{{template "field-error" $rErr}}</div>
+      {{if $d.Targets}}
       <ol class="route-rows" data-route-rows aria-label="轉發路由"{{if $rErr}} aria-describedby="f-routes-err"{{end}}>
         {{range $d.Routes}}{{template "route-row" (dict "R" . "Targets" $d.Targets)}}{{end}}
       </ol>
