@@ -10,10 +10,13 @@ import (
 )
 
 type Result struct {
-	Code    string
-	URL     string
-	Service string
-	Rule    string
+	Code string
+	URL  string
+	// LinkText is the visible text of the chosen link in the mail ("Verify email"), used
+	// as the Telegram button label; empty for bare URLs.
+	LinkText string
+	Service  string
+	Rule     string
 }
 
 // Trace is a human-readable log of the decision, printed by `relay test`. It may

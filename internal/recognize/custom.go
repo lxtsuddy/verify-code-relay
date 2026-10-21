@@ -88,7 +88,7 @@ func (c *Custom) Run(msg *mailparse.Message, tr *Trace) (*Result, bool) {
 			// The rule selects a link; the whole URL is returned, not just the part the regex matched.
 			for _, l := range msg.Links {
 				if r.linkRe.MatchString(l.URL) {
-					res.URL = l.URL
+					res.URL, res.LinkText = l.URL, l.Text
 					break
 				}
 			}

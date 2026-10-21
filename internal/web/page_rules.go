@@ -266,7 +266,9 @@ type tplVar struct{ Name, Label, Sample string }
 
 var tplVars = []tplVar{
 	{".Code", "驗證碼", sampleCode},
-	{".URL", "認證連結", sampleURL},
+	{".URL", "認證連結（完整網址）", sampleURL},
+	{".LinkText", "連結按鈕文字", sampleLinkText},
+	{".Host", "連結網域", "github.com"},
 	{".Service", "服務名稱", "GitHub"},
 	{".FromName", "寄件者名稱", "GitHub"},
 	{".FromAddr", "寄件者地址", "noreply@github.com"},

@@ -384,3 +384,20 @@ func TestRulesPageHasMailTest(t *testing.T) {
 		t.Errorf("no-JS mail test post = %d, want 403", resp.StatusCode)
 	}
 }
+
+// The built-in link template previews with the host line and a button named after the link.
+func TestTemplatePreviewLinkButton(t *testing.T) {
+	e := newEnv(t, nil)
+	e.login()
+	_, body := e.postJSON("/api/templates/preview", map[string]string{"kind": "link", "template": ""})
+	var a previewAnswer
+	if err := json.Unmarshal([]byte(body), &a); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(a.HTML, "🌐 github.com") || strings.Contains(a.HTML, "login/device") {
+		t.Errorf("html = %q", a.HTML)
+	}
+	if !strings.Contains(body, `"text":"🔗 驗證裝置"`) {
+		t.Errorf("buttons = %s", body)
+	}
+}

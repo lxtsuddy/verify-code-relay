@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"html/template"
+	"net/url"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -21,16 +22,21 @@ const (
 	maxHeaderRunes = 1024 // Subject, FromName, FromAddr, To
 	maxNameRunes   = 256  // Service, Mailbox
 
-	maxCopyRunes = 256
-	maxInlineURL = 4000 // UTF-16 units of the escaped URL
-	kindCode     = "code"
-	kindLink     = "link"
-	kindBoth     = "both"
+	maxCopyRunes  = 256
+	maxLabelRunes = 32   // link text on the Telegram button
+	maxInlineURL  = 4000 // UTF-16 units of the escaped URL
+	kindCode      = "code"
+	kindLink      = "link"
+	kindBoth      = "both"
 )
 
 type Data struct {
-	Code     string
-	URL      string
+	Code string
+	URL  string
+	// LinkText is the visible text of the link in the mail ("Verify email"); it labels
+	// the Telegram button. Host is the URL's host name, set by Render.
+	LinkText string
+	Host     string
 	Service  string
 	FromName string
 	FromAddr string
@@ -53,7 +59,8 @@ type Renderer struct {
 	mailbox map[string]tset
 }
 
-var trialData = Data{Code: "123456", URL: "https://example.com/verify?token=abc", Service: "Example",
+var trialData = Data{Code: "123456", URL: "https://example.com/verify?token=abc", LinkText: "Verify",
+	Host: "example.com", Service: "Example",
 	FromName: "Example", FromAddr: "noreply@example.com", To: "me@example.com", Subject: "Subject",
 	Mailbox: "Mailbox", Rule: "builtin:code", Date: time.Unix(0, 0)}
 
@@ -123,6 +130,7 @@ func (r *Renderer) Render(mailbox string, d Data) (Rendered, error) {
 	d.Subject, d.FromName, d.FromAddr, d.To = clamp(d.Subject, maxHeaderRunes), clamp(d.FromName, maxHeaderRunes),
 		clamp(d.FromAddr, maxHeaderRunes), clamp(d.To, maxHeaderRunes)
 	d.Service, d.Mailbox = clamp(d.Service, maxNameRunes), clamp(d.Mailbox, maxNameRunes)
+	d.LinkText, d.Host = clamp(strings.Join(strings.Fields(d.LinkText), " "), maxNameRunes), hostOf(d.URL)
 	kind := kindCode
 	switch {
 	case d.Code != "" && d.URL != "":
@@ -245,13 +253,34 @@ type copyText struct {
 	Text string `json:"text"`
 }
 
+// hostOf returns the lower-cased host name of an http(s) URL, or "".
+func hostOf(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+// linkLabel is the link button's text: the link's own text from the mail, else the host
+// it opens, else a generic label.
+func linkLabel(d Data) string {
+	switch {
+	case d.LinkText != "":
+		return clamp(d.LinkText, maxLabelRunes)
+	case d.Host != "":
+		return "開啟 " + d.Host
+	}
+	return "開啟連結"
+}
+
 func buttons(d Data) (string, error) {
 	var row []button
 	if n := utf8.RuneCountInString(d.Code); n >= 1 && n <= maxCopyRunes {
 		row = append(row, button{Text: "📋 複製驗證碼", CopyText: &copyText{Text: d.Code}})
 	}
 	if d.URL != "" {
-		row = append(row, button{Text: "🔗 開啟連結", URL: d.URL})
+		row = append(row, button{Text: "🔗 " + linkLabel(d), URL: d.URL})
 	}
 	if len(row) == 0 {
 		return "", nil

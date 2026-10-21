@@ -58,7 +58,7 @@ func kindOf(res *recognize.Result, ignore bool) string {
 // renderData is what the templates see for msg, recognised as res, in mailbox mb.
 func renderData(msg *mailparse.Message, res *recognize.Result, mb Mailbox) render.Data {
 	return render.Data{
-		Code: res.Code, URL: res.URL, Service: res.Service, FromName: msg.From.Name, FromAddr: msg.From.Addr,
+		Code: res.Code, URL: res.URL, LinkText: res.LinkText, Service: res.Service, FromName: msg.From.Name, FromAddr: msg.From.Addr,
 		To: Recipient(msg.To, mb.Username), Subject: msg.Subject, Mailbox: mb.DisplayName, Rule: res.Rule, Date: msg.Date,
 	}
 }

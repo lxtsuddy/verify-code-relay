@@ -58,3 +58,20 @@ func TestRunTrialParseError(t *testing.T) {
 		t.Fatalf("want a parse error, got %+v %v", tr, err)
 	}
 }
+
+// The link button carries the mail's own link text, and the text shows the host, not the URL.
+func TestRunTrialLinkButtonText(t *testing.T) {
+	rec, rnd := trialDeps(t, nil)
+	mail := "From: Example <no-reply@example.com>\r\nSubject: Confirm your email\r\nContent-Type: text/html; charset=utf-8\r\n\r\n" +
+		`<p>Please confirm your email address.</p><a href="https://example.com/verify?token=Zx8_kq2LmN0pQr7sTuVwXy">Confirm email</a>` + "\r\n"
+	tr, err := RunTrial([]byte(mail), rec, rnd, Mailbox{DisplayName: "（測試）"})
+	if err != nil || tr.Kind != "link" || tr.Output == nil {
+		t.Fatalf("trial = %+v, %v", tr, err)
+	}
+	if !strings.Contains(tr.Output.ReplyMarkup, `"text":"🔗 Confirm email"`) {
+		t.Errorf("markup = %s", tr.Output.ReplyMarkup)
+	}
+	if strings.Contains(tr.Output.Text, "token=") || !strings.Contains(tr.Output.Text, "🌐 example.com") {
+		t.Errorf("text = %q", tr.Output.Text)
+	}
+}
