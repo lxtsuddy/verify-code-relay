@@ -70,8 +70,10 @@
 </form>
 
 {{/* Mail test: a form of its own (outside data-rules-form, so saving the rules never sends
-a mail); app.js posts it together with the rules form's current fields. */}}
-<form class="card mailtest" id="mailtest" data-mailtest novalidate aria-labelledby="mt-title">
+a mail); app.js posts it together with the rules form's current fields. Without JS it
+POSTs to the API, which refuses it for lacking the CSRF token — a GET would put the
+pasted mail in the URL (history, proxy logs). */}}
+<form class="card mailtest" id="mailtest" method="post" action="/api/rules/test" enctype="multipart/form-data" data-mailtest novalidate aria-labelledby="mt-title">
   <header class="card-head">
     <div>
       <h2 class="card-title" id="mt-title">用信件測試</h2>
@@ -108,7 +110,8 @@ a mail); app.js posts it together with the rules form's current fields. */}}
       </div>
     </div>
     <noscript><p class="hint">信件測試需要啟用 JavaScript。</p></noscript>
-    <div class="mt-out" data-mt-out aria-live="polite"></div>
+    <p class="sr-only" role="status" data-mt-live></p>
+    <div class="mt-out" data-mt-out></div>
   </div>
 </form>
 

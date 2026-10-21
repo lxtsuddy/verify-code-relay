@@ -1571,6 +1571,8 @@
       [data-mt-drop]                   拖放區（內含 input[name=eml]）。
       [data-mt-out]                    結果（空的時候不顯示）。規則錯誤時把對應欄位標成
                                        aria-invalid（data-mt-invalid），清單上的項目可跳到該欄位。
+      [data-mt-live]                   一直存在的 role=status：每次測試後寫入一行摘要供報讀
+                                       （結果區一開始不顯示，放在那裡的 aria-live 不一定會被報讀）。
 
     伺服器回來的字串（信件內容、錯誤訊息）一律以 textContent 放進畫面；訊息預覽的 HTML 只經 showSafeHTML。
   */
@@ -1681,6 +1683,15 @@
     code: ["ok", "會轉發驗證碼"], link: ["ok", "會轉發連結"], both: ["ok", "會轉發驗證碼與連結"],
     ignored: ["muted", "被規則略過，不轉發"], none: ["warn", "不符合任何規則，不轉發"]
   };
+
+  // announce writes one line to the persistent status element; it is cleared first so the
+  // same verdict twice in a row is still read out.
+  function announce(form, text) {
+    var live = form.querySelector("[data-mt-live]");
+    if (!live) return;
+    live.textContent = "";
+    setTimeout(function () { live.textContent = text; }, 60);
+  }
 
   function showMailTest(out, d, where) {
     out.textContent = "";
@@ -1850,7 +1861,11 @@
     var out = form.querySelector("[data-mt-out]");
     var btn = form.querySelector("button[type=submit]");
     function done() { delete form.dataset.submitting; setBusy(btn, false); out.classList.remove("is-stale"); }
-    function fail(text, items) { showMailTestError(out, text, items); revealMailTest(out); }
+    function fail(text, items) {
+      showMailTestError(out, text, items);
+      announce(form, text + (items && items.length ? "（" + items.length + " 項錯誤）" : ""));
+      revealMailTest(out);
+    }
     var fd = new FormData();
     if (rulesForm) new FormData(rulesForm).forEach(function (v, k) { if (k !== "csrf") fd.append(k, v); });
     // only the active source is sent: an empty file part would otherwise win over pasted text
@@ -1869,7 +1884,13 @@
     clearMtMarks();
     out.classList.add("is-stale");
     fetchJSON("/api/rules/test", fd).then(function (d) {
-      if (d.ok) { showMailTest(out, d, where); revealMailTest(out); return; }
+      if (d.ok) {
+        showMailTest(out, d, where);
+        var res = d.result || {};
+        announce(form, "測試完成：" + (MT_VERDICT[res.kind] || MT_VERDICT.none)[1] + (res.code ? "，驗證碼 " + res.code : ""));
+        revealMailTest(out);
+        return;
+      }
       fail(d.error || "測試失敗", d.errors ? mtErrorItems(rulesForm, d.errors) : []);
     }).then(done, function (err) {
       done();

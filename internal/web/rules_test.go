@@ -1,8 +1,11 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"mime/multipart"
+	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
@@ -352,5 +355,32 @@ func TestRulesPageHasMailTest(t *testing.T) {
 	}
 	if strings.Contains(body, " style=") || strings.Contains(body, "<script>") {
 		t.Errorf("inline style or script breaks the CSP")
+	}
+	// Without JS the form must POST to the API (rejected there for lacking the CSRF
+	// header), never GET the page with the pasted mail in the URL.
+	i := strings.Index(body, `id="mailtest"`)
+	start, end := strings.LastIndex(body[:max(i, 0)], "<form"), strings.Index(body[max(i, 0):], ">")
+	if i < 0 || start < 0 || end < 0 {
+		t.Fatalf("no mail test form tag")
+	}
+	tag := body[start : i+end]
+	for _, want := range []string{`method="post"`, `action="/api/rules/test"`, `enctype="multipart/form-data"`} {
+		if !strings.Contains(tag, want) {
+			t.Errorf("mail test form %s lacks %s", tag, want)
+		}
+	}
+	if !strings.Contains(body, `data-mt-live`) || !strings.Contains(body, `role="status"`) {
+		t.Errorf("rules page lacks the mail test status line")
+	}
+	// that no-JS post: same origin and logged in, but no CSRF token
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	mw.WriteField("eml_text", recoveryMail)
+	mw.Close()
+	req, _ := http.NewRequest(http.MethodPost, e.ts.URL+"/api/rules/test", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.Header.Set("Origin", e.ts.URL)
+	if resp, _ := e.do(req); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("no-JS mail test post = %d, want 403", resp.StatusCode)
 	}
 }
