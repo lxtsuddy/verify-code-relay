@@ -124,10 +124,16 @@ func TestNormalizeLinesMapMatchesReference(t *testing.T) {
 		{"x\n  keep   inner  \ny", []span{{2, 20}}},
 		{"\n\n\nlead\n\n\ntrail\n\n\n", nil},
 		{"中文  字\t\t間\n第二行", nil},
+		{"\u3000 a \u00a0 \n\t b\v\f\r", nil},
+		{"pre\n\t  x \t\n\n  y\nz  ", []span{{4, 16}}},
 	}
 	for _, c := range cases {
+		want := normalizeLinesRef(c.s, c.verbatim)
+		if got := normalizeLines(c.s, c.verbatim); got != want {
+			t.Errorf("normalizeLines(%q) = %q, want %q", c.s, got, want)
+		}
 		got, pos := normalizeLinesMap(c.s, c.verbatim)
-		if want := normalizeLinesRef(c.s, c.verbatim); got != want {
+		if got != want {
 			t.Errorf("normalizeLinesMap(%q) = %q, want %q", c.s, got, want)
 		}
 		if len(pos) != len(c.s)+1 {
@@ -138,6 +144,14 @@ func TestNormalizeLinesMapMatchesReference(t *testing.T) {
 				t.Fatalf("pos not monotonic within [0,%d]: %v", len(got), pos)
 			}
 		}
+	}
+}
+
+func TestNormalizeLinesMapPositions(t *testing.T) {
+	// "a b\n\nc": a collapsed run maps to its single space, dropped bytes to the next kept one.
+	text, pos := normalizeLinesMap("a  b\n\n c", nil)
+	if want := []int{0, 1, 2, 2, 5, 5, 5, 5, 6}; text != "a b\n\nc" || !reflect.DeepEqual(pos, want) {
+		t.Errorf("got %q %v, want %v", text, pos, want)
 	}
 }
 

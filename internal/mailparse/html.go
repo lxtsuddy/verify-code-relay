@@ -296,69 +296,56 @@ type span struct{ start, end int }
 // the ascending verbatim spans (<pre> content) keep their inner and leading
 // whitespace; only trailing whitespace is dropped.
 func normalizeLines(s string, verbatim []span) string {
-	text, _ := normalizeLinesMap(s, verbatim)
-	return text
+	return normalize(s, verbatim, nil)
 }
 
 // normalizeLinesMap is normalizeLines that also maps positions: for every byte offset i
 // of s (0..len(s)), pos[i] is the offset in the result of the first byte kept from s[i:],
 // or len(result) when nothing after i is kept.
 func normalizeLinesMap(s string, verbatim []span) (string, []int) {
-	type piece struct {
-		src, n int  // the bytes s[src:src+n]
-		space  bool // a run of white space collapsed to one ' '
-	}
 	pos := make([]int, len(s)+1)
+	return normalize(s, verbatim, pos), pos
+}
+
+// lineSpaces are the white space characters collapsed inside a line. All are single
+// bytes, and UTF-8 never uses bytes below 0x80 inside a multi-byte rune, so lines can
+// be scanned byte by byte.
+const lineSpaces = " \t\r\f\v"
+
+// normalize implements normalizeLines, filling pos as normalizeLinesMap describes when
+// it is not nil. It streams: kept bytes go straight to the result, so the cost is the
+// result plus pos, whatever the line lengths.
+func normalize(s string, verbatim []span, pos []int) string {
 	for i := range pos {
 		pos[i] = -1
 	}
 	var b strings.Builder
+	b.Grow(len(s))
 	lines := 0
 	blank := true
-	off := 0
-	for _, l := range strings.Split(s, "\n") {
-		start := off
-		off += len(l) + 1
+	for start := 0; start <= len(s); {
+		end := strings.IndexByte(s[start:], '\n')
+		if end < 0 {
+			end = len(s)
+		} else {
+			end += start
+		}
+		l := s[start:end]
 		for len(verbatim) > 0 && verbatim[0].end <= start {
 			verbatim = verbatim[1:]
 		}
-		keep := len(verbatim) > 0 && verbatim[0].start < start+len(l) // a <pre> line
-		var ps []piece
-		run := false
-		for i, r := range l {
-			n := utf8.RuneLen(r)
-			if r == utf8.RuneError {
-				_, n = utf8.DecodeRuneInString(l[i:]) // 1 for an invalid byte
-			}
-			if !keep && strings.ContainsRune(" \t\r\f\v", r) {
-				if !run {
-					ps = append(ps, piece{start + i, n, true})
-				}
-				run = true
-				continue
-			}
-			run = false
-			ps = append(ps, piece{start + i, n, false})
+		// The kept part of the line is l[ts:te]: a <pre> line keeps its indent, other
+		// lines are trimmed of all Unicode white space (as strings.TrimSpace).
+		var ts, te int
+		keep := len(verbatim) > 0 && verbatim[0].start < end
+		if keep {
+			te = len(strings.TrimRight(l, lineSpaces))
+		} else {
+			ts = len(l) - len(strings.TrimLeftFunc(l, unicode.IsSpace))
+			te = ts + len(strings.TrimRightFunc(l[ts:], unicode.IsSpace))
 		}
-		isSpace := func(p piece) bool {
-			if p.space {
-				return true
-			}
-			r, _ := utf8.DecodeRuneInString(s[p.src:])
-			if keep {
-				return strings.ContainsRune(" \t\r\f\v", r)
-			}
-			return unicode.IsSpace(r)
-		}
-		if !keep {
-			for len(ps) > 0 && isSpace(ps[0]) {
-				ps = ps[1:]
-			}
-		}
-		for len(ps) > 0 && isSpace(ps[len(ps)-1]) {
-			ps = ps[:len(ps)-1]
-		}
-		if len(ps) == 0 {
+		start = end + 1
+		if ts == te {
 			if !blank {
 				if lines > 0 {
 					b.WriteByte('\n')
@@ -372,26 +359,37 @@ func normalizeLinesMap(s string, verbatim []span) (string, []int) {
 			b.WriteByte('\n')
 		}
 		lines++
-		for _, p := range ps {
-			pos[p.src] = b.Len()
-			if p.space {
-				b.WriteByte(' ')
-			} else {
-				b.WriteString(s[p.src : p.src+p.n])
-			}
-		}
 		blank = false
+		run := false
+		for i := ts; i < te; i++ {
+			c := l[i]
+			if !keep && strings.IndexByte(lineSpaces, c) >= 0 {
+				if !run {
+					if pos != nil {
+						pos[end-len(l)+i] = b.Len()
+					}
+					b.WriteByte(' ')
+				}
+				run = true
+				continue
+			}
+			run = false
+			if pos != nil {
+				pos[end-len(l)+i] = b.Len()
+			}
+			b.WriteByte(c)
+		}
 	}
 	// Lines are already trimmed and never start blank; TrimSpace would eat a <pre> indent.
 	text := strings.TrimRight(b.String(), "\n")
 	next := len(text)
-	for i := len(s); i >= 0; i-- {
+	for i := len(pos) - 1; i >= 0; i-- {
 		if pos[i] >= 0 && pos[i] < len(text) {
 			next = pos[i]
 		}
 		pos[i] = next
 	}
-	return text, pos
+	return text
 }
 
 // runeSpans maps byte spans of the text before normalisation to rune spans of text
