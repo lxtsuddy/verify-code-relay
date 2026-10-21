@@ -111,7 +111,14 @@
   --card-pad-x: 20px;
   --section-gap: 36px;
 
-  --rail-w: 232px;
+  /* layout: the rail is wide from 1200px, an icon rail from 861px, a top bar below;
+     the page column is centred beside it at the width the page declares */
+  --rail-w-full: 232px;
+  --rail-w-compact: 88px;
+  --rail-w: var(--rail-w-full);
+  --page-wide: 1360px;
+  --page-form: 1040px;
+  --gutter: clamp(16px, 0.75rem + 1.8vw, 48px);
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
@@ -254,8 +261,36 @@ b, strong { font-weight: 700; }
 .logout-btn:hover { background: rgba(255, 255, 255, 0.07); color: #fff; }
 .logout-btn:focus-visible { outline-color: var(--green-300); }
 
-.main { width: 100%; max-width: 1120px; padding: 36px 44px 72px; }
+/* the page column is centred in the space beside the rail; each page declares its width
+   (main-wide for lists and the overview, main-form for forms; see layout.html) */
+.main {
+  --page-max: var(--page-wide);
+  width: 100%; max-width: calc(var(--page-max) + 2 * var(--gutter)); margin-inline: auto;
+  padding: clamp(24px, 1rem + 1.2vw, 40px) var(--gutter) 72px;
+}
+.main-form { --page-max: var(--page-form); }
 .main:focus { outline: none; }
+
+/* mid widths (laptops with display scaling): an icon rail with small labels, so the
+   content keeps its room; the current page is still a tab joined to the content */
+@media (min-width: 861px) and (max-width: 1199px) {
+  :root { --rail-w: var(--rail-w-compact); }
+  .rail { padding: 18px 0 14px 8px; }
+  .rail .brand { justify-content: center; padding: 0 8px 22px 0; }
+  .rail .brand-name {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+  }
+  .nav-item, .logout-btn {
+    flex-direction: column; justify-content: center; gap: 5px;
+    padding: 10px 2px 9px; font-size: var(--fs-xs); letter-spacing: 0.02em; line-height: 1.25; text-align: center;
+  }
+  .nav-item { margin-right: 8px; }
+  .nav-item .icon, .logout-btn .icon { width: 20px; height: 20px; }
+  /* the joined tab reaches the rail's edge, 8px further than the others: pad it so its
+     icon stays in line with theirs */
+  .nav-item[aria-current="page"] { padding-right: 10px; }
+  .rail-logout { margin-right: 8px; }
+}
 
 @media (max-width: 860px) {
   .shell { grid-template-columns: minmax(0, 1fr); background: none; }
@@ -296,16 +331,15 @@ b, strong { font-weight: 700; }
   margin-bottom: 28px; padding-bottom: 20px;
   border-bottom: 1px solid var(--line);
 }
-.page-title { font-size: 28px; line-height: 1.25; font-weight: 800; letter-spacing: 0.04em; }
+.page-title { font-size: clamp(24px, 1.1rem + 0.8vw, 30px); line-height: 1.25; font-weight: 800; letter-spacing: 0.04em; }
 .page-desc { margin-top: 6px; max-width: 62ch; color: var(--muted); }
 .page-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 
 .section-title { margin: var(--section-gap) 0 14px; font-size: var(--fs-xl); font-weight: 700; letter-spacing: 0.03em; }
 
 @media (max-width: 860px) {
-  .main { padding: 24px 16px 56px; }
+  .main { padding-bottom: 56px; }
   .page-head { margin-bottom: 22px; padding-bottom: 16px; }
-  .page-title { font-size: 24px; }
 }
 
 @media (max-width: 640px) {
@@ -1052,7 +1086,6 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .empty-steps li.is-done::before { content: "✓"; background: var(--green-100); color: var(--green-800); }
 
 /* the form: one column of cards, the save bar stays at the bottom of the viewport */
-.mb-form { max-width: 860px; }
 .mb-form > .card + .card { margin-top: 18px; }
 .mb-form .card-head .btn { flex: none; }
 .grid-host { display: grid; grid-template-columns: minmax(0, 1fr) 7.5em; gap: 18px 20px; }
@@ -1224,7 +1257,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   background: linear-gradient(to bottom, rgba(242, 244, 239, 0), var(--paper) 14px);
 }
 
-.danger-zone { max-width: 860px; margin-top: 36px; border-color: var(--red-100); }
+.danger-zone { margin-top: 36px; border-color: var(--red-100); }
 .danger-body { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 16px 20px; }
 .danger-body .card-title { color: var(--red-700); }
 
@@ -1382,7 +1415,6 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 }
 .subnav + .page-head { margin-top: 4px; }
 
-.rules-form, .tpl-form { max-width: 980px; }
 .rules-form .card-head { flex-wrap: wrap; }
 .rules-form .card-head > div:first-child { flex: 1 1 360px; }
 
@@ -1656,7 +1688,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
    could not test), a found code sits in red postcode boxes, a discarded mail wears the same
    「略過」 stamp as the rule that dropped it, and beside it the message lands in Telegram. */
 
-.mailtest { max-width: 980px; margin-top: 28px; }
+.mailtest { margin-top: 28px; }
 .mailtest .card-head > div { flex: 1 1 360px; }
 .mt-form { display: grid; gap: 16px; }
 

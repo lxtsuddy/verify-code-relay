@@ -6,6 +6,8 @@ Page files:
   {{template "app" .}}          signed-in pages: navigation rail, flash, form-level error
   {{template "bare" .}}         centred pages without navigation (login, TOTP, errors)
   {{define "content"}}…{{end}}  the page body
+  {{define "width"}}form{{end}}  optional: a form page, narrower (--page-form); lists and the overview
+                                stay "wide" (--page-wide)
 
 Data: every template receives a Page {Title, Nav, CSRF, Flash, Errors, Data}. Inside
 {{with}}/{{range}} use $ for the Page (e.g. $.Errors, $.CSRF).
@@ -56,7 +58,7 @@ is bound in static/app.js through data-* attributes; appearance lives in static/
       <button type="submit" class="logout-btn">{{template "icon" "logout"}}<span>登出</span></button>
     </form>
   </header>
-  <main id="main" class="main" tabindex="-1">
+  <main id="main" class="main main-{{block "width" .}}wide{{end}}" tabindex="-1">
     {{template "flash" .}}
     {{template "form-error" .}}
     {{template "content" .}}
