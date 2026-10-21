@@ -1836,7 +1836,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 /* log page: whole log or forwarded mail only (links, so the choice stays in the URL) */
 .log-view { display: inline-flex; gap: 2px; margin-bottom: 12px; padding: 3px; border-radius: 9px; background: var(--sunken); }
 .log-view-item {
-  display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 14px; border-radius: 7px;
+  display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 14px; border-radius: 7px; white-space: nowrap;
   color: var(--muted); font-size: 14px; font-weight: 600; letter-spacing: 0.03em; text-decoration: none;
   transition: background-color 0.15s, box-shadow 0.15s;
 }
@@ -1913,11 +1913,14 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .log-filter .field { max-width: none; }
   .log-filter-actions { width: 100%; }
   .log-filter-actions .btn { flex: 1; }
+  /* the page numbers take a row of their own under the step buttons */
   .pager { justify-content: space-between; }
-  .pager-pages { display: none; }
-  .pager-pos { display: inline; }
+  .pager-pages { order: 3; flex: 1 1 100%; justify-content: center; }
   .log-view { display: flex; }
   .log-view-item { flex: 1; justify-content: center; }
+  /* on the overview the switch takes its own row under the title */
+  .section-head:has(.log-view-sm) { flex-wrap: wrap; }
+  .log-view-sm { order: 3; flex: 1 1 100%; margin: 6px 0 0; }
 }
 
 /* ---------- motion ---------- */

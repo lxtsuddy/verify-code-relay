@@ -105,12 +105,14 @@ type logsData struct {
 	Filtered                  bool
 }
 
-// pageLinks lists the first and last pages and those next to the current one, with gaps.
+// pageLinks lists the first and last pages and those next to the current one, with gaps;
+// a gap that would hide a single page shows that page instead.
 func pageLinks(f logFilter, pages int) []pageLink {
 	var out []pageLink
 	last := 0
+	shown := func(n int) bool { return n == 1 || n == pages || (n >= f.Page-1 && n <= f.Page+1) }
 	for n := 1; n <= pages; n++ {
-		if n != 1 && n != pages && (n < f.Page-1 || n > f.Page+1) {
+		if !shown(n) && !(shown(n-1) && shown(n+1)) {
 			continue
 		}
 		if last > 0 && n > last+1 {
@@ -124,11 +126,19 @@ func pageLinks(f logFilter, pages int) []pageLink {
 	return out
 }
 
+// cutRunes returns s cut to its first n runes (without an ellipsis: it is a search).
+func cutRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n])
+	}
+	return s
+}
+
 // readLogFilter reads the page's query, dropping values it does not know.
 func readLogFilter(q url.Values) logFilter {
 	f := logFilter{
 		Mailbox: truncate(strings.TrimSpace(q.Get("mailbox")), 200), Result: q.Get("result"), Kind: q.Get("kind"),
-		Since: q.Get("since"), Search: truncate(strings.TrimSpace(q.Get("q")), maxLogSearch),
+		Since: q.Get("since"), Search: cutRunes(strings.TrimSpace(q.Get("q")), maxLogSearch),
 	}
 	if _, ok := resultLabels[f.Result]; !ok {
 		f.Result = ""

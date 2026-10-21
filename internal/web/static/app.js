@@ -285,7 +285,12 @@
   });
 
   // a page restored from the back/forward cache must not stay "submitting"
-  window.addEventListener("pageshow", function (e) { if (e.persisted) resetForms(); });
+  window.addEventListener("pageshow", function (e) {
+    if (!e.persisted) return;
+    resetForms();
+    // the log filter disables its empty fields on submit (see "log page")
+    document.querySelectorAll("form.log-filter [disabled]").forEach(function (f) { f.disabled = false; });
+  });
 
   document.addEventListener("click", function (e) {
     var t = e.target;
@@ -1563,6 +1568,21 @@
     document.querySelectorAll("[data-tpl-preview]").forEach(runPreview);
   });
 
+  /* ---------- log page ----------
+
+    form.log-filter（GET /logs）：送出前停用空白欄位與預設的每頁筆數，網址只留下真正在用的條件，
+    和伺服器產生的連結一致。
+  */
+
+  document.addEventListener("submit", function (e) {
+    var form = e.target;
+    if (!form.classList || !form.classList.contains("log-filter")) return;
+    Array.prototype.forEach.call(form.elements, function (f) {
+      if (!f.name) return;
+      if (f.value.trim() === "" || (f.name === "size" && f.value === "20")) f.disabled = true;
+    });
+  });
+
   /* ---------- rules page: mail test ----------
 
     form[data-mailtest]                獨立於規則表單；送出時把 form[data-rules-form] 目前的欄位
@@ -2103,6 +2123,7 @@
     var mb = el("td", "c-mb");
     var label = r.mailbox_label || r.mailbox;
     var name = mb.appendChild(el("span", "log-mb", label));
+    name.title = label;
     if (label !== r.mailbox) name.appendChild(el("span", "log-key mono", r.mailbox));
     var folder = mb.appendChild(el("span", "log-folder mono", r.folder));
     folder.title = r.folder;

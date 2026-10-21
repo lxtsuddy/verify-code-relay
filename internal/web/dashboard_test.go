@@ -221,8 +221,8 @@ func TestLogsPagination(t *testing.T) {
 			t.Errorf("page 3 lacks %q", want)
 		}
 	}
-	if strings.Contains(body, `href="/logs?page=5"`) {
-		t.Error("page 5 is not next to page 3: it should be a gap")
+	if _, body = e.get("/logs?page=2"); strings.Contains(body, `href="/logs?page=4"`) || !strings.Contains(body, "pager-gap") {
+		t.Error("pages 4 and 5 are not next to page 2: they should be a gap")
 	}
 	// out-of-range and junk pages and sizes are clamped, never an error
 	for q, want := range map[string]string{"page=0": "第 1 / 6 頁", "page=-4": "第 1 / 6 頁", "page=abc": "第 1 / 6 頁",
@@ -289,6 +289,14 @@ func TestLogsKindSinceAndSearch(t *testing.T) {
 			t.Errorf("%s: no way to clear the filters", q)
 		}
 	}
+	// an over-long search is cut without an ellipsis, so it can still match
+	if _, body := e.get("/logs?q=" + strings.Repeat("s", 150)); strings.Contains(body, "…") {
+		t.Error("the search box should not gain an ellipsis")
+	}
+	// "全部紀錄" is current only without a kind filter
+	if _, body := e.get("/logs?kind=none"); strings.Contains(body, `aria-current="true"`) {
+		t.Error("no switch item is current under another kind filter")
+	}
 	// the quick switch keeps the other filters
 	_, body := e.get("/logs?q=slack")
 	if !strings.Contains(body, `href="/logs?kind=hit&amp;q=slack"`) {
@@ -336,10 +344,10 @@ func TestLogRowsShowDisplayName(t *testing.T) {
 	}
 	for _, path := range []string{"/logs", "/?recent=all"} {
 		_, body := e.get(path)
-		if !strings.Contains(body, `<span class="log-mb">個人 Gmail<span class="log-key mono">gmail</span></span>`) {
+		if !strings.Contains(body, `<span class="log-mb" title="個人 Gmail">個人 Gmail<span class="log-key mono">gmail</span></span>`) {
 			t.Errorf("%s: display name row missing", path)
 		}
-		if !strings.Contains(body, `<span class="log-mb">gone</span>`) {
+		if !strings.Contains(body, `<span class="log-mb" title="gone">gone</span>`) {
 			t.Errorf("%s: deleted mailbox row missing", path)
 		}
 	}
@@ -389,5 +397,33 @@ func TestDashboardRecentScope(t *testing.T) {
 	}
 	if _, body = e.get("/api/status?recent=all"); !strings.Contains(body, "週末特賣") {
 		t.Error("status poll with recent=all should list every mail")
+	}
+}
+
+// A single hidden page is shown as its number, not as a gap.
+func TestPageLinksGaps(t *testing.T) {
+	render := func(page, pages int) string {
+		var out []string
+		for _, l := range pageLinks(logFilter{Size: defaultLogPageSize, Page: page}, pages) {
+			switch {
+			case l.Gap:
+				out = append(out, "…")
+			case l.Current:
+				out = append(out, fmt.Sprintf("[%d]", l.Num))
+			default:
+				out = append(out, fmt.Sprint(l.Num))
+			}
+		}
+		return strings.Join(out, " ")
+	}
+	for _, tc := range []struct {
+		page, pages int
+		want        string
+	}{
+		{1, 1, "[1]"}, {1, 5, "[1] 2 … 5"}, {4, 7, "1 2 3 [4] 5 6 7"}, {5, 9, "1 … 4 [5] 6 … 9"}, {4, 5, "1 2 3 [4] 5"}, {3, 6, "1 2 [3] 4 5 6"}, {2, 6, "1 [2] 3 … 6"}, {5, 5, "1 … 4 [5]"},
+	} {
+		if got := render(tc.page, tc.pages); got != tc.want {
+			t.Errorf("page %d of %d: %q, want %q", tc.page, tc.pages, got, tc.want)
+		}
 	}
 }

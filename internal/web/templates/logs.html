@@ -9,7 +9,7 @@
 </header>
 
 <nav class="log-view" aria-label="顯示範圍">
-  <a class="log-view-item" href="{{$d.AllURL}}"{{if ne $d.Kind "hit"}} aria-current="true"{{end}}>{{template "icon" "logs"}}<span>全部紀錄</span></a>
+  <a class="log-view-item" href="{{$d.AllURL}}"{{if eq $d.Kind ""}} aria-current="true"{{end}}>{{template "icon" "logs"}}<span>全部紀錄</span></a>
   <a class="log-view-item" href="{{$d.HitsURL}}"{{if eq $d.Kind "hit"}} aria-current="true"{{end}}>{{template "icon" "send"}}<span>只看轉發</span></a>
 </nav>
 
