@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestHTMLToText(t *testing.T) {
@@ -27,7 +28,7 @@ func TestHTMLToText(t *testing.T) {
 			t.Errorf("text missing %q:\n%s", want, text)
 		}
 	}
-	wantLinks := []Link{{URL: "https://example.com/verify?t=abc", Text: "Verify email"}}
+	wantLinks := []Link{{URL: "https://example.com/verify?t=abc", Text: "Verify email", Before: "c\n"}}
 	if !reflect.DeepEqual(links, wantLinks) {
 		t.Errorf("links = %+v", links)
 	}
@@ -165,5 +166,54 @@ func TestRenderHTMLEmphasis(t *testing.T) {
 		if !reflect.DeepEqual(emph, c.want) {
 			t.Errorf("renderHTML(%q) emphasis = %v, want %v", c.src, emph, c.want)
 		}
+	}
+}
+
+func TestRenderHTMLLinkDetails(t *testing.T) {
+	cases := []struct {
+		name, src string
+		want      Link
+	}{
+		{"image alt", `<a href="https://x.test/a"><img src="b.png" alt=" Verify  email "></a>`,
+			Link{URL: "https://x.test/a", Text: "Verify email", Before: "\n"}},
+		{"text beats alt", `<a href="https://x.test/a">Go <img alt="Verify"></a>`,
+			Link{URL: "https://x.test/a", Text: "Go", Before: "\n"}},
+		{"bg on a", `<a href="https://x.test/v" style="background-color:#1a73e8;color:#fff">Verify</a>`,
+			Link{URL: "https://x.test/v", Text: "Verify", Button: true, Before: "\n"}},
+		{"padding on a", `<a href="https://x.test/v" style="padding:12px 24px">Go</a>`,
+			Link{URL: "https://x.test/v", Text: "Go", Button: true, Before: "\n"}},
+		{"class btn", `<a class="btn btn-primary" href="https://x.test/v">Go</a>`,
+			Link{URL: "https://x.test/v", Text: "Go", Button: true, Before: "\n"}},
+		{"bgcolor parent td", `<table><tr><td bgcolor="#1a73e8"><a href="https://x.test/v">Verify</a></td></tr></table>`,
+			Link{URL: "https://x.test/v", Text: "Verify", Button: true, Before: "\n"}},
+		{"white parent is not a button", `<table><tr><td style="background:#FFFFFF"><a href="https://x.test/v">Verify</a></td></tr></table>`,
+			Link{URL: "https://x.test/v", Text: "Verify", Before: "\n"}},
+		{"padding on parent is not a button", `<table><tr><td style="padding:10px"><a href="https://x.test/v">Go</a></td></tr></table>`,
+			Link{URL: "https://x.test/v", Text: "Go", Before: "\n"}},
+		{"parent with text is not a button", `<p style="background:#00f">Read <a href="https://x.test/v">more</a></p>`,
+			Link{URL: "https://x.test/v", Text: "more", Before: "\nRead"}},
+		{"styled only child", `<a href="https://x.test/v"><span style="background:#e00;padding:8px">Verify</span></a>`,
+			Link{URL: "https://x.test/v", Text: "Verify", Button: true, Before: "\n"}},
+		{"before: previous non-blank line", `<p>Please verify your email by clicking the link below.</p><p><a href="https://x.test/v">Click here</a></p>`,
+			Link{URL: "https://x.test/v", Text: "Click here", Before: "Please verify your email by clicking the link below.\n"}},
+		{"before: same line", `<p>Thanks.</p><p>To finish,   <a href="https://x.test/v">click here</a></p>`,
+			Link{URL: "https://x.test/v", Text: "click here", Before: "Thanks.\nTo finish,"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, links, _ := renderHTML(c.src)
+			if len(links) != 1 || links[0] != c.want {
+				t.Errorf("links = %+v, want [%+v]", links, c.want)
+			}
+		})
+	}
+}
+
+func TestTextBeforeCutsTo120Runes(t *testing.T) {
+	long := strings.Repeat("驗", 200)
+	got := textBefore(long+"\n\n"+long+" x", len(long)*2+2+len(" x"))
+	prev, cur, _ := strings.Cut(got, "\n")
+	if utf8.RuneCountInString(prev) != 120 || utf8.RuneCountInString(cur) != 120 {
+		t.Fatalf("prev %d runes, cur %d runes", utf8.RuneCountInString(prev), utf8.RuneCountInString(cur))
 	}
 }

@@ -89,6 +89,7 @@ func renderHTML(src string) (string, []Link, []Span) {
 	var emph []span // byte spans of b
 	pre := 0        // depth of enclosing <pre> elements; whitespace is kept verbatim inside them
 	var verbatim []span
+	var linkAt []int // byte offset in b where each link starts
 	var walk func(n *html.Node)
 	walk = func(n *html.Node) {
 		if n.Type == html.ElementNode {
@@ -120,7 +121,12 @@ func renderHTML(src string) (string, []Link, []Span) {
 				}
 				href := strings.TrimSpace(attr(n, "href"))
 				if isHTTP(href) {
-					links = append(links, Link{URL: href, Text: collapseSpaces(b.String()[start:])})
+					text := collapseSpaces(b.String()[start:])
+					if text == "" {
+						text = imgAlt(n)
+					}
+					links = append(links, Link{URL: href, Text: text, Button: isButton(n)})
+					linkAt = append(linkAt, start)
 				}
 				return
 			}
@@ -143,7 +149,116 @@ func renderHTML(src string) (string, []Link, []Span) {
 	}
 	walk(doc)
 	text, pos := normalizeLinesMap(b.String(), verbatim)
+	for i := range links {
+		links[i].Before = textBefore(text, pos[linkAt[i]])
+	}
 	return text, links, runeSpans(text, emph, pos)
+}
+
+const beforeRunes = 120
+
+// textBefore returns the text before byte offset off of text as "previous line\nsame
+// line": the same line runs from the line start to off, the previous line is the nearest
+// non-blank line above it. Each is space-collapsed and cut to its last 120 runes.
+func textBefore(text string, off int) string {
+	head := text[max(0, off-4096):off]
+	i := strings.LastIndexByte(head, '\n')
+	cur, prev := head[i+1:], ""
+	for rest := head[:max(i, 0)]; i >= 0; {
+		i = strings.LastIndexByte(rest, '\n')
+		if line := rest[i+1:]; strings.TrimSpace(line) != "" {
+			prev = line
+			break
+		}
+		rest = rest[:max(i, 0)]
+	}
+	return lastRunes(collapseSpaces(prev), beforeRunes) + "\n" + lastRunes(collapseSpaces(cur), beforeRunes)
+}
+
+func lastRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[len(r)-n:])
+	}
+	return s
+}
+
+var (
+	buttonClassRe = regexp.MustCompile(`(?i)\b(btn|button)`)
+	backgroundRe  = regexp.MustCompile(`(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)`)
+	paddingRe     = regexp.MustCompile(`(?:^|;)\s*padding(?:-[a-z]+)?\s*:`)
+)
+
+// hasBackground reports whether n has a visible background colour (style or bgcolor);
+// white counts as none, as e-mail layouts put it on every cell.
+func hasBackground(n *html.Node) bool {
+	v := strings.ToLower(strings.TrimSpace(attr(n, "bgcolor")))
+	if m := backgroundRe.FindStringSubmatch(strings.ToLower(attr(n, "style"))); m != nil {
+		v = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(m[1]), "!important"))
+	}
+	switch v {
+	case "", "none", "transparent", "inherit", "initial", "#fff", "#ffffff", "white":
+		return false
+	}
+	return true
+}
+
+func buttonish(n *html.Node, self bool) bool {
+	if buttonClassRe.MatchString(attr(n, "class")) || buttonClassRe.MatchString(attr(n, "role")) || hasBackground(n) {
+		return true
+	}
+	return self && paddingRe.MatchString(strings.ToLower(attr(n, "style")))
+}
+
+// onlyElementChild returns n's single element child when n has no other element and
+// no non-blank text, else nil.
+func onlyElementChild(n *html.Node) *html.Node {
+	var only *html.Node
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		switch {
+		case c.Type == html.ElementNode:
+			if only != nil {
+				return nil
+			}
+			only = c
+		case c.Type == html.TextNode && strings.TrimSpace(c.Data) != "":
+			return nil
+		}
+	}
+	return only
+}
+
+// isButton reports whether the link a is styled as a button: a itself has a button
+// class or role, a background or padding; or its only child, or a parent whose only
+// child it is (mail layouts colour the surrounding <td>), has a button class or role
+// or a background.
+func isButton(a *html.Node) bool {
+	if buttonish(a, true) {
+		return true
+	}
+	if c := onlyElementChild(a); c != nil && buttonish(c, false) {
+		return true
+	}
+	p := a.Parent
+	return p != nil && p.Type == html.ElementNode && onlyElementChild(p) == a && buttonish(p, false)
+}
+
+// imgAlt returns the first non-blank alt text of an image inside n.
+func imgAlt(n *html.Node) string {
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		if c.Type != html.ElementNode || hidden(c) {
+			continue
+		}
+		if c.DataAtom == atom.Img {
+			if a := collapseSpaces(attr(c, "alt")); a != "" {
+				return a
+			}
+			continue
+		}
+		if a := imgAlt(c); a != "" {
+			return a
+		}
+	}
+	return ""
 }
 
 func attr(n *html.Node, key string) string {

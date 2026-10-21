@@ -26,6 +26,11 @@ type Span struct{ Start, End int }
 type Link struct {
 	URL  string
 	Text string
+	// Button is set when the link is styled as a button (see isButton).
+	Button bool
+	// Before is the text before the link: the nearest non-blank line above, "\n", then
+	// the link's own line up to the link (see textBefore).
+	Before string
 }
 
 type Message struct {
