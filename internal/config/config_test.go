@@ -58,8 +58,8 @@ func TestParse(t *testing.T) {
 	if g.Auth.Password != `p"w#: x` {
 		t.Errorf("password = %q", g.Auth.Password)
 	}
-	if len(g.Folders) != 1 || g.Folders[0] != "INBOX" {
-		t.Errorf("folders = %v", g.Folders)
+	if len(g.Routes) != 1 || g.Routes[0] != (Route{"INBOX", "me"}) {
+		t.Errorf("routes = %v", g.Routes)
 	}
 	if g.MaxAge.Duration != 10*time.Minute || g.TTL.Duration != 15*time.Minute || g.PollInterval.Duration != 30*time.Second {
 		t.Errorf("gmail effective durations wrong: %+v", g)

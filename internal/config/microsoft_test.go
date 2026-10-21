@@ -76,8 +76,8 @@ func TestParseNoLongerFillsMailboxTenant(t *testing.T) {
 func TestValidateMicrosoftApp(t *testing.T) {
 	outlook := func(c *Config, clientID string) {
 		c.Mailboxes["outlook"] = &Mailbox{Name: "outlook", DisplayName: "outlook", Host: "outlook.office365.com", Port: 993,
-			Username: "me@outlook.com", Auth: Auth{Type: "microsoft_oauth", ClientID: clientID}, Folders: []string{"INBOX"},
-			Targets: []string{"me"}, MaxAge: c.Defaults.MaxAge, TTL: c.Defaults.TTL, PollInterval: c.Defaults.PollInterval}
+			Username: "me@outlook.com", Auth: Auth{Type: "microsoft_oauth", ClientID: clientID},
+			Routes: []Route{{"INBOX", "me"}}, MaxAge: c.Defaults.MaxAge, TTL: c.Defaults.TTL, PollInterval: c.Defaults.PollInterval}
 	}
 	for _, tc := range []struct {
 		name   string

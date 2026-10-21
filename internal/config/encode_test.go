@@ -103,7 +103,7 @@ func TestCloneIsDeepForRawConfigs(t *testing.T) {
 	c.Bots["main"] = Bot{Token: "t"}
 	c.Mailboxes["m"] = &Mailbox{
 		Host:      "h",
-		Folders:   []string{"INBOX"},
+		Routes:    []Route{{"INBOX", "me"}},
 		TTL:       Duration{Duration: time.Minute, Set: true},
 		Templates: Templates{Code: "code"},
 	}
@@ -116,12 +116,12 @@ func TestCloneIsDeepForRawConfigs(t *testing.T) {
 	}
 	d.Bots["other"] = Bot{Token: "x"}
 	d.Mailboxes["m"].Host = "changed"
-	d.Mailboxes["m"].Folders[0] = "Changed"
+	d.Mailboxes["m"].Routes[0].Folder = "Changed"
 	d.Mailboxes["new"] = &Mailbox{}
 	if len(c.Bots) != 1 || len(c.Mailboxes) != 1 {
 		t.Errorf("original maps changed: %d bots, %d mailboxes", len(c.Bots), len(c.Mailboxes))
 	}
-	if c.Mailboxes["m"].Host != "h" || c.Mailboxes["m"].Folders[0] != "INBOX" {
+	if c.Mailboxes["m"].Host != "h" || c.Mailboxes["m"].Routes[0].Folder != "INBOX" {
 		t.Errorf("original mailbox changed: %+v", c.Mailboxes["m"])
 	}
 }

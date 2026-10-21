@@ -84,6 +84,7 @@ func startMemIMAP(t *testing.T) *memIMAP {
 	mem := imapmemserver.New()
 	u := imapmemserver.NewUser(memUser, memPass)
 	u.Create("INBOX", nil)
+	u.Create("Spam", nil)
 	mem.AddUser(u)
 	srv := imapserver.New(&imapserver.Options{
 		NewSession: func(*imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
@@ -123,8 +124,27 @@ func (m *memIMAP) dial(t *testing.T) runtime.DialFactory {
 	}
 }
 
+// idling reports whether at least n connections have sent IDLE.
+func (m *memIMAP) idling(n int) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	k := 0
+	for _, c := range m.conns {
+		if c.Load() > 0 {
+			k++
+		}
+	}
+	return k >= n
+}
+
 // appendMail stores raw (any line ends) in INBOX through a separate client.
 func (m *memIMAP) appendMail(t *testing.T, raw []byte) {
+	t.Helper()
+	m.appendMailTo(t, "INBOX", raw)
+}
+
+// appendMailTo is appendMail into folder.
+func (m *memIMAP) appendMailTo(t *testing.T, folder string, raw []byte) {
 	t.Helper()
 	c, err := imapclient.DialInsecure(m.addr.String(), nil)
 	if err != nil {
@@ -135,7 +155,7 @@ func (m *memIMAP) appendMail(t *testing.T, raw []byte) {
 		t.Fatal(err)
 	}
 	msg := strings.ReplaceAll(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n", "\r\n")
-	cmd := c.Append("INBOX", int64(len(msg)), nil)
+	cmd := c.Append(folder, int64(len(msg)), nil)
 	cmd.Write([]byte(msg))
 	cmd.Close()
 	if _, err := cmd.Wait(); err != nil {

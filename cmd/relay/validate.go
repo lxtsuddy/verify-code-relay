@@ -15,11 +15,12 @@ func cmdValidate(configPath string, args []string, stdout, stderr io.Writer) int
 		fmt.Fprintf(stderr, "設定檔有誤（%s）：\n%v\n", path, err)
 		return 1
 	}
-	folders := 0
+	folders, routes := 0, 0
 	for _, m := range a.Config.Mailboxes {
-		folders += len(m.Folders)
+		folders += len(m.WatchedFolders())
+		routes += len(m.Routes)
 	}
-	fmt.Fprintf(stdout, "設定檔正確：Bot %d 個、目標 %d 個、信箱 %d 個（監看 %d 個資料夾）、自訂規則 %d 條\n",
-		len(a.Config.Bots), len(a.Config.Targets), len(a.Config.Mailboxes), folders, len(a.Config.Rules))
+	fmt.Fprintf(stdout, "設定檔正確：Bot %d 個、目標 %d 個、信箱 %d 個（監看 %d 個資料夾、%d 條轉發路由）、自訂規則 %d 條\n",
+		len(a.Config.Bots), len(a.Config.Targets), len(a.Config.Mailboxes), folders, routes, len(a.Config.Rules))
 	return 0
 }

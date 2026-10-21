@@ -109,3 +109,52 @@ mailboxes:
 		t.Errorf("chats = %v, want 42 and 43", chats)
 	}
 }
+
+// Mail found in a folder goes to that folder's targets only.
+func TestEndToEndRoutesByFolder(t *testing.T) {
+	srv := startMemIMAP(t)
+	tg := startFakeTelegram(t)
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.yaml")
+	cfgYAML := `bots: { main: { token: "123:abc" } }
+targets:
+  me: { bot: main, chat_id: 42 }
+  family: { bot: main, chat_id: 43 }
+mailboxes:
+  test:
+    host: 127.0.0.1
+    username: me@example.com
+    auth: { type: password, password: pw }
+    routes:
+      - { folder: INBOX, target: me }
+      - { folder: Spam, target: family }
+`
+	if err := os.WriteFile(cfgPath, []byte(cfgYAML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := loadApp(cfgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(filepath.Join(dir, "relay.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	sender := &telegram.Client{BaseURL: tg.URL, HTTP: tg.Client()}
+	rt := runtime.New(runtime.Options{Store: st, Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Sender: sender, Dial: srv.dial(t)})
+	rt.Apply(a)
+	defer rt.Stop()
+
+	waitFor(t, "both watchers idling", func() bool { return srv.idling(2) })
+	raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "eml", "github-device-en.eml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.appendMailTo(t, "Spam", raw)
+	waitFor(t, "a message from Spam", func() bool { return len(tg.messages()) >= 1 })
+	time.Sleep(300 * time.Millisecond) // nothing more may follow
+	if got := tg.messages(); len(got) != 1 || got[0].ChatID != 43 {
+		t.Fatalf("mail in Spam sent to %+v, want only chat 43 (family)", got)
+	}
+}

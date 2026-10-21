@@ -3,9 +3,11 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -388,5 +390,27 @@ func TestLoadBuiltErrorKinds(t *testing.T) {
 	st.Close()
 	if _, err := LoadBuilt(ctx, st); err == nil || errors.As(err, &invalid) {
 		t.Errorf("closed database: err = %v, want a read error", err)
+	}
+}
+
+// Each folder's watcher forwards to that folder's targets only.
+func TestEachFolderForwardsToItsOwnTargets(t *testing.T) {
+	c := sample()
+	c.Targets["fam"] = config.Target{Bot: "main", ChatID: 7}
+	m := c.Mailboxes["gmail"]
+	m.Folders, m.Targets = nil, nil
+	m.Routes = []config.Route{{Folder: "INBOX", Target: "me"}, {Folder: "Spam", Target: "fam"}, {Folder: "INBOX", Target: "fam"}}
+	b, err := Build(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, f := range b.Config.Mailboxes["gmail"].WatchedFolders() {
+		for _, tg := range mailboxFor(b.Config, "gmail", f).Targets {
+			got[f] += fmt.Sprintf("%s:%d ", tg.Name, tg.ChatID)
+		}
+	}
+	if want := map[string]string{"INBOX": "me:42 fam:7 ", "Spam": "fam:7 "}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("targets by folder = %v", got)
 	}
 }

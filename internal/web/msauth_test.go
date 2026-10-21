@@ -285,7 +285,7 @@ func TestOAuthFlowErrorsAndRetry(t *testing.T) {
 func outlookForm(kv ...string) url.Values {
 	f := url.Values{"host": {"outlook.office365.com"}, "username": {"me@outlook.com"},
 		"auth_type": {"microsoft_oauth"}, "client_id": {"00000000-0000-0000-0000-000000000001"}, "tenant": {"consumers"},
-		"folders": {"INBOX"}, "targets": {"me"}}
+		"route_folder": {"INBOX"}, "route_target": {"me"}}
 	for i := 0; i+1 < len(kv); i += 2 {
 		f.Set(kv[i], kv[i+1])
 	}
@@ -535,7 +535,7 @@ func TestOAuthFlowSurvivesUnrelatedEdit(t *testing.T) {
 	<-polled
 	e.postForm("/mailboxes/outlook", url.Values{"display_name": {"工作信箱"}, "host": {"outlook.office365.com"}, "username": {"me@outlook.com"},
 		"auth_type": {"microsoft_oauth"}, "client_id": {"00000000-0000-0000-0000-000000000001"}, "tenant": {"consumers"},
-		"folders": {"INBOX"}, "targets": {"me"}})
+		"route_folder": {"INBOX"}, "route_target": {"me"}})
 	close(release)
 	e.waitOAuthState("outlook", "done")
 	if _, ok, _ := e.st.GetOAuthToken(context.Background(), "outlook"); !ok {
@@ -616,7 +616,7 @@ func TestEditPageKeepsStoredAccountForAuthorisation(t *testing.T) {
 	e.login()
 	resp, page := e.postForm("/mailboxes/outlook", url.Values{"host": {"outlook.office365.com"}, "port": {"99999"}, "username": {"me@outlook.com"},
 		"auth_type": {"microsoft_oauth"}, "client_id": {"00000000-0000-0000-0000-000000000001"}, "tenant": {"organizations"},
-		"folders": {"INBOX"}, "targets": {"me"}})
+		"route_folder": {"INBOX"}, "route_target": {"me"}})
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Fatalf("= %d", resp.StatusCode)
 	}

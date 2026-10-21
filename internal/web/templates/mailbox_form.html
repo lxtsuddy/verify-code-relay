@@ -157,65 +157,32 @@
     </div>
   </section>
 
-  {{/* ---------- folders ---------- */}}
-  {{$folderErr := fieldErr $e "folders"}}
-  <section class="card" aria-labelledby="folders-title">
+  {{/* ---------- routes: folder → target ---------- */}}
+  {{$rErr := fieldErr $e "routes"}}
+  <section class="card" id="routes" aria-labelledby="routes-title">
     <header class="card-head">
       <div>
-        <h2 class="card-title" id="folders-title">資料夾</h2>
-        <p class="card-desc">勾選要監看的資料夾；全部不勾時監看 INBOX。</p>
+        <h2 class="card-title" id="routes-title">轉發路由</h2>
+        <p class="card-desc">信件從哪個資料夾進來，就轉發到該列的目標。同一個資料夾可以送到多個目標，各寫一列。</p>
       </div>
       <button type="button" class="btn" data-probe>{{template "icon" "refresh"}}<span>測試連線</span></button>
     </header>
     <div class="card-body">
       <div class="probe" data-probe-out aria-live="polite">
         <span class="probe-icon">{{template "icon" "info"}}</span>
-        <p class="probe-text">「測試連線」會用上面填的資料實際登入，列出伺服器上的資料夾供勾選；不會儲存任何東西。</p>
+        <p class="probe-text">「測試連線」會用上面填的資料實際登入，列出伺服器上的資料夾，可在路由的資料夾欄位挑選；不會儲存任何東西。</p>
       </div>
-      <ul class="folders{{if $folderErr}} is-invalid{{end}}" data-folder-list aria-label="要監看的資料夾"{{if $folderErr}} aria-describedby="f-folders-err"{{end}}>{{range $f.Folders}}<li><label class="folder"><input type="checkbox" name="folders" value="{{.}}" checked><span class="folder-name mono">{{.}}</span></label></li>{{end}}</ul>
-      <div class="folder-add">
-        <label class="sr-only" for="f-folder-new">手動加入資料夾</label>
-        <input class="input input-mono" id="f-folder-new" type="text" placeholder="手動加入，例如 [Gmail]/垃圾郵件" autocomplete="off" spellcheck="false" data-folder-input>
-        <button type="button" class="btn" data-folder-add>{{template "icon" "plus"}}<span>加入</span></button>
-      </div>
-      <div id="f-folders-err">{{template "field-error" $folderErr}}</div>
-    </div>
-  </section>
-
-  {{/* ---------- routes ---------- */}}
-  {{$tErr := fieldErr $e "targets"}}
-  <section class="card" aria-labelledby="routes-title">
-    <header class="card-head">
-      <div>
-        <h2 class="card-title" id="routes-title">轉發到</h2>
-        <p class="card-desc">驗證碼與登入連結會送到每個勾選的目標，至少一個。</p>
-      </div>
-    </header>
-    <div class="card-body">
+      <div id="f-routes-err">{{template "field-error" $rErr}}</div>
       {{if $d.Targets}}
-      <fieldset class="fieldset">
-        <legend class="sr-only">轉發目標</legend>
-        <div class="routes"{{if $tErr}} aria-describedby="f-targets-err"{{end}}>
-          {{range $d.Targets}}
-          <label class="route-pick">
-            <input type="checkbox" name="targets" value="{{.Name}}"{{if .Checked}} checked{{end}}{{if $tErr}} aria-invalid="true"{{end}}>
-            <span class="route-card">
-              <span class="route-name mono">{{.Name}}</span>
-              <span class="route" aria-label="由 Bot {{.Bot}} 送到 chat {{.ChatID}}">
-                <span class="route-bot mono">{{.Bot}}</span>
-                <span class="route-line" aria-hidden="true"></span>
-                <span class="route-chat mono">{{.ChatID}}</span>
-              </span>
-              <span class="route-check" aria-hidden="true">{{template "icon" "check"}}</span>
-            </span>
-          </label>
-          {{end}}
-        </div>
-      </fieldset>
+      <ol class="route-rows" data-route-rows aria-label="轉發路由"{{if $rErr}} aria-describedby="f-routes-err"{{end}}>
+        {{range $d.Routes}}{{template "route-row" (dict "R" . "Targets" $d.Targets)}}{{end}}
+      </ol>
+      <button type="button" class="btn btn-ghost route-add" data-route-add>{{template "icon" "plus"}}<span>新增路由</span></button>
+      <datalist id="f-folder-options" data-folder-options>{{range $d.FolderOptions}}<option value="{{.}}"></option>{{end}}</datalist>
+      <template id="tpl-route-row">{{template "route-row" (dict "R" $d.NewRoute "Targets" $d.Targets)}}</template>
       {{else}}
-      <div class="callout callout-warn">{{template "icon" "alert"}}<p>還沒有任何 Telegram 目標。請先到 <a href="/telegram">Telegram</a> 新增 Bot 與目標，再回來勾選。</p></div>
+      <div class="callout callout-warn">{{template "icon" "alert"}}<p>還沒有任何 Telegram 目標。請先到 <a href="/telegram">Telegram</a> 新增 Bot 與目標，再回來設定路由。</p></div>
       {{end}}
-      <div id="f-targets-err">{{template "field-error" $tErr}}</div>
     </div>
   </section>
 
@@ -291,3 +258,21 @@
 </div>
 {{end}}
 {{define "width"}}form{{end}}
+
+{{/* route-row: one "folder → target" row: {{template "route-row" (dict "R" routeRowView "Targets" []routeOption)}}.
+The template copy in #tpl-route-row is cloned by app.js for "新增路由". */}}
+{{define "route-row"}}{{$r := .R}}<li class="route-row{{if $r.Spare}} route-row-spare{{end}}{{if $r.Err}} is-invalid{{end}}" data-route-row>
+  <span class="route-row-no" aria-hidden="true"></span>
+  <div class="route-row-fields">
+    <label class="sr-only" for="f-route-folder-{{$r.Index}}">資料夾</label>
+    <input class="input input-mono route-folder" id="f-route-folder-{{$r.Index}}" name="route_folder" value="{{$r.Folder}}" list="f-folder-options" placeholder="資料夾，例如 INBOX" autocomplete="off" spellcheck="false"{{if $r.FolderBad}} aria-invalid="true"{{end}}{{if $r.Err}} aria-describedby="f-route-err-{{$r.Index}}"{{end}}>
+    <span class="route-line" aria-hidden="true"></span>
+    <label class="sr-only" for="f-route-target-{{$r.Index}}">轉發到</label>
+    <select class="select route-target" id="f-route-target-{{$r.Index}}" name="route_target"{{if $r.TargetBad}} aria-invalid="true"{{end}}{{if $r.Err}} aria-describedby="f-route-err-{{$r.Index}}"{{end}}>
+      <option value="">選擇目標</option>
+      {{range .Targets}}<option value="{{.Name}}"{{if eq .Name $r.Target}} selected{{end}}>{{.Name}}（{{.Bot}} → {{.ChatID}}）</option>{{end}}
+    </select>
+    <button type="button" class="icon-btn icon-btn-danger route-remove" data-route-remove aria-label="刪除這條路由">{{template "icon" "trash"}}</button>
+  </div>
+  {{with $r.Err}}<div id="f-route-err-{{$r.Index}}">{{template "field-error" .}}</div>{{end}}
+</li>{{end}}

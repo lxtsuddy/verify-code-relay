@@ -75,11 +75,14 @@ func presetFor(host string) string {
 	return "custom"
 }
 
+// routeRow is one "folder → target" row of the form, as typed.
+type routeRow struct{ Folder, Target string }
+
 // mailboxForm holds the form values as typed (never the password).
 type mailboxForm struct {
 	Name, DisplayName, Preset, Host, Port, Username string
 	AuthType, ClientID, Tenant                      string
-	Folders, Targets                                []string
+	Routes                                          []routeRow
 	MaxAge, TTL, PollInterval                       string
 	TplCode, TplLink, TplBoth                       string
 }
@@ -88,9 +91,11 @@ func formFromMailbox(name string, m *config.Mailbox) mailboxForm {
 	f := mailboxForm{
 		Name: name, DisplayName: m.DisplayName, Preset: presetFor(m.Host), Host: m.Host, Username: m.Username,
 		AuthType: m.Auth.Type, ClientID: m.Auth.ClientID, Tenant: m.Auth.Tenant,
-		Folders: append([]string(nil), m.Folders...), Targets: append([]string(nil), m.Targets...),
 		MaxAge: durationValue(m.MaxAge), TTL: durationValue(m.TTL), PollInterval: durationValue(m.PollInterval),
 		TplCode: m.Templates.Code, TplLink: m.Templates.Link, TplBoth: m.Templates.Both,
+	}
+	for _, rt := range m.Routes {
+		f.Routes = append(f.Routes, routeRow{Folder: rt.Folder, Target: rt.Target})
 	}
 	if m.Port != 0 {
 		f.Port = strconv.Itoa(m.Port)
@@ -101,7 +106,8 @@ func formFromMailbox(name string, m *config.Mailbox) mailboxForm {
 	return f
 }
 
-// readMailboxForm reads the posted form. Empty folder rows are dropped; template text
+// readMailboxForm reads the posted form. Route rows come as the parallel lists
+// route_folder and route_target; a row with both left blank is dropped. Template text
 // gets the browser's CRLF line ends turned back into LF.
 func readMailboxForm(r *http.Request) mailboxForm {
 	v := func(k string) string { return strings.TrimSpace(r.PostFormValue(k)) }
@@ -112,14 +118,17 @@ func readMailboxForm(r *http.Request) mailboxForm {
 		MaxAge: v("max_age"), TTL: v("ttl"), PollInterval: v("poll_interval"),
 		TplCode: tpl("tpl_code"), TplLink: tpl("tpl_link"), TplBoth: tpl("tpl_both"),
 	}
-	for _, x := range r.PostForm["folders"] {
-		if x = strings.TrimSpace(x); x != "" {
-			f.Folders = append(f.Folders, x)
+	folders, targets := r.PostForm["route_folder"], r.PostForm["route_target"]
+	for i := 0; i < max(len(folders), len(targets)); i++ {
+		var row routeRow
+		if i < len(folders) {
+			row.Folder = strings.TrimSpace(folders[i])
 		}
-	}
-	for _, x := range r.PostForm["targets"] {
-		if x = strings.TrimSpace(x); x != "" {
-			f.Targets = append(f.Targets, x)
+		if i < len(targets) {
+			row.Target = strings.TrimSpace(targets[i])
+		}
+		if row.Folder != "" || row.Target != "" {
+			f.Routes = append(f.Routes, row)
 		}
 	}
 	if f.AuthType == "" {
@@ -149,8 +158,10 @@ func (f mailboxForm) mailbox(old *config.Mailbox, password string) (*config.Mail
 	fe := FieldErrors{}
 	m := &config.Mailbox{
 		Name: f.Name, DisplayName: f.DisplayName, Host: f.Host, Username: f.Username,
-		Folders: f.Folders, Targets: f.Targets,
 		Templates: config.Templates{Code: f.TplCode, Link: f.TplLink, Both: f.TplBoth},
+	}
+	for _, rt := range f.Routes {
+		m.Routes = append(m.Routes, config.Route{Folder: rt.Folder, Target: rt.Target})
 	}
 	var msg string
 	if m.Port, msg = parsePort(f.Port); msg != "" {
@@ -192,7 +203,7 @@ func remapMailbox(fe FieldErrors, key string) FieldErrors {
 	fields := map[string]string{
 		"": "name", ".host": "host", ".port": "port", ".username": "username",
 		".auth.type": "auth_type", ".auth.password": "password", ".auth.client_id": "client_id", ".auth.tenant": "tenant",
-		".targets": "targets", ".max_age": "max_age", ".ttl": "ttl", ".poll_interval": "poll_interval",
+		".routes": "routes", ".max_age": "max_age", ".ttl": "ttl", ".poll_interval": "poll_interval",
 		".templates.code": "tpl_code", ".templates.link": "tpl_link", ".templates.both": "tpl_both",
 	}
 	out := FieldErrors{}
@@ -201,12 +212,8 @@ func remapMailbox(fe FieldErrors, key string) FieldErrors {
 		v := fe[k]
 		sub, ok := strings.CutPrefix(k, base)
 		if ok && (sub == "" || sub[0] == '.') {
-			switch {
-			case strings.HasPrefix(sub, ".folders["):
-				out.add("folders", v)
-				continue
-			case strings.HasPrefix(sub, ".targets["):
-				out.add("targets", v)
+			if rest, ok := strings.CutPrefix(sub, ".routes["); ok { // routes[i], routes[i].folder, routes[i].target
+				out.add("routes["+rest, v)
 				continue
 			}
 			if to, ok := fields[sub]; ok {
@@ -234,6 +241,7 @@ func checkMailboxName(name string, taken bool) string {
 type folderRow struct {
 	Name, Label, Class string
 	Live               bool
+	Targets            []string // where this folder's mail goes
 }
 
 type mailboxRow struct {
@@ -242,7 +250,6 @@ type mailboxRow struct {
 	Microsoft, NeedsAuth                     bool // NeedsAuth: no token stored
 	NeedsLogin                               bool // a folder's watcher reports needs_login
 	Folders                                  []folderRow
-	Targets                                  []string
 }
 
 type mailboxesData struct {
@@ -289,7 +296,7 @@ func (s *Server) getMailboxes(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		row := mailboxRow{Name: name, DisplayName: m.DisplayName, Username: m.Username, Host: m.Host, Port: m.Port, Glyph: glyphFor(m.Host),
-			Microsoft: m.Auth.Type == authMicrosoft, Targets: m.Targets}
+			Microsoft: m.Auth.Type == authMicrosoft}
 		if row.Port == 0 {
 			row.Port = 993
 		}
@@ -304,13 +311,9 @@ func (s *Server) getMailboxes(w http.ResponseWriter, r *http.Request) {
 			}
 			row.NeedsAuth = !ok
 		}
-		folders := m.Folders
-		if len(folders) == 0 {
-			folders = []string{"INBOX"}
-		}
-		for _, f := range folders {
+		for _, f := range m.WatchedFolders() {
 			st, ok := status[[2]string{name, f}]
-			fr := folderRow{Name: f}
+			fr := folderRow{Name: f, Targets: m.TargetsOf(f)}
 			if ok {
 				fr.Label, fr.Class, fr.Live = statusBadge(st)
 			} else {
@@ -329,15 +332,31 @@ func (s *Server) getMailboxes(w http.ResponseWriter, r *http.Request) {
 type routeOption struct {
 	Name, Bot string
 	ChatID    int64
-	Checked   bool
 }
+
+// routeRowView is one route row as the form shows it, with that row's problems (the
+// route itself, its folder, its target) joined into Err. Spare rows are blank rows for
+// typing a new route without script; app.js drops them and adds rows on demand.
+type routeRowView struct {
+	Index                int
+	Folder, Target       string
+	Err                  string
+	FolderBad, TargetBad bool
+	Spare                bool
+}
+
+// spareRoutes is how many blank route rows the form carries for use without script.
+const spareRoutes = 2
 
 type mailboxFormData struct {
 	New             bool
 	Name            string // the mailbox being edited ("" when creating)
 	F               mailboxForm
 	Presets         []mailboxPreset
-	Targets         []routeOption
+	Targets         []routeOption                               // every target, for the route rows' target choice
+	Routes          []routeRowView                              // the route rows, then the spare blank ones
+	FolderOptions   []string                                    // folders to suggest in the route rows (those already routed)
+	NewRoute        routeRowView                                // the blank row app.js copies for "新增路由"
 	HasPassword     bool                                        // a password is stored (edit, password auth)
 	PasswordDropped bool                                        // a typed password is never sent back: say so
 	StoredMicrosoft bool                                        // the stored mailbox uses Microsoft (authorisation applies)
@@ -352,17 +371,19 @@ type mailboxFormData struct {
 }
 
 func (s *Server) getMailboxNew(w http.ResponseWriter, r *http.Request) {
-	f := mailboxForm{Preset: "gmail", Host: "imap.gmail.com", AuthType: authPassword, Folders: []string{"INBOX"}}
+	f := mailboxForm{Preset: "gmail", Host: "imap.gmail.com", AuthType: authPassword}
 	raw, _, err := runtime.LoadConfig(r.Context(), s.o.Store)
 	if err != nil {
 		s.serverError(w, r, err)
 		return
 	}
+	row := routeRow{Folder: "INBOX"}
 	if len(raw.Targets) == 1 { // the only choice: preselect it
 		for name := range raw.Targets {
-			f.Targets = []string{name}
+			row.Target = name
 		}
 	}
+	f.Routes = []routeRow{row}
 	s.renderMailboxForm(w, r, http.StatusOK, raw, "", f, nil, false)
 }
 
@@ -387,13 +408,31 @@ func (s *Server) renderMailboxForm(w http.ResponseWriter, r *http.Request, statu
 	if d.F.Preset == "" {
 		d.F.Preset = presetFor(f.Host)
 	}
-	checked := map[string]bool{}
-	for _, t := range f.Targets {
-		checked[t] = true
-	}
 	for _, t := range sortedNames(raw.Targets) {
 		tg := raw.Targets[t]
-		d.Targets = append(d.Targets, routeOption{Name: t, Bot: tg.Bot, ChatID: tg.ChatID, Checked: checked[t]})
+		d.Targets = append(d.Targets, routeOption{Name: t, Bot: tg.Bot, ChatID: tg.ChatID})
+	}
+	seen := map[string]bool{"INBOX": true}
+	d.FolderOptions = []string{"INBOX"}
+	for i, rt := range f.Routes {
+		key := fmt.Sprintf("routes[%d]", i)
+		v := routeRowView{Index: i, Folder: rt.Folder, Target: rt.Target,
+			FolderBad: errs[key+".folder"] != "", TargetBad: errs[key+".target"] != ""}
+		var msgs []string
+		for _, k := range []string{key, key + ".folder", key + ".target"} {
+			if errs[k] != "" {
+				msgs = append(msgs, errs[k])
+			}
+		}
+		v.Err = strings.Join(msgs, "\n")
+		d.Routes = append(d.Routes, v)
+		if rt.Folder != "" && !seen[rt.Folder] {
+			seen[rt.Folder] = true
+			d.FolderOptions = append(d.FolderOptions, rt.Folder)
+		}
+	}
+	for i := 0; i < spareRoutes; i++ {
+		d.Routes = append(d.Routes, routeRowView{Index: len(f.Routes) + i, Spare: true})
 	}
 	if old := raw.Mailboxes[name]; name != "" && old != nil {
 		d.HasPassword = old.Auth.Type == authPassword && old.Auth.Password != ""
@@ -531,11 +570,6 @@ func (s *Server) saveMailbox(w http.ResponseWriter, r *http.Request, name string
 			return local
 		}
 		becameMS = cur != nil && cur.Auth.Type != authMicrosoft && next.Auth.Type == authMicrosoft
-		if !isNew {
-			// checkbox and probe order is not a change: keep the stored order of the same set
-			next.Folders = keepOrder(cur.Folders, next.Folders)
-			next.Targets = keepOrder(cur.Targets, next.Targets)
-		}
 		if !isNew && reflect.DeepEqual(cur, next) {
 			return errNoChange
 		}
@@ -576,23 +610,6 @@ func (s *Server) saveMailbox(w http.ResponseWriter, r *http.Request, name string
 		done += "，並清除了它的 Microsoft 授權"
 	}
 	s.redirect(w, r, "/mailboxes", &Flash{Kind: "success", Text: done})
-}
-
-// keepOrder returns old when next holds the same items in another order, else next.
-func keepOrder(old, next []string) []string {
-	if len(old) != len(next) {
-		return next
-	}
-	count := map[string]int{}
-	for _, x := range old {
-		count[x]++
-	}
-	for _, x := range next {
-		if count[x]--; count[x] < 0 {
-			return next
-		}
-	}
-	return old
 }
 
 // effectivePort is the port a mailbox connects to (config defaults 0 to 993).

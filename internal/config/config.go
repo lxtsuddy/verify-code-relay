@@ -104,18 +104,76 @@ func (g Microsoft) For(a Auth) (clientID, tenant string) {
 }
 
 type Mailbox struct {
-	Name         string    `yaml:"-"`
-	DisplayName  string    `yaml:"display_name,omitempty"`
-	Host         string    `yaml:"host,omitempty"`
-	Port         int       `yaml:"port,omitempty"`
-	Username     string    `yaml:"username,omitempty"`
-	Auth         Auth      `yaml:"auth,omitempty"`
+	Name        string  `yaml:"-"`
+	DisplayName string  `yaml:"display_name,omitempty"`
+	Host        string  `yaml:"host,omitempty"`
+	Port        int     `yaml:"port,omitempty"`
+	Username    string  `yaml:"username,omitempty"`
+	Auth        Auth    `yaml:"auth,omitempty"`
+	Routes      []Route `yaml:"routes,omitempty"`
+	// Folders and Targets are the old shape (every folder to every target), read only:
+	// decoding and applying defaults turn them into Routes (see adoptLegacyRoutes).
 	Folders      []string  `yaml:"folders,omitempty"`
 	Targets      []string  `yaml:"targets,omitempty"`
 	MaxAge       Duration  `yaml:"max_age,omitempty"`
 	TTL          Duration  `yaml:"ttl,omitempty"`
 	PollInterval Duration  `yaml:"poll_interval,omitempty"`
 	Templates    Templates `yaml:"templates,omitempty"`
+}
+
+// Route sends the mail found in Folder to Target. A folder is watched when a route names
+// it; one folder may go to several targets, each its own route.
+type Route struct {
+	Folder string `yaml:"folder"`
+	Target string `yaml:"target"`
+}
+
+// WatchedFolders lists the folders the routes name, in the order they first appear.
+func (m *Mailbox) WatchedFolders() []string {
+	return uniq(m.Routes, func(r Route) (string, bool) { return r.Folder, true })
+}
+
+// TargetsOf lists the targets of folder, in route order (nil when no route names it).
+func (m *Mailbox) TargetsOf(folder string) []string {
+	return uniq(m.Routes, func(r Route) (string, bool) { return r.Target, r.Folder == folder })
+}
+
+// RouteTargets lists every target the routes name, in the order they first appear.
+func (m *Mailbox) RouteTargets() []string {
+	return uniq(m.Routes, func(r Route) (string, bool) { return r.Target, true })
+}
+
+func uniq(routes []Route, pick func(Route) (string, bool)) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, r := range routes {
+		if v, ok := pick(r); ok && !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// adoptLegacyRoutes turns the old folders and targets into routes (every folder, INBOX
+// when none were listed, to every target, in that order) when the mailbox has no routes.
+// A mailbox that has both keeps both, for Validate to report.
+func (m *Mailbox) adoptLegacyRoutes() {
+	if len(m.Routes) > 0 {
+		return
+	}
+	folders := m.Folders
+	if len(folders) == 0 {
+		folders = []string{"INBOX"}
+	}
+	if len(m.Targets) > 0 {
+		for _, f := range folders {
+			for _, t := range m.Targets {
+				m.Routes = append(m.Routes, Route{Folder: f, Target: t})
+			}
+		}
+	}
+	m.Folders, m.Targets = nil, nil
 }
 
 type Auth struct {
@@ -195,6 +253,11 @@ func decodeNode(root *yaml.Node) (*Config, error) {
 	if err := dec.Decode(&check); err != nil {
 		return nil, fmt.Errorf("解析設定：%s", yamlLineRe.ReplaceAllString(err.Error(), ""))
 	}
+	for _, m := range c.Mailboxes {
+		if m != nil {
+			m.adoptLegacyRoutes()
+		}
+	}
 	return &c, nil
 }
 
@@ -230,9 +293,7 @@ func (c *Config) applyDefaults() {
 		if m.Port == 0 {
 			m.Port = 993
 		}
-		if len(m.Folders) == 0 {
-			m.Folders = []string{"INBOX"}
-		}
+		m.adoptLegacyRoutes()
 		orDur(&m.MaxAge, c.Defaults.MaxAge.Duration)
 		orDur(&m.TTL, c.Defaults.TTL.Duration)
 		orDur(&m.PollInterval, c.Defaults.PollInterval.Duration)

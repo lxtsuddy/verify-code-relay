@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -50,8 +51,8 @@ type targetRow struct {
 	Name      string
 	Bot       string
 	ChatID    int64
-	Mailboxes []string // mailboxes routing to the target
-	Admin     bool     // the notification target (settings)
+	Mailboxes []mailboxUse // mailbox folders routed to the target
+	Admin     bool         // the notification target (settings)
 	// edit form values: the stored ones, or what was submitted when sent back with errors
 	FormBot, FormChatID string
 }
@@ -123,16 +124,31 @@ func sortedNames[V any](m map[string]V) []string {
 	return out
 }
 
-func mailboxesUsing(raw *config.Config, target string) []string {
-	var out []string
+// mailboxUse is a mailbox with the folders it routes to one target; as text,
+// "gmail（INBOX、Spam）".
+type mailboxUse struct {
+	Name    string
+	Folders []string
+}
+
+func (u mailboxUse) String() string { return u.Name + "（" + joinNames(u.Folders) + "）" }
+
+// mailboxesUsing lists the mailboxes, each with its folders, that route to target.
+func mailboxesUsing(raw *config.Config, target string) []mailboxUse {
+	var out []mailboxUse
 	for _, name := range sortedNames(raw.Mailboxes) {
-		if m := raw.Mailboxes[name]; m != nil {
-			for _, t := range m.Targets {
-				if t == target {
-					out = append(out, name)
-					break
-				}
+		m := raw.Mailboxes[name]
+		if m == nil {
+			continue
+		}
+		u := mailboxUse{Name: name}
+		for _, f := range m.WatchedFolders() {
+			if slices.Contains(m.TargetsOf(f), target) {
+				u.Folders = append(u.Folders, f)
 			}
+		}
+		if len(u.Folders) > 0 {
+			out = append(out, u)
 		}
 	}
 	return out
@@ -489,7 +505,11 @@ func (s *Server) postTargetDelete(w http.ResponseWriter, r *http.Request) {
 		}
 		var users []string
 		if m := mailboxesUsing(raw, name); len(m) > 0 {
-			users = append(users, "信箱 "+joinNames(m)+" ") // a space between the names and the next word
+			var names []string
+			for _, u := range m {
+				names = append(names, u.String())
+			}
+			users = append(users, "信箱 "+joinNames(names))
 		}
 		if raw.Admin == name {
 			users = append(users, "通知對象（系統設定）")

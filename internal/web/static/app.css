@@ -43,7 +43,8 @@
             依清單寬度改變的是各部分跨哪些軌，所以每列的欄位（含動作按鈕欄）永遠對齊。
     郵票    <label class="stamp-pick"><input type="radio"><span class="stamp"><span class="stamp-face">…</span></span></label>
             信箱頁的服務選擇：打孔邊緣（mask）、刻字縮寫；選中時蓋上郵戳。每頁只用在一處。
-    勾選卡  <label class="route-pick"><input type="checkbox"><span class="route-card">…<span class="route-check">check icon</span></span></label>
+    路由列  <ol class="route-rows" data-route-rows>{{template "route-row" …}}</ol>（mailbox_form.html）：每列資料夾輸入框
+            （list 到 datalist）→ .route-line → 目標下拉 → 刪除；編號用 CSS counter 畫成方框。
     路徑    <p class="route"><span class="route-bot">bot</span><span class="route-line"></span><span class="route-chat">chat_id</span></p>
     表單彈出 <dialog class="modal modal-form" data-open?><form>modal-head／modal-body／modal-foot</form></dialog>；
             伺服器退回表單時在 dialog 加 data-open，載入後自動開啟。
@@ -1036,6 +1037,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .tg-handle.is-err { color: var(--red-700); font-weight: 600; }
 .tg-handle .icon { display: inline-block; width: 15px; height: 15px; margin-right: 4px; vertical-align: -2.5px; }
 .tg-uses { font-size: var(--fs-sm); color: var(--ink-2); overflow-wrap: anywhere; }
+.tg-uses .mono { white-space: nowrap; } /* a mailbox or folder name stays in one piece */
 .tg-actions { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 8px; }
 .tg-actions form { display: contents; }
 @container list (min-width: 720px) {
@@ -1134,15 +1136,16 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
    many buttons a row has) line up from row to row. The tracks never change (a container
    cannot query itself); what changes with the list's own width ("list" container) is
    which tracks a row's parts span:
-     narrow  (default)   glyph | the account, then folders, route and actions under it
-     medium  (>= 600px)  glyph | account | actions; folders and route under the account
-     wide    (>= 900px)  glyph | account | folders | route | actions
+     narrow  (default)   glyph | the account, then the folders and the actions under it
+     medium  (>= 600px)  glyph | account | actions; the folders under the account
+     wide    (>= 900px)  glyph | account | folders | actions
+   Each folder line reads: name, state, then the routing line to that folder's targets.
    A subgrid's padding is taken from its edge tracks, so the glyph track includes it. */
 .mb-list {
   --row-pad: 20px;
   container: list / inline-size;
   display: grid;
-  grid-template-columns: calc(44px + var(--row-pad)) minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 0.7fr) auto;
+  grid-template-columns: calc(44px + var(--row-pad)) minmax(0, 1fr) minmax(0, 1.5fr) auto;
   margin: 0; padding: 0; list-style: none;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1);
 }
@@ -1153,7 +1156,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; gap: 10px 16px; align-items: center;
   padding: 14px var(--row-pad); border-bottom: 1px solid var(--line);
 }
-.mb-item > .mb-glyph { grid-column: 1; grid-row: span 4; align-self: start; }
+.mb-item > .mb-glyph { grid-column: 1; grid-row: span 3; align-self: start; }
 .mb-item > :not(.mb-glyph) { grid-column: 2 / -1; }
 .mb-item:last-child { border-bottom: 0; }
 .mb-item:hover { background: #fafcf9; }
@@ -1171,9 +1174,9 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 /* an address never breaks mid-word: a long one ends in … (the full one is the title) */
 .mb-user { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mb-host { color: var(--muted); }
-.mb-folders { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.mb-folders { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
 /* a folder keeps its badge on its line: a long name ends in … (the full name is the title) */
-.mb-folder { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; font-size: var(--fs-sm); }
+.mb-folder { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; max-width: 100%; font-size: var(--fs-sm); }
 .mb-folder-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .mb-folder .badge { flex: none; font-size: var(--fs-xs); line-height: 18px; }
 .mb-route { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--fs-sm); }
@@ -1182,20 +1185,19 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 
 @container list (min-width: 600px) {
   .mb-item { padding-top: 16px; padding-bottom: 16px; }
-  .mb-item > .mb-glyph { grid-row: span 3; }
-  .mb-item > .mb-main { grid-column: 2 / 5; grid-row: 1; }
-  .mb-item > .mb-actions { grid-column: 5; grid-row: 1; align-self: start; justify-content: flex-end; }
+  .mb-item > .mb-glyph { grid-row: span 2; }
+  .mb-item > .mb-main { grid-column: 2 / 4; grid-row: 1; }
+  .mb-item > .mb-actions { grid-column: 4; grid-row: 1; align-self: start; justify-content: flex-end; }
 }
 
 @container list (min-width: 900px) {
   .mb-item { gap: 8px 20px; }
   .mb-item > .mb-glyph { grid-row: auto; align-self: center; }
   .mb-item > .mb-main { grid-column: 2; }
-  /* folder names in one column, their states lined up in the next */
-  .mb-item > .mb-folders { grid-column: 3; display: grid; grid-template-columns: minmax(0, max-content) max-content; gap: 5px 10px; align-items: center; }
+  /* folder names in one column, their states and their targets lined up in the next two */
+  .mb-item > .mb-folders { grid-column: 3; grid-template-columns: minmax(0, max-content) max-content minmax(0, 1fr); gap: 5px 10px; align-items: center; }
   .mb-folder { display: contents; }
-  .mb-item > .mb-route { grid-column: 4; }
-  .mb-item > .mb-actions { align-self: center; }
+  .mb-item > .mb-actions { grid-column: 4; align-self: center; }
 }
 .mb-after { margin-top: 18px; }
 .empty-steps li.is-done::before { content: "✓"; background: var(--green-100); color: var(--green-800); }
@@ -1310,47 +1312,28 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .probe.is-ok { background: var(--green-50); border-color: var(--green-100); color: var(--green-800); }
 .probe.is-err { background: var(--red-50); border-color: var(--red-100); color: var(--red-700); font-weight: 600; }
 
-.folders { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.folders:empty::before { content: "未勾選任何資料夾：將監看 INBOX"; font-size: var(--fs-sm); color: var(--muted); }
-.folder {
-  display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 5px 12px 5px 10px;
-  border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: #fff; cursor: pointer;
-  font-size: var(--fs-md); transition: background-color 0.15s, border-color 0.15s;
+/* forwarding routes: one row per "folder → target", numbered in a box like the rule chain;
+   the arrow between the two is the address label's routing line. In a narrow card the
+   folder takes its own line and the arrow, target and remove button go under it. */
+.route-rows { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; counter-reset: route; }
+.route-row { counter-increment: route; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 4px 12px; align-items: start; }
+.route-row > :not(.route-row-no) { grid-column: 2; }
+.route-row.is-new { animation: rise-in 0.3s var(--ease); }
+.route-row-no::before {
+  content: counter(route); display: grid; place-items: center; width: 30px; height: 42px;
+  border: 1.5px solid var(--line-2); background: #fff; color: var(--muted);
+  font-family: var(--mono); font-size: var(--fs-md); font-weight: 700; font-variant-numeric: tabular-nums;
 }
-.folder input { width: 16px; height: 16px; }
-.folder:hover { border-color: var(--green-300); }
-.folder:has(input:checked) { border-color: var(--green-600); background: var(--green-50); }
-.folder:has(input:focus-visible) { outline: 2.5px solid var(--green-600); outline-offset: 2px; }
-.folder-name { overflow-wrap: anywhere; }
-.folder-tag { padding: 0 6px; border-radius: 4px; background: var(--sunken); color: var(--muted); font-size: var(--fs-2xs); font-weight: 600; line-height: 18px; white-space: nowrap; }
-.folder-tag.is-warn { background: var(--amber-50); color: var(--amber-ink); }
-.folder.is-new { animation: rise-in 0.3s var(--ease); }
-.folders.is-invalid .folder { border-color: var(--red); }
-.folder-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; max-width: 520px; margin-top: 14px; }
-.folder-add .btn { min-height: 42px; }
-#f-folders-err:not(:empty), #f-targets-err:not(:empty) { margin-top: 10px; }
-
-/* forwarding routes: one card per target, ticked like a checklist */
-.routes { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
-.route-pick { position: relative; display: block; cursor: pointer; }
-.route-pick input { position: absolute; top: 14px; left: 14px; opacity: 0; }
-.route-card {
-  position: relative; display: grid; gap: 2px; padding: 12px 44px 12px 14px;
-  border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: #fff;
-  transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s;
+.route-row.is-invalid .route-row-no::before { border-color: var(--red); color: var(--red-700); }
+.route-row-fields { display: grid; grid-template-columns: minmax(0, 1.2fr) 44px minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; }
+.route-row-fields .route-line { width: auto; margin: 0 6px 0 2px; }
+.route-row-fields .route-remove { width: 40px; height: 42px; }
+.route-add { margin-top: 12px; }
+#f-routes-err:not(:empty) { margin-bottom: 12px; }
+@container card (max-width: 559px) {
+  .route-row-fields { grid-template-columns: 28px minmax(0, 1fr) auto; }
+  .route-row-fields .route-folder { grid-column: 1 / -1; }
 }
-.route-card .route { margin-top: 4px; }
-.route-name { font-size: var(--fs-base); font-weight: 700; }
-.route-check {
-  position: absolute; top: 12px; right: 12px; display: grid; place-items: center; width: 22px; height: 22px;
-  border: 1.5px solid var(--line-2); border-radius: 6px; background: #fff; color: transparent;
-}
-.route-check .icon { width: 15px; height: 15px; stroke-width: 2.6; }
-.route-pick:hover .route-card { border-color: var(--green-300); }
-.route-pick input:checked + .route-card { border-color: var(--green-600); background: var(--green-50); box-shadow: inset 0 0 0 1px var(--green-600); }
-.route-pick input:checked + .route-card .route-check { border-color: var(--green-700); background: var(--green-700); color: #fff; }
-.route-pick input:focus-visible + .route-card { outline: 2.5px solid var(--green-600); outline-offset: 2px; }
-.route-pick input[aria-invalid="true"] + .route-card { border-color: var(--red); }
 
 /* advanced settings: a card that opens */
 .advanced > summary { list-style: none; cursor: pointer; border-bottom: 0; }

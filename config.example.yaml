@@ -33,8 +33,9 @@ mailboxes:
     host: imap.gmail.com
     username: me@gmail.com
     auth: { type: password, password: "${GMAIL_APP_PASSWORD}" }   # Google 帳戶 → 安全性 → 應用程式密碼
-    folders: [INBOX, "[Gmail]/Spam"]   # 監看垃圾郵件匣需在 Gmail 標籤設定勾選「在 IMAP 中顯示」
-    targets: [me]
+    routes:                  # 資料夾 → 目標，一列一組；同一個資料夾要送到多個目標就寫多列
+      - { folder: INBOX, target: me }
+      - { folder: "[Gmail]/Spam", target: me }   # 監看垃圾郵件匣需在 Gmail 標籤設定勾選「在 IMAP 中顯示」
 
   outlook:
     display_name: Outlook
@@ -43,7 +44,9 @@ mailboxes:
     auth:
       type: microsoft_oauth  # 沿用上面 microsoft 的 client_id 與 tenant；匯入後在 Web 的信箱頁授權
       # client_id: "…"       # 選填：只有這個信箱要用別的 Azure 應用程式時才寫（tenant 同理）
-    targets: [me, work_chan]
+    routes:
+      - { folder: INBOX, target: me }
+      - { folder: INBOX, target: work_chan }
     max_age: 5m
     templates:
       code: |

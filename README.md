@@ -74,7 +74,7 @@ docker logs -f relay
 6. **首次登入**：瀏覽器開 `https://relay.example.com` → 用 `secret.env` 的密碼登入 → 依畫面綁定兩步驟驗證（用 Google Authenticator、1Password 等 App 掃 QR code，輸入一組驗證碼）→ 依序新增：
    1. **Telegram → Bot**：貼上 @BotFather 給的 token。
    2. **Telegram → 目標**：先對 Bot 傳一則訊息，再按「讀取最近對話」選擇聊天室，存檔後按「發送測試」確認收得到。
-   3. **信箱**：選擇服務、填入帳號與應用程式密碼（Outlook 選 Microsoft 授權，並先在 **系統設定 → Microsoft 應用程式** 填一次 Azure 應用程式，見「信箱設定 → Microsoft」），按「測試連線」挑選資料夾，勾選要轉發的目標。
+   3. **信箱**：選擇服務、填入帳號與應用程式密碼（Outlook 選 Microsoft 授權，並先在 **系統設定 → Microsoft 應用程式** 填一次 Azure 應用程式，見「信箱設定 → Microsoft」），在「轉發路由」設定「資料夾 → 目標」（按「測試連線」可列出伺服器上的資料夾來挑）。
    4. **系統設定 → 通知對象**：選一個目標接收登入通知與信箱告警（強烈建議，見「安全」）。
 
    也可以改用 `relay config import` 匯入現成的 YAML（見「匯入 YAML」）。
@@ -182,7 +182,7 @@ IP 只用於記錄與通知，不影響任何安全判斷。
 
 ## 信箱設定
 
-在 Web 的 **信箱** 頁新增：選擇服務（會帶入 IMAP 主機）、填入帳號與密碼、按「測試連線」實際登入並列出資料夾供勾選，再勾選要轉發到哪些目標。存檔後立即開始監看。信箱的「名稱」建立後不能修改（收信進度與授權以名稱儲存），「顯示名稱」可以隨時改。
+在 Web 的 **信箱** 頁新增：選擇服務（會帶入 IMAP 主機）、填入帳號與密碼、再在「轉發路由」一列一組寫下「資料夾 → 目標」：信件從哪個資料夾進來就送到該列的目標，同一個資料夾要送到多個目標就寫多列（「測試連線」會實際登入並列出資料夾供挑選）。路由裡出現的資料夾才會監看。存檔後立即開始監看。信箱的「名稱」建立後不能修改（收信進度與授權以名稱儲存），「顯示名稱」可以隨時改。
 
 ### Gmail / iCloud / 自架信箱（應用程式密碼）
 - Gmail：Google 帳戶需開啟兩步驟驗證，再到「安全性 → 應用程式密碼」建立。主機 `imap.gmail.com`。
@@ -236,7 +236,7 @@ kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay config i
 | `admin` | 通知對象（目標名稱）：登入通知與系統告警（斷線、授權失效、發送失敗） |
 | `defaults` | `max_age`（收信時間超過多久就不轉發）、`ttl`（待發送訊息超過多久就丟棄）、`alert_ttl`、`poll_interval`（伺服器不支援 IDLE 時的輪詢間隔）、`alert_after`（連續斷線多久才告警） |
 | `microsoft` | Microsoft 信箱共用的 Azure 應用程式：`client_id`、`tenant`（選填，省略為 `common`；個人帳號用 `consumers`） |
-| `mailboxes.<名稱>` | `display_name`、`host`、`port`（預設 993）、`username`、`auth`、`folders`（預設 `INBOX`）、`targets`，以及覆寫用的 `max_age`、`ttl`、`poll_interval`、`templates` |
+| `mailboxes.<名稱>` | `display_name`、`host`、`port`（預設 993）、`username`、`auth`、`routes`（`folder` → `target` 配對，一列一組；監看的資料夾就是路由裡出現的資料夾。舊的 `folders`＋`targets` 仍可讀取，會轉成「每個資料夾 → 每個目標」），以及覆寫用的 `max_age`、`ttl`、`poll_interval`、`templates` |
 | `mailboxes.<名稱>.auth` | `{type: password, password: …}`，或 `{type: microsoft_oauth}`（匯入後在 Web 授權）；`client_id`、`tenant` 選填，寫了就覆寫 `microsoft` 的值 |
 | `templates` | 全域範本 `code`、`link`、`both`（見「範本」） |
 | `rules` | 自訂規則（見「辨識規則」） |
@@ -350,7 +350,7 @@ RELAY_DATA_DIR=./data RELAY_ADMIN_PASSWORD='change-me-at-least-12-chars' ./relay
 - [ ] 中斷網路數分鐘後恢復，服務自動重連並補抓斷線期間的信。
 - [ ] 重啟服務後，超過 `max_age` 的舊信不會被轉發。
 - [ ] 連續寄兩封測試信（間隔一兩秒），兩封都應立即轉發，不會有一封延遲到 25 分鐘後才到（確認伺服器在 IDLE 開始時會回報先前到達的信）。
-- [ ] 落入垃圾郵件匣的驗證信也會轉發（Gmail 需在信箱的資料夾勾選 `[Gmail]/Spam`，並在標籤設定勾選「在 IMAP 中顯示」）。
+- [ ] 落入垃圾郵件匣的驗證信也會轉發（Gmail 需在信箱的轉發路由加上 `[Gmail]/Spam`，並在標籤設定勾選「在 IMAP 中顯示」）。
 - [ ] 備援的命令列授權：`kubectl exec -it … /relay login <信箱>` 授權成功，重新啟動後仍有效。
 - [ ] 在 **規則與範本 → 辨識規則** 的「用信件測試」上傳一封真實驗證信（`.eml` 與貼上原始碼各試一次），結果與 Telegram 預覽符合預期。
 - [ ] `relay test --eml 信件.eml --send <目標>` 實際送出，Telegram 收到的訊息格式與按鈕（複製驗證碼、以連結文字命名的連結按鈕）正常。
