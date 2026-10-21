@@ -276,6 +276,8 @@ kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay config i
   - 卡號末碼（末四碼、尾號、ending in、last 4 …）、郵遞區號（郵遞區號、邮编、zip、postal 與美國 `CA 94043`）、地址門牌（`1600 Main St`、`100 號`），以及電話、金額、時間、年份、訂單編號。
   - 優惠碼：同一行或上一行提到 promo、coupon、discount、voucher、checkout、% off、優惠、折扣、折價的碼（例如「Use this code SAVE20 at checkout」）。
   - 電子報常見連結：取消訂閱、在瀏覽器中檢視、聯絡我們、contact（只看連結文字與網址路徑），以及圖片、`.pdf`、`.css`、`.js` 等靜態檔案。這些連結的文字也不會讓信件通過「含連結關鍵字」的檢查。
+  - 帳號被盜時的補救連結：連結前文（同一行或上一行）寫著「If this wasn't you」「didn't try to sign in」「若非本人操作」「密碼可能已外洩」這類說法時，不當成登入連結。自己申請的重設密碼信不受影響，那類信的「如果不是您申請的，請忽略」寫在連結後面。
+  - 信裡已經找到驗證碼時，重設密碼、變更密碼、保護帳號、查看活動這類連結（文字或網址含 password、密碼、secure、security、activity、安全 …）不會跟驗證碼一起轉發；只轉發驗證碼。
   - 一封信最多看 500 個不同的連結。
 
 ### 辨識不到或辨識錯誤時

@@ -163,6 +163,13 @@ HTML 轉文字時，以下元素內的文字記為強調：
 
 圖片副檔名排除擴充為靜態資源：`.png .jpg .jpeg .gif .webp .svg .bmp .ico .css .js .pdf`（Trace 原因「靜態資源」）。
 
+### 4.6 帳號救援連結（v0.2.4 增補）
+
+登入驗證碼信常附「若非本人操作，請重設密碼」的連結，那是帳號被他人登入時的補救手段，不是登入連結。
+
+- **非本人情境**：連結的 `Before`（上一行與同一行）含 `notYouWords`（wasn't you、not you、didn't try、didn't sign in、don't recognize、unrecognized、someone may、compromised、若非本人、非本人操作、如果不是您、可能已外洩 …；英文整字比對，彎引號視同直引號）時排除，Trace 原因「非本人時的補救連結」。只看連結之前的文字：自己申請的重設密碼信把「若非本人申請請忽略」寫在連結之後，不受影響。
+- **有驗證碼時不搭配救援連結**：同一輪已找到驗證碼時，連結文字或網址路徑（不含主機）含 `recoveryWords`（password、passwd、密碼、密码、パスワード、secure、security、activity、安全、活動、保護 …；子字串比對，因網址常把字連在一起）的連結排除，結果只轉發驗證碼。沒有驗證碼時不套用，所以真正的重設密碼信照常轉發連結。
+
 ## 5. Web 信件測試
 
 ### 5.1 介面

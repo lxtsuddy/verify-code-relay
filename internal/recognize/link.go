@@ -43,6 +43,25 @@ var (
 		"連結", "链接", "按鈕", "按钮", "點擊", "点击"}
 )
 
+var (
+	// notYouWords before a link mark it as the remedy offered when someone else used the
+	// account ("If this wasn't you, reset your password"), never a sign-in link. A
+	// requested reset puts its "didn't request this? ignore it" after the link, so the
+	// text before a real reset link does not use these words.
+	notYouWords = []string{"wasn't you", "was not you", "weren't you", "were not you", "not you",
+		"didn't try", "did not try", "didn't sign in", "did not sign in", "didn't log in", "did not log in",
+		"don't recognize", "do not recognize", "didn't recognize", "did not recognize", "unrecognized",
+		"someone may", "compromised",
+		"若非本人", "如非本人", "非本人操作", "不是本人", "並非本人", "并非本人", "不是您本人", "不是你本人",
+		"若不是您", "若不是你", "如果不是您", "如果不是你",
+		"可能已外洩", "可能已洩漏", "可能已泄露", "可能已泄漏",
+		"心当たりがない", "心当たりのない", "ご本人でない"}
+	// recoveryWords in a link's text or URL mark account-recovery pages (password, account
+	// security, recent activity). Next to a code they are not the code's sign-in link.
+	recoveryWords = []string{"password", "passwd", "密碼", "密码", "パスワード", "secure", "security", "activity",
+		"安全", "活動", "活动", "保護", "保护"}
+)
+
 const buttonBonus = 10
 
 const linkThreshold = 50
@@ -68,7 +87,10 @@ func (f *linkFinder) containsKeyword(s string) (string, bool) {
 	return "", false
 }
 
-func (f *linkFinder) find(msg *mailparse.Message, tr *Trace) string {
+// find returns the best verification link of msg, or "". withCode says a code was
+// found in the same message: account-recovery links (recoveryWords) are then left out,
+// as they accompany sign-in codes for when someone else signed in.
+func (f *linkFinder) find(msg *mailparse.Message, tr *Trace, withCode bool) string {
 	kw, ok := f.containsKeyword(strings.ToLower(string(scanRunes(msg))))
 	if ok {
 		tr.Addf("連結：關鍵字 %q", kw)
@@ -105,6 +127,16 @@ func (f *linkFinder) find(msg *mailparse.Message, tr *Trace) string {
 		if reason := linkExcludeReason(u, lu, lt); reason != "" {
 			tr.Addf("  連結 %s：排除（%s）", l.URL, reason)
 			continue
+		}
+		if w, ok := containsAnyWord(normalizeApostrophes(strings.ToLower(l.Before)), notYouWords); ok {
+			tr.Addf("  連結 %s：排除（非本人時的補救連結，前文含 %q）", l.URL, w)
+			continue
+		}
+		if withCode {
+			if w, ok := containsAny(lt+" "+strings.ToLower(urlTail(u)), recoveryWords); ok {
+				tr.Addf("  連結 %s：排除（已有驗證碼，不搭配帳號救援連結，含 %q）", l.URL, w)
+				continue
+			}
 		}
 		score, note := 0, ""
 		textKeyword := false
@@ -246,4 +278,20 @@ func linkExcludeReason(u *url.URL, lu, lt string) string {
 		return "靜態資源"
 	}
 	return ""
+}
+
+// normalizeApostrophes turns typographic apostrophes into ASCII ones ("wasn’t" → "wasn't").
+func normalizeApostrophes(s string) string {
+	return strings.NewReplacer("’", "'", "‘", "'", "ʼ", "'").Replace(s)
+}
+
+// containsAny returns the first of words that s contains anywhere (URLs run words
+// together: "resetpassword").
+func containsAny(s string, words []string) (string, bool) {
+	for _, w := range words {
+		if strings.Contains(s, w) {
+			return w, true
+		}
+	}
+	return "", false
 }

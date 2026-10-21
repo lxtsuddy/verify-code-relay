@@ -16,7 +16,7 @@ func NewBuiltin(opts config.RecognizeOptions) *Builtin {
 
 func (b *Builtin) Run(msg *mailparse.Message, tr *Trace) (*Result, bool) {
 	code := b.code.find(msg, tr)
-	link := b.link.find(msg, tr)
+	link := b.link.find(msg, tr, code != "")
 	switch {
 	case code != "" && link != "":
 		return &Result{Code: code, URL: link, Rule: "builtin:code+link"}, false
