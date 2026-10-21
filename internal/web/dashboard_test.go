@@ -427,3 +427,24 @@ func TestPageLinksGaps(t *testing.T) {
 		}
 	}
 }
+
+// Subjects and senders are clipped on screen, so the full text rides along as a title.
+func TestLogRowTitles(t *testing.T) {
+	e := newEnv(t, withSample)
+	e.login()
+	e.st.RecordMessage(context.Background(), store.LogEntry{At: time.Now(), Mailbox: "gmail", Folder: "INBOX", UID: 1,
+		FromAddr: "Long Sender <long.sender@example.com>", Subject: "A long subject line", Kind: "code", Result: "sent"},
+		nil, store.MailboxState{UIDValidity: 1, LastUID: 1})
+	for _, path := range []string{"/", "/logs"} {
+		_, body := e.get(path)
+		if !strings.Contains(body, `<span class="log-subject" title="A long subject line">`) {
+			t.Errorf("%s: subject without title", path)
+		}
+		if !strings.Contains(body, `<span class="log-from mono" title="Long Sender &lt;long.sender@example.com&gt;">`) {
+			t.Errorf("%s: sender without title", path)
+		}
+	}
+	if _, body := e.get("/logs"); !strings.Contains(body, `class="table log-table log-table-full log-table-rule"`) {
+		t.Error("/logs: the table with a rule column should say so")
+	}
+}

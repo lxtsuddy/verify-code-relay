@@ -6,7 +6,7 @@ live refresh (see "overview" in app.js); keep the two in step.
 {{define "log-row"}}{{with .R}}<tr>
   <td class="c-time">{{localtime .At}}</td>
   <td class="c-mb"><span class="log-mb" title="{{.MailboxLabel}}">{{.MailboxLabel}}{{if ne .MailboxLabel .Mailbox}}<span class="log-key mono">{{.Mailbox}}</span>{{end}}</span><span class="log-folder mono" title="{{.Folder}}">{{.Folder}}</span></td>
-  <td class="c-msg"><span class="log-subject">{{with .Subject}}{{.}}{{else}}<span class="muted">（沒有主旨）</span>{{end}}</span><span class="log-from mono">{{.From}}</span></td>
+  <td class="c-msg"><span class="log-subject"{{with .Subject}} title="{{.}}"{{end}}>{{with .Subject}}{{.}}{{else}}<span class="muted">（沒有主旨）</span>{{end}}</span><span class="log-from mono" title="{{.From}}">{{.From}}</span></td>
   <td class="c-kind"><span class="tag{{if .Hit}} tag-hit{{end}}">{{.KindLabel}}</span></td>
   {{- if $.Rule}}
   <td class="c-rule">{{with .Rule}}<span class="log-rule">{{.}}</span>{{else}}<span class="faint" aria-label="沒有套用規則">—</span>{{end}}</td>

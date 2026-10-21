@@ -2130,9 +2130,11 @@
     tr.appendChild(mb);
     var msg = el("td", "c-msg");
     var subj = el("span", "log-subject", r.subject ? r.subject : null);
-    if (!r.subject) subj.appendChild(el("span", "muted", "（沒有主旨）"));
+    if (r.subject) subj.title = r.subject;
+    else subj.appendChild(el("span", "muted", "（沒有主旨）"));
     msg.appendChild(subj);
-    msg.appendChild(el("span", "log-from mono", r.from));
+    var from = msg.appendChild(el("span", "log-from mono", r.from));
+    from.title = r.from;
     tr.appendChild(msg);
     var kind = el("td", "c-kind");
     kind.appendChild(el("span", "tag" + (r.hit ? " tag-hit" : ""), r.kind_label));

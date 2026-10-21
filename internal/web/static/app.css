@@ -559,7 +559,7 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; margin:
 
 /* ---------- tables ---------- */
 
-.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1); }
+.table-wrap { container: table / inline-size; overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1); }
 .card .table-wrap { border: 0; border-radius: 0 0 var(--radius) var(--radius); box-shadow: none; }
 .table { width: 100%; border-collapse: collapse; font-size: var(--fs-md); }
 .table th {
@@ -1986,26 +1986,89 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .dash-action { display: flex; flex-wrap: wrap; gap: 8px; }
 .dash-action:empty { display: none; }
 
-/* forward log rows (the overview's latest and the log page) */
-.log-table td { vertical-align: middle; }
-.log-table .c-time { white-space: nowrap; font-size: var(--fs-sm); color: var(--ink-2); font-variant-numeric: tabular-nums; }
-.log-table .c-mb { min-width: 7em; }
-/* one line per mailbox name: the subject column takes the rest of the width, and a
-   wrapping name would make every row several lines tall */
-.log-mb { display: block; max-width: 20em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+/* forward log rows (the overview's latest and the log page). The table keeps its
+   semantics, but every row is a grid on the same content-independent tracks, so columns
+   line up row to row; the layout follows the width the table itself gets (the "table"
+   container, see .table-wrap):
+     card     (default)   time + result, the subject, mailbox + kind, the rule
+     compact  (>= 600px)  time over mailbox | subject and sender | kind over result
+     full     (>= 880px, or >= 1000px with the rule column)  a column each, header shown */
+.log-table, .log-table thead, .log-table tbody { display: block; }
+.log-table tr {
+  display: grid; align-items: center; gap: 4px 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "time result" "msg msg" "mb kind" "rule rule";
+  padding: 12px 16px; border-bottom: 1px solid var(--line);
+}
+.log-table tbody tr:last-child { border-bottom: 0; }
+.log-table th, .log-table td { display: block; min-width: 0; padding: 0; border: 0; background: none; }
+.log-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.log-table thead tr { padding-top: 10px; padding-bottom: 10px; background: var(--surface-2); border-bottom: 1px solid var(--line); }
+
+/* placement is shared by the header and the cells; what a cell looks like is for td only */
+.log-table .c-time { grid-area: time; }
+.log-table .c-mb { grid-area: mb; }
+.log-table .c-msg { grid-area: msg; }
+.log-table .c-kind { grid-area: kind; justify-self: end; }
+.log-table .c-rule { grid-area: rule; }
+.log-table .c-result { grid-area: result; justify-self: end; }
+.log-table td.c-time { white-space: nowrap; font-size: var(--fs-sm); color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.log-table td.c-mb { display: flex; align-items: baseline; gap: 0 8px; font-size: var(--fs-sm); }
+.log-table td.c-kind, .log-table td.c-result { white-space: nowrap; }
+.log-table td.c-rule { font-size: var(--fs-xs); color: var(--muted); overflow-wrap: break-word; }
+.log-table td.c-rule:has(.faint) { display: none; }
+.log-table td.c-rule::before { content: "規則："; color: var(--faint); }
+
+/* one line per mailbox name and folder: a long one ends in … (the full name is the title);
+   a folder path never breaks mid-word ("[Gmail]/Spa m") */
+.log-mb { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 /* the config key beside a display name, as on the mailbox cards */
 .log-key { margin-left: 6px; font-size: var(--fs-2xs); font-weight: 500; color: var(--muted); }
-/* a folder path never breaks mid-word ("[Gmail]/Spa m"); a long one ends in … (full name in title) */
-.log-folder { display: block; max-width: 16em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); color: var(--muted); }
-.log-table .c-msg { width: 100%; min-width: 14em; }
-.log-subject { display: block; overflow-wrap: anywhere; color: var(--ink); }
-.log-from { display: block; font-size: var(--fs-xs); color: var(--muted); overflow-wrap: anywhere; }
-.log-table .c-kind, .log-table .c-result { white-space: nowrap; }
-.log-table .c-rule { min-width: 8.5em; max-width: 14em; font-size: var(--fs-sm); overflow-wrap: break-word; }
+.log-folder { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); color: var(--muted); }
+/* the subject wraps to two lines at most and the sender stays on one (both in full in
+   their titles), so a long subject never makes a row tower over the others */
+.log-subject {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+  overflow: hidden; overflow-wrap: anywhere; color: var(--ink);
+}
+.log-from { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); color: var(--muted); }
 .log-rule { color: var(--ink-2); }
 .faint { color: var(--faint); }
 .tag-hit { background: var(--green-50); color: var(--green-800); }
 .log-table .badge { font-size: var(--fs-xs); line-height: 18px; }
+
+@container table (min-width: 600px) {
+  .log-table tr {
+    grid-template-columns: 9em minmax(0, 1fr) 7.5em;
+    grid-template-areas: "time msg kind" "mb msg result" ". rule .";
+    gap: 2px 18px;
+  }
+  .log-table td.c-mb { display: grid; gap: 0; }
+  .log-table .c-kind, .log-table .c-result { justify-self: start; }
+}
+
+@container table (min-width: 880px) {
+  .log-table:not(.log-table-rule) thead { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
+  .log-table:not(.log-table-rule) tr {
+    grid-template-columns: 9em minmax(8em, 13em) minmax(0, 1fr) 7.5em 6.5em;
+    grid-template-areas: "time mb msg kind result";
+    gap: 0 18px;
+  }
+}
+
+@container table (min-width: 1000px) {
+  .log-table-rule thead { position: static; width: auto; height: auto; overflow: visible; clip: auto; }
+  .log-table-rule tr {
+    grid-template-columns: 9em minmax(8em, 13em) minmax(0, 1fr) 7.5em minmax(6em, 10em) 6.5em;
+    grid-template-areas: "time mb msg kind rule result";
+    gap: 0 18px;
+  }
+  .log-table-rule td.c-rule { font-size: var(--fs-sm); color: var(--ink-2); }
+  .log-table-rule td.c-rule:has(.faint) { display: block; }
+  .log-table-rule td.c-rule::before { content: none; }
+}
+
+.log-table th { white-space: nowrap; font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.06em; color: var(--muted); }
 
 .quiet-empty {
   display: flex; align-items: center; gap: 10px; padding: 18px 20px;
@@ -2086,26 +2149,6 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .health-facts dd { font-size: 20px; }
   .dash-cards { grid-template-columns: minmax(0, 1fr); gap: 12px; }
 
-  /* log rows become cards: time and result on top, then subject, then mailbox and kind */
-  .log-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
-  .log-table, .log-table tbody { display: block; }
-  .log-table tr {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px;
-    grid-template-areas: "time result" "msg msg" "mb kind" "rule rule";
-    padding: 12px 16px; border-bottom: 1px solid var(--line);
-  }
-  .log-table tbody tr:last-child { border-bottom: 0; }
-  .log-table td { display: block; padding: 0; border: 0; }
-  .log-table .c-time { grid-area: time; align-self: center; }
-  .log-table .c-result { grid-area: result; justify-self: end; }
-  .log-table .c-msg { grid-area: msg; width: auto; min-width: 0; }
-  .log-table .c-mb { grid-area: mb; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font-size: var(--fs-sm); }
-  .log-table .c-mb .log-mb { display: inline; max-width: none; white-space: normal; overflow-wrap: anywhere; }
-  .log-table .c-mb .log-folder { display: inline-block; max-width: 100%; vertical-align: bottom; }
-  .log-table .c-kind { grid-area: kind; justify-self: end; align-self: center; }
-  .log-table .c-rule { grid-area: rule; font-size: var(--fs-xs); color: var(--muted); }
-  .log-table .c-rule:has(.faint) { display: none; }
-  .log-table .c-rule .log-rule::before { content: "規則："; color: var(--faint); }
   .log-filter { padding: 14px 16px; }
   .log-filter .field { max-width: none; }
   .log-filter-actions { width: 100%; }

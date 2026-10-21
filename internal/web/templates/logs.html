@@ -64,8 +64,8 @@
 {{if $d.Rows}}
 <p class="log-count" role="status">{{if $d.Filtered}}符合條件的{{end}}共 {{$d.Total}} 筆{{if gt $d.Pages 1}}，這頁是第 {{$d.First}}–{{$d.Last}} 筆{{end}}</p>
 <div class="table-wrap">
-  <table class="table log-table log-table-full">
-    <thead><tr><th scope="col">時間</th><th scope="col">信箱／資料夾</th><th scope="col">主旨與寄件者</th><th scope="col">種類</th><th scope="col">規則</th><th scope="col">結果</th></tr></thead>
+  <table class="table log-table log-table-full log-table-rule">
+    <thead><tr><th scope="col" class="c-time">時間</th><th scope="col" class="c-mb">信箱／資料夾</th><th scope="col" class="c-msg">主旨與寄件者</th><th scope="col" class="c-kind">種類</th><th scope="col" class="c-rule">規則</th><th scope="col" class="c-result">結果</th></tr></thead>
     <tbody>{{range $d.Rows}}{{template "log-row" (dict "R" . "Rule" true)}}{{end}}</tbody>
   </table>
 </div>
