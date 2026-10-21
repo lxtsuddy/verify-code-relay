@@ -1,7 +1,7 @@
 # 辨識強化與 Web 信件測試設計規格
 
 - 日期：2026-10-21
-- 狀態：方向已確認，待使用者審閱本文件
+- 狀態：已實作
 - 相關規格：`2026-10-19-verify-code-relay-design.md`（辨識規則 §4）、`2026-10-20-web-admin-design.md`（本規格把其中「不做」的 `.eml` 上傳測試納入）
 
 ## 1. 目標與背景
@@ -105,12 +105,12 @@ HTML 轉文字時，以下元素內的文字記為強調：
 
 ### 3.6 新增排除
 
-候選前 16 個 rune 內（小寫、去空白後比對）出現以下詞時排除（16 個 rune 才涵蓋「last 4 digits 1234」）：
+候選前 16 個 rune 內（小寫、空白壓縮成單一空格後比對）出現以下詞時排除（16 個 rune 才涵蓋「last 4 digits 1234」）：
 
-- 卡號：`末四碼`、`末4碼`、`末四码`、`末4码`、`尾號`、`尾号`、`endingin`、`endsin`、`last4`、`lastfour`——Trace 原因「卡號末碼」；
+- 卡號：`末四碼`、`末4碼`、`末四码`、`末4码`、`尾號`、`尾号`、`ending in`、`ends in`、`last 4`、`last4`、`last four`——Trace 原因「卡號末碼」；
 - 郵遞區號：`郵遞區號`、`郵政編碼`、`邮编`、`邮政编码`、`zip`、`postal`、`postcode`——Trace 原因「郵遞區號」。
 
-英文詞比對時遵守既有的英文字母邊界規則（`zip` 不比中 `unzip`）。
+英文詞比對時遵守既有的英文字母邊界規則（`zip` 不比中 `unzip`）。比對的是空白壓縮後的文字，而不是把空白全部移除：移除空白會讓相鄰的單字黏在一起，使字母邊界檢查失效，所以英文詞組保留空格寫成 `ending in`、`last 4`。
 
 另新增地址排除（Trace 原因「地址」）：
 
@@ -223,7 +223,7 @@ CLI `relay test` 與 Web 共用「解析 → 辨識 → 渲染」的邏輯，抽
 | `author-link-en` | 同網域「Read more」按鈕連到 `https://blog.example.com/author/jane`，內文有「verify your own profile」（讓連結入口檢查通過） |
 | `footer-zip-en` | 安全提醒信「We will never ask for your verification code」，頁尾 `Example Inc., 1600 Main Street, Mountain View, CA 94043`，沒有驗證連結 |
 
-> 註：`order-subject-zh` 的主旨寫成「您的訂單已出貨：20261021」（訂單詞與數字相距超過 10 個 rune），專門驗證 §3.3 條件 3。另加 `author-link-en`（反例）：同網域「Read more」按鈕連到 `/author/jane`，內文含「verified」，驗證 §4.3 的 `auth` 錨定與 §4.4 的按鈕條件。
+> 註：`order-subject-zh` 驗證 §3.3 的訂單／物流詞檢查：主旨提到訂單，內文又獨佔一行出現同一串數字，不得因此被當成驗證碼。`author-link-en` 驗證 §4.3 的 `auth` 錨定（`/author/…` 不算網址特徵詞）與 §4.4 的按鈕條件（單有按鈕樣式不加分）。
 
 ### 6.2 單元測試
 
