@@ -269,7 +269,7 @@ The template copy in #tpl-route-row is cloned by app.js for "新增路由". */}}
     <span class="route-line" aria-hidden="true"></span>
     <label class="sr-only" for="f-route-target-{{$r.Index}}">轉發到</label>
     <select class="select route-target" id="f-route-target-{{$r.Index}}" name="route_target"{{if $r.TargetBad}} aria-invalid="true"{{end}}{{if $r.Err}} aria-describedby="f-route-err-{{$r.Index}}"{{end}}>
-      <option value="">選擇目標</option>
+      <option value="" data-placeholder>選擇目標</option>
       {{range .Targets}}<option value="{{.Name}}"{{if eq .Name $r.Target}} selected{{end}}>{{.Name}}（{{.Bot}} → {{.ChatID}}）</option>{{end}}
     </select>
     <button type="button" class="icon-btn icon-btn-danger route-remove" data-route-remove aria-label="刪除這條路由">{{template "icon" "trash"}}</button>

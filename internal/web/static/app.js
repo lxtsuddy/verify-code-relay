@@ -30,6 +30,7 @@
     relay.openModal(idOrElement)、relay.closeModal(idOrElement)
     relay.ready(fn)                DOM 就緒後執行
     relay.localTimes(root?)        動態加入 <time data-localtime> 後呼叫，改成本地時間
+    relay.syncSelect(select)       程式直接改了 select.value 後呼叫，讓選單按鈕顯示新的選項
 */
 (function () {
   "use strict";
@@ -255,6 +256,363 @@
     document.querySelectorAll("form[data-submitting]").forEach(function (f) { delete f.dataset.submitting; });
     document.querySelectorAll('[aria-busy="true"]').forEach(function (b) { setBusy(b, false); });
   }
+
+  /* ---------- select menus ----------
+
+    select.select（單選）會換上與其他欄位同款的按鈕（button.select.select-btn，role=combobox），
+    選項清單在最上層彈出（ul.select-menu，popover）；原本的 <select> 留著、移出視線，負責送出
+    表單：選一個選項就設定它的 value，並在它身上觸發 input 與 change。之後加入頁面的 select
+    （新增的路由列、規則、對話框）出現時自動套用。程式直接改 select.value 後請呼叫
+    relay.syncSelect(select)。
+    input[list]（datalist 建議）同樣改用這個清單：輸入時篩選，option 的 label 以小字顯示在右側。
+    沒有 JS 時一切維持原生。
+  */
+
+  var menuSeq = 0;
+  var menu = null; // the open list: {owner, list, items, active, pick(item)}
+
+  function labelFor(control) {
+    var l = control.labels && control.labels[0];
+    if (l && !l.id) l.id = (control.id || "f" + (++menuSeq)) + "-label";
+    return l;
+  }
+
+  function mirrorAria(from, to) {
+    ["aria-invalid", "aria-describedby"].forEach(function (a) {
+      if (from.hasAttribute(a)) to.setAttribute(a, from.getAttribute(a));
+      else to.removeAttribute(a);
+    });
+    if ("disabled" in to) to.disabled = from.disabled;
+  }
+
+  function syncSelect(sel) {
+    var btn = sel && sel.relayButton;
+    if (!btn) return;
+    var opt = sel.options[sel.selectedIndex];
+    var text = opt ? opt.textContent.trim() : "";
+    btn.firstChild.textContent = text;
+    btn.title = text;
+    btn.classList.toggle("is-placeholder", !!opt && opt.hasAttribute("data-placeholder"));
+    mirrorAria(sel, btn);
+  }
+
+  function enhanceSelect(sel) {
+    if (sel.relayButton || sel.multiple) return;
+    var id = sel.id || "sel-" + (++menuSeq);
+    var btn = el("button", sel.className + " select-btn");
+    btn.type = "button";
+    btn.id = id + "-btn";
+    btn.setAttribute("role", "combobox");
+    btn.setAttribute("aria-haspopup", "listbox");
+    btn.setAttribute("aria-expanded", "false");
+    btn.setAttribute("aria-controls", id + "-menu");
+    var label = labelFor(sel);
+    if (label) btn.setAttribute("aria-labelledby", label.id);
+    else if (sel.getAttribute("aria-label")) btn.setAttribute("aria-label", sel.getAttribute("aria-label"));
+    btn.appendChild(el("span", "select-value"));
+    sel.after(btn);
+    sel.classList.add("is-enhanced");
+    sel.tabIndex = -1;
+    sel.setAttribute("aria-hidden", "true");
+    sel.relayButton = btn;
+    btn.relaySelect = sel;
+    // a label click, or code focusing the field (the first invalid one), lands on the button
+    sel.addEventListener("focus", function () { btn.focus(); });
+    sel.addEventListener("change", function () { syncSelect(sel); });
+    new MutationObserver(function () { syncSelect(sel); })
+      .observe(sel, { attributes: true, attributeFilter: ["aria-invalid", "aria-describedby", "disabled"] });
+    syncSelect(sel);
+  }
+
+  function enhanceCombo(input) {
+    var list = byId(input.getAttribute("list"));
+    if (!list || input.relayList) return;
+    input.relayList = list;
+    input.removeAttribute("list"); // the browser's own suggestions would open as well
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-autocomplete", "list");
+    input.setAttribute("aria-expanded", "false");
+    input.setAttribute("aria-controls", (input.id || "combo-" + (++menuSeq)) + "-menu");
+  }
+
+  function enhanceMenus(root) {
+    if (root.matches && root.matches("select.select")) enhanceSelect(root);
+    if (root.matches && root.matches("input[list]")) enhanceCombo(root);
+    if (root.querySelectorAll) {
+      root.querySelectorAll("select.select").forEach(enhanceSelect);
+      root.querySelectorAll("input[list]").forEach(enhanceCombo);
+    }
+  }
+
+  // the list element of an owner, made on first use and kept; inside a modal dialog it lives
+  // in the dialog, as the rest of the page is inert while the dialog is open
+  function menuList(owner) {
+    var id = owner.getAttribute("aria-controls");
+    var list = byId(id);
+    if (!list) {
+      list = el("ul", "select-menu");
+      list.id = id;
+      list.setAttribute("role", "listbox");
+      var label = owner.getAttribute("aria-labelledby");
+      if (label) list.setAttribute("aria-labelledby", label);
+      if (typeof list.showPopover === "function") list.setAttribute("popover", "manual");
+      (owner.closest("dialog") || document.body).appendChild(list);
+    }
+    return list;
+  }
+
+  // openMenu shows items ({value, text, note, selected, disabled}) under owner (or above it,
+  // when the room is there); pick(item) is called for the item chosen.
+  function openMenu(owner, items, pick) {
+    var list = menuList(owner);
+    if (menu && menu.owner !== owner) closeMenu();
+    list.textContent = "";
+    list.classList.toggle("is-mono", owner.classList.contains("input-mono"));
+    var active = -1;
+    items.forEach(function (it, i) {
+      var li = el("li", "select-option");
+      li.id = list.id + "-" + i;
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", it.selected ? "true" : "false");
+      if (it.disabled) li.setAttribute("aria-disabled", "true");
+      if (it.placeholder) li.classList.add("is-placeholder");
+      li.appendChild(el("span", "select-option-text", it.text));
+      if (it.note) li.appendChild(el("span", "select-option-note", it.note));
+      li.appendChild(icon("check"));
+      li.relayIndex = i;
+      list.appendChild(li);
+      if (it.selected && active < 0) active = i;
+    });
+    menu = { owner: owner, list: list, items: items, active: -1, pick: pick };
+    owner.setAttribute("aria-expanded", "true");
+    if (list.showPopover) { if (!list.matches(":popover-open")) list.showPopover(); }
+    else list.classList.add("is-open");
+    placeMenu();
+    setActive(active, true);
+  }
+
+  function closeMenu() {
+    if (!menu) return;
+    var m = menu;
+    menu = null;
+    m.owner.setAttribute("aria-expanded", "false");
+    m.owner.removeAttribute("aria-activedescendant");
+    if (m.list.hidePopover) { if (m.list.matches(":popover-open")) m.list.hidePopover(); }
+    else m.list.classList.remove("is-open");
+  }
+
+  function placeMenu() {
+    if (!menu) return;
+    var r = menu.owner.getBoundingClientRect();
+    var list = menu.list;
+    var below = window.innerHeight - r.bottom - 8, above = r.top - 8;
+    var up = below < 220 && above > below;
+    list.style.left = Math.max(8, Math.min(r.left, window.innerWidth - r.width - 8)) + "px";
+    list.style.minWidth = r.width + "px";
+    list.style.maxWidth = Math.max(r.width, Math.min(480, window.innerWidth - 16)) + "px";
+    list.style.maxHeight = Math.max(120, Math.min(320, (up ? above : below) - 4)) + "px";
+    list.style.top = (up ? r.top - 4 - list.offsetHeight : r.bottom + 4) + "px";
+    list.classList.toggle("is-up", up);
+  }
+
+  function setActive(i, center) {
+    if (!menu) return;
+    var opts = menu.list.children;
+    if (menu.active >= 0 && opts[menu.active]) opts[menu.active].classList.remove("is-active");
+    menu.active = i;
+    if (i < 0 || !opts[i]) { menu.owner.removeAttribute("aria-activedescendant"); return; }
+    opts[i].classList.add("is-active");
+    menu.owner.setAttribute("aria-activedescendant", opts[i].id);
+    var li = opts[i], list = menu.list;
+    if (center) list.scrollTop = li.offsetTop - (list.clientHeight - li.offsetHeight) / 2;
+    else if (li.offsetTop < list.scrollTop) list.scrollTop = li.offsetTop;
+    else if (li.offsetTop + li.offsetHeight > list.scrollTop + list.clientHeight) list.scrollTop = li.offsetTop + li.offsetHeight - list.clientHeight;
+  }
+
+  // step moves the active option by delta (or to an end), past disabled ones.
+  function step(delta) {
+    var n = menu.items.length, i = menu.active;
+    if (delta === "first" || delta === "last") {
+      i = delta === "first" ? -1 : n;
+      delta = delta === "first" ? 1 : -1;
+    }
+    for (var k = 0; k < n; k++) {
+      var j = i + delta * (k + 1);
+      if (j < 0 || j >= n) break;
+      if (!menu.items[j].disabled) { setActive(j); return; }
+      if (Math.abs(delta) > 1) delta = delta > 0 ? 1 : -1;
+    }
+  }
+
+  function choose(i) {
+    if (!menu || i < 0 || menu.items[i].disabled) return;
+    var m = menu;
+    closeMenu();
+    m.pick(m.items[i]);
+  }
+
+  function selectItems(sel) {
+    return Array.prototype.map.call(sel.options, function (o) {
+      return { value: o.value, text: o.textContent.trim(), selected: o.selected, disabled: o.disabled, placeholder: o.hasAttribute("data-placeholder") };
+    });
+  }
+
+  function openSelect(btn) {
+    var sel = btn.relaySelect;
+    openMenu(btn, selectItems(sel), function (it) {
+      if (sel.value !== it.value) {
+        sel.value = it.value;
+        syncSelect(sel);
+        sel.dispatchEvent(new Event("input", { bubbles: true }));
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      btn.focus();
+    });
+  }
+
+  // comboItems lists the suggestions; all of them, or (filter) those containing what is typed
+  function comboItems(input, filter) {
+    var q = filter ? input.value.trim().toLowerCase() : "";
+    var items = [];
+    Array.prototype.forEach.call(input.relayList.options, function (o) {
+      if (q && o.value.toLowerCase().indexOf(q) < 0) return;
+      var note = o.label && o.label !== o.value ? o.label : folderTag(o.value);
+      items.push({ value: o.value, text: o.value, note: note, selected: o.value === input.value.trim() });
+    });
+    return items;
+  }
+
+  // openCombo shows the suggestions: filtered while typing, all when asked for (arrow, click)
+  function openCombo(input, filter) {
+    var items = comboItems(input, filter);
+    if (!items.length || (filter && items.length === 1 && items[0].selected)) { if (menu && menu.owner === input) closeMenu(); return; }
+    openMenu(input, items, function (it) {
+      input.value = it.value;
+      input.relayPicking = true;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.relayPicking = false;
+      input.focus();
+    });
+  }
+
+  // typeahead: letters typed quickly find the next option that starts with them
+  var typed = { text: "", at: 0 };
+  function typeahead(ch) {
+    var now = Date.now();
+    typed.text = now - typed.at < 600 ? typed.text + ch : ch;
+    typed.at = now;
+    var q = typed.text.toLowerCase(), n = menu.items.length;
+    var start = typed.text.length === 1 ? menu.active + 1 : Math.max(menu.active, 0);
+    for (var k = 0; k < n; k++) {
+      var j = (start + k) % n;
+      if (!menu.items[j].disabled && menu.items[j].text.toLowerCase().indexOf(q) === 0) { setActive(j); return; }
+    }
+  }
+
+  document.addEventListener("keydown", function (e) {
+    var t = e.target;
+    var isBtn = t instanceof HTMLButtonElement && t.relaySelect;
+    var isCombo = t instanceof HTMLInputElement && t.relayList;
+    if (!isBtn && !isCombo) return;
+    var open = menu && menu.owner === t;
+    var k = e.key;
+    if (!open) {
+      if (isBtn && (k === "ArrowDown" || k === "ArrowUp" || k === "Enter" || k === " " || k === "Home" || k === "End")) {
+        e.preventDefault();
+        openSelect(t);
+        if (k === "Home") step("first");
+        if (k === "End") step("last");
+      } else if (isBtn && k.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        openSelect(t);
+        typeahead(k);
+      } else if (isCombo && (k === "ArrowDown" || k === "ArrowUp")) {
+        e.preventDefault();
+        openCombo(t, false);
+      }
+      return;
+    }
+    switch (k) {
+      case "ArrowDown": e.preventDefault(); if (e.altKey) return; step(1); break;
+      case "ArrowUp": e.preventDefault(); if (e.altKey) { closeMenu(); return; } step(-1); break;
+      case "PageDown": e.preventDefault(); step(8); break;
+      case "PageUp": e.preventDefault(); step(-8); break;
+      case "Home": if (isBtn) { e.preventDefault(); step("first"); } break;
+      case "End": if (isBtn) { e.preventDefault(); step("last"); } break;
+      case "Enter":
+        if (menu.active >= 0) { e.preventDefault(); choose(menu.active); }
+        else if (isBtn) { e.preventDefault(); closeMenu(); }
+        else closeMenu(); // the field's own Enter (submitting) goes on
+        break;
+      case " ":
+        if (isBtn) { e.preventDefault(); choose(menu.active); }
+        break;
+      case "Escape":
+        e.preventDefault(); // keep an open dialog open
+        e.stopPropagation();
+        closeMenu();
+        break;
+      case "Tab": closeMenu(); break;
+      default:
+        if (isBtn && k.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); typeahead(k); }
+    }
+  }, true);
+
+  document.addEventListener("click", function (e) {
+    var t = e.target instanceof Element ? e.target : null;
+    if (!t) return;
+    var btn = t.closest(".select-btn");
+    if (btn && btn.relaySelect) {
+      if (menu && menu.owner === btn) closeMenu();
+      else openSelect(btn);
+      return;
+    }
+    var li = t.closest(".select-option");
+    if (li && menu && li.parentElement === menu.list) choose(li.relayIndex);
+  });
+
+  // keep the focus on the field while the pointer is in its list
+  document.addEventListener("mousedown", function (e) {
+    var t = e.target instanceof Element ? e.target : null;
+    if (t && t.closest(".select-menu")) { e.preventDefault(); return; }
+    if (menu && t !== menu.owner && !(t && menu.owner.contains(t))) closeMenu();
+  });
+
+  document.addEventListener("mousemove", function (e) {
+    var li = e.target instanceof Element ? e.target.closest(".select-option") : null;
+    if (li && menu && li.parentElement === menu.list && li.relayIndex !== menu.active && !menu.items[li.relayIndex].disabled) setActive(li.relayIndex);
+  });
+
+  document.addEventListener("input", function (e) {
+    var t = e.target;
+    if (t instanceof HTMLInputElement && t.relayList && !t.relayPicking) openCombo(t, true);
+  });
+
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (t instanceof HTMLInputElement && t.relayList && !(menu && menu.owner === t)) openCombo(t, false);
+  });
+
+  document.addEventListener("focusout", function (e) {
+    if (menu && e.target === menu.owner) closeMenu();
+  });
+
+  window.addEventListener("resize", placeMenu);
+  document.addEventListener("scroll", function (e) {
+    if (menu && !(e.target instanceof Element && e.target.closest(".select-menu"))) placeMenu();
+  }, true);
+
+  ready(function () {
+    enhanceMenus(document);
+    new MutationObserver(function (records) {
+      records.forEach(function (r) {
+        r.addedNodes.forEach(function (n) { if (n.nodeType === 1) enhanceMenus(n); });
+      });
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+  // a page restored from the back-forward cache keeps the values the user picked
+  window.addEventListener("pageshow", function () {
+    document.querySelectorAll("select.is-enhanced").forEach(syncSelect);
+  });
 
   /* ---------- event wiring ---------- */
 
@@ -739,7 +1097,9 @@
     if (!rows) return;
     if (rows.querySelectorAll("[data-route-row]").length === 1) {
       li.querySelector('input[name="route_folder"]').value = "";
-      li.querySelector('select[name="route_target"]').value = "";
+      var target = li.querySelector('select[name="route_target"]');
+      target.value = "";
+      syncSelect(target);
       li.querySelector('input[name="route_folder"]').focus();
     } else {
       var next = li.nextElementSibling || li.previousElementSibling;
@@ -1255,7 +1615,7 @@
   document.addEventListener("keydown", function (e) {
     if (!e.altKey || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
     var li = e.target instanceof Element ? e.target.closest("form[data-rules-form] [data-rule]") : null;
-    if (!li || e.target.tagName === "SELECT") return; // Alt+↓ opens a select's list
+    if (!li || e.target.tagName === "SELECT" || e.target.relaySelect) return; // Alt+↓ opens a select's list
     e.preventDefault();
     moveRule(li, e.key === "ArrowUp" ? "up" : "down", document.activeElement);
   });
@@ -2314,6 +2674,7 @@
     confirm: confirmDialog,
     openModal: openModal,
     closeModal: closeModal,
-    ready: ready
+    ready: ready,
+    syncSelect: syncSelect
   };
 })();
