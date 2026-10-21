@@ -143,14 +143,9 @@ func (p *Processor) Process(ctx context.Context, mb Mailbox, folder string, uidV
 	}
 
 	res, ignore, _ := p.Recognizer.Recognize(msg) // the trace may contain codes: never log it
-	switch {
-	case ignore:
-		entry.Kind = "ignored"
-		if res != nil {
-			entry.Rule = res.Rule
-		}
-	case res == nil:
-		entry.Kind = "none"
+	entry.Kind = kindOf(res, ignore)
+	if ignore && res != nil {
+		entry.Rule = res.Rule
 	}
 	if ignore || res == nil {
 		_, err := p.Store.RecordMessage(ctx, entry, nil, st)
@@ -163,18 +158,7 @@ func (p *Processor) Process(ctx context.Context, mb Mailbox, folder string, uidV
 	entry.Rule = res.Rule
 	// Codes must never be stored or logged; the Telegram text below keeps the real subject.
 	entry.Subject = redact(entry.Subject, res.Code)
-	switch {
-	case res.Code != "" && res.URL != "":
-		entry.Kind = "both"
-	case res.Code != "":
-		entry.Kind = "code"
-	default:
-		entry.Kind = "link"
-	}
-	out, err := p.Renderer.Render(mb.Name, render.Data{
-		Code: res.Code, URL: res.URL, Service: res.Service, FromName: msg.From.Name, FromAddr: msg.From.Addr,
-		To: Recipient(msg.To, mb.Username), Subject: msg.Subject, Mailbox: mb.DisplayName, Rule: res.Rule, Date: msg.Date,
-	})
+	out, err := p.Renderer.Render(mb.Name, renderData(msg, res, mb))
 	if err != nil {
 		entry.Result = "failed"
 		p.Log.Error("套用範本失敗", append(logAttrs(entry), "err", err)...)
