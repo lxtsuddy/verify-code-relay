@@ -762,3 +762,12 @@ func TestMailboxFormKeepsLegacyOverride(t *testing.T) {
 		t.Errorf("saving the legacy mailbox unchanged = %q", e.flash(resp))
 	}
 }
+
+// Without a global client_id the override shows no sample value as if it were a default.
+func TestMailboxOverridePlaceholderBlankWithoutGlobal(t *testing.T) {
+	e := newEnv(t, nil)
+	e.login()
+	if _, body := e.get("/mailboxes/new"); strings.Contains(body, `placeholder="00000000-0000-0000-0000-000000000000"`) {
+		t.Error("client_id override shows a sample UUID placeholder")
+	}
+}

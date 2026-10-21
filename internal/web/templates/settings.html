@@ -94,9 +94,11 @@
         <p class="hint" id="f-ms-tenant-hint">{{if $ms.Suggested}}已預先填入建議值，儲存後才生效。{{end}}個人帳號（Outlook.com、Hotmail）填 <code>consumers</code>；公司或學校帳號填 <code>organizations</code> 或租戶 ID；留空為 <code>common</code>。</p>
         <div id="f-ms-tenant-err">{{template "field-error" $tnErr}}</div>
       </div>
-      {{if or $ms.Using $ms.Own}}
+      {{if or $ms.Using $ms.OwnClient $ms.OwnTenant $ms.Own}}
       <dl class="ip-facts ms-uses">
         <div><dt>沿用這裡的設定</dt><dd>{{range $ms.Using}}<span class="ms-box mono">{{.}}</span>{{else}}<span class="muted">（沒有）</span>{{end}}</dd></div>
+        {{with $ms.OwnClient}}<div><dt>只沿用預設 tenant</dt><dd>{{range .}}<span class="ms-box mono">{{.}}</span>{{end}}</dd></div>{{end}}
+        {{with $ms.OwnTenant}}<div><dt>只沿用識別碼</dt><dd>{{range .}}<span class="ms-box mono">{{.}}</span>{{end}}</dd></div>{{end}}
         {{with $ms.Own}}<div><dt>使用自己的應用程式</dt><dd>{{range .}}<span class="ms-box mono">{{.}}</span>{{end}}</dd></div>{{end}}
       </dl>
       {{end}}

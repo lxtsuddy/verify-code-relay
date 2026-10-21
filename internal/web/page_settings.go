@@ -48,8 +48,10 @@ type msAppData struct {
 	ClientID, Tenant             string   // form values
 	StoredClientID, StoredTenant string   // the microsoft section as stored
 	Suggested                    bool     // Tenant is the suggested consumers, not a stored value
-	Using                        []string // Microsoft mailboxes without their own client_id
-	Own                          []string // Microsoft mailboxes with their own client_id
+	Using                        []string // Microsoft mailboxes that take both values from here
+	OwnClient                    []string // their own client_id, this tenant
+	OwnTenant                    []string // their own tenant, this client_id
+	Own                          []string // both their own: nothing from here
 	// what a save would clear (authorised mailboxes using the global value), as the text of
 	// the confirmation app.js asks for when the client_id, the tenant or both change; ""
 	// when nothing would be cleared
@@ -95,10 +97,15 @@ func newMSAppData(raw *config.Config, authorised map[string]bool) msAppData {
 		if m == nil || m.Auth.Type != authMicrosoft {
 			continue
 		}
-		if m.Auth.ClientID == "" {
-			d.Using = append(d.Using, name)
-		} else {
+		switch ownID, ownTenant := m.Auth.ClientID != "", m.Auth.Tenant != ""; {
+		case ownID && ownTenant:
 			d.Own = append(d.Own, name)
+		case ownID:
+			d.OwnClient = append(d.OwnClient, name)
+		case ownTenant:
+			d.OwnTenant = append(d.OwnTenant, name)
+		default:
+			d.Using = append(d.Using, name)
 		}
 		blankTenant = blankTenant || m.Auth.Tenant == ""
 	}
@@ -286,8 +293,10 @@ func (s *Server) postSettingsGeneral(w http.ResponseWriter, r *http.Request) {
 func (s *Server) postSettingsMicrosoft(w http.ResponseWriter, r *http.Request) {
 	app := config.Microsoft{ClientID: strings.TrimSpace(r.PostFormValue("ms_client_id")), Tenant: strings.TrimSpace(r.PostFormValue("ms_tenant"))}
 	res, fe, err := s.saveConfig(r, "web", "修改 Microsoft 應用程式設定", func(raw *config.Config) error {
-		if raw.Microsoft == app {
-			return errNoChange
+		_, curTenant := raw.Microsoft.For(config.Auth{})
+		_, nextTenant := app.For(config.Auth{})
+		if raw.Microsoft.ClientID == app.ClientID && curTenant == nextTenant {
+			return errNoChange // a blank tenant is common: nothing signs in differently
 		}
 		raw.Microsoft = app
 		return nil

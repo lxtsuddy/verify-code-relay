@@ -231,7 +231,7 @@
     <div class="card-body form">
       <div class="auth-panel auth-ms">
         <div class="grid-2">
-          {{template "mb-input" (dict "ID" "f-client" "Name" "client_id" "Label" "應用程式（用戶端）識別碼" "Opt" "選填" "Value" $f.ClientID "Err" (fieldErr $e "client_id") "Mono" true "Placeholder" (or $d.MS.ClientID "00000000-0000-0000-0000-000000000000") "Hint" (or (and $d.MS.ClientID "留空沿用系統設定的 Microsoft 應用程式（欄位中的灰字）。") "系統設定還沒有填 Microsoft 應用程式，這個信箱要在這裡填入識別碼才能授權。"))}}
+          {{template "mb-input" (dict "ID" "f-client" "Name" "client_id" "Label" "應用程式（用戶端）識別碼" "Opt" "選填" "Value" $f.ClientID "Err" (fieldErr $e "client_id") "Mono" true "Placeholder" $d.MS.ClientID "Hint" (or (and $d.MS.ClientID "留空沿用系統設定的 Microsoft 應用程式（欄位中的灰字）。") "系統設定還沒有填 Microsoft 應用程式，這個信箱要在這裡填入識別碼才能授權。"))}}
           {{template "mb-input" (dict "ID" "f-tenant" "Name" "tenant" "Label" "Tenant" "Opt" "選填" "Value" $f.Tenant "Err" (fieldErr $e "tenant") "Mono" true "Placeholder" (or $d.MS.Tenant "common") "Hint" "留空沿用系統設定（灰字）。個人帳號填 consumers；公司帳號填 organizations 或租戶 ID。")}}
         </div>
         <p class="hint">只有這個信箱要用別的 Azure 應用程式時才填。改了識別碼或 tenant 需要重新授權。</p>

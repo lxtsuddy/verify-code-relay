@@ -1781,7 +1781,8 @@
     form[data-ms-app]   系統設定的「Microsoft 應用程式」卡片。伺服器在 data-stored-client_id／data-stored-tenant
                         放已儲存的值，在 data-confirm-client／-tenant／-both 放改了識別碼、tenant 或兩者時會被
                         清除的授權（沒有就是空字串）。欄位一改就依改了哪些重設 data-confirm，送出時由共用的
-                        data-confirm 處理確認；tenant 留空等於 common。
+                        data-confirm 處理確認；tenant 留空等於 common。識別碼欄空白時不確認：伺服器會
+                        拒絕仍有信箱需要它的儲存，什麼都不會清除。
   */
 
   function msTenant(v) { v = (v || "").trim(); return v === "" ? "common" : v; }
@@ -1793,6 +1794,7 @@
     var idChanged = id.value.trim() !== (form.getAttribute("data-stored-client_id") || "");
     var tnChanged = msTenant(tn.value) !== msTenant(form.getAttribute("data-stored-tenant"));
     var key = idChanged && tnChanged ? "both" : idChanged ? "client" : tnChanged ? "tenant" : "";
+    if (id.value.trim() === "") key = "";
     var text = key ? form.getAttribute("data-confirm-" + key) : "";
     if (text) form.dataset.confirm = "儲存 Microsoft 應用程式設定？\n" + text + "。";
     else delete form.dataset.confirm;

@@ -535,3 +535,36 @@ func confirmAttrs(body string) string {
 	}
 	return strings.Join(out, "\n")
 }
+
+// Saving the same effective values (a blank tenant is common) stores nothing.
+func TestSettingsMicrosoftAppNoOpIsEffective(t *testing.T) {
+	e := newEnv(t, withOwnAppAndTeam) // global client_id global-app, tenant blank
+	e.login()
+	_, before, _ := runtime.LoadConfig(context.Background(), e.st)
+	resp, _ := e.postForm("/settings/microsoft", url.Values{"ms_client_id": {"global-app"}, "ms_tenant": {"common"}})
+	if e.flash(resp) != msgNoChange {
+		t.Errorf("blank → common flash = %q", e.flash(resp))
+	}
+	if _, after, _ := runtime.LoadConfig(context.Background(), e.st); after != before {
+		t.Error("a save without an effective change stored a version")
+	}
+}
+
+// The card groups the Microsoft mailboxes by what they take from it.
+func TestSettingsMicrosoftAppGroupsByDependence(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) {
+		withOwnAppAndTeam(c) // team: both global; outlook: own client_id and tenant
+		c.Mailboxes["half"] = &config.Mailbox{Host: "outlook.office365.com", Username: "h@outlook.com",
+			Auth: config.Auth{Type: "microsoft_oauth", ClientID: "own-app"}, Targets: []string{"me"}}
+		c.Mailboxes["tonly"] = &config.Mailbox{Host: "outlook.office365.com", Username: "t@outlook.com",
+			Auth: config.Auth{Type: "microsoft_oauth", Tenant: "organizations"}, Targets: []string{"me"}}
+	})
+	e.login()
+	_, body := e.get("/settings")
+	text := regexpStripTags(body)
+	for _, want := range []string{"沿用這裡的設定team", "只沿用預設 tenanthalf", "只沿用識別碼tonly", "使用自己的應用程式outlook"} {
+		if !strings.Contains(strings.Join(strings.Fields(text), ""), strings.ReplaceAll(want, " ", "")) {
+			t.Errorf("card does not list %q", want)
+		}
+	}
+}

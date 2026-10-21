@@ -713,7 +713,8 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 /* Microsoft application: fields beside the Azure registration steps */
 .ms-app-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr); gap: 20px 28px; align-items: start; }
 .ms-uses { margin-top: 0; }
-.ms-uses dd { display: flex; flex-wrap: wrap; gap: 6px; }
+.ms-uses > div { grid-template-columns: 10.5em minmax(0, 1fr); }
+.ms-uses dd { display: flex; flex-wrap: wrap; align-items: flex-start; align-content: flex-start; gap: 6px; }
 .ms-box {
   display: inline-block; padding: 1px 8px; border-radius: 999px;
   background: var(--sunken); color: var(--ink-2); font-size: 13px;
