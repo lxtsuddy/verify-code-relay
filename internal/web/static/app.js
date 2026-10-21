@@ -1698,7 +1698,7 @@
     main.appendChild(el("p", "mt-verdict-text", v[1]));
     main.appendChild(el("p", "mt-verdict-sub", msg.subject || "（無主旨）"));
     head.appendChild(main);
-    var boxed = res.code && res.code.length <= 8;
+    var boxed = res.code && /^[0-9A-Za-z]{1,8}$/.test(res.code);
     if (boxed) {
       var pc = el("p", "mt-code");
       pc.appendChild(el("span", "sr-only", "驗證碼 " + res.code));
@@ -1905,9 +1905,15 @@
   // editing a field the test marked clears the mark
   document.addEventListener("input", function (e) {
     var n = e.target;
-    if (n instanceof Element && n.hasAttribute("data-mt-invalid")) {
+    if (!(n instanceof Element)) return;
+    if (n.hasAttribute("data-mt-invalid")) {
       n.removeAttribute("aria-invalid");
       n.removeAttribute("data-mt-invalid");
+    }
+    var row = n.closest("[data-mt-invalid-row]");
+    if (row && !row.querySelector("[data-mt-invalid]")) {
+      row.classList.remove("is-invalid");
+      row.removeAttribute("data-mt-invalid-row");
     }
   });
 
