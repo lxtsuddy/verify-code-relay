@@ -256,8 +256,8 @@ func TestLinkFinderWithCode(t *testing.T) {
 // password if this wasn't you" link forwards the code alone.
 func TestBuiltinCodeSkipsRemedyLink(t *testing.T) {
 	cases := map[string]string{
-		"en": `<p>Your sign-in verification code is</p><p><b>482913</b></p><p>If you didn't try to sign in, someone may know your password. <a href="https://account.example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy">Reset your password</a></p>`,
-		"zh": `<p>您的登入驗證碼為 <b>604217</b>，10 分鐘內有效。</p><p>若非本人操作，您的密碼可能已外洩，請立即 <a href="https://www.example.com.tw/account/reset-password?t=Qm9yZWFsaXNEaWdpdGFsQWJj">重設密碼</a>。</p>`,
+		"en":                 `<p>Your sign-in verification code is</p><p><b>482913</b></p><p>If you didn't try to sign in, someone may know your password. <a href="https://account.example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy">Reset your password</a></p>`,
+		"zh":                 `<p>您的登入驗證碼為 <b>604217</b>，10 分鐘內有效。</p><p>若非本人操作，您的密碼可能已外洩，請立即 <a href="https://www.example.com.tw/account/reset-password?t=Qm9yZWFsaXNEaWdpdGFsQWJj">重設密碼</a>。</p>`,
 		"no not-you wording": `<p>Your sign-in code is <b>739201</b>.</p><p><a href="https://account.example.com/password/reset?token=Zx8_kq2LmN0pQr7sTuVwXy">Reset your password</a></p>`,
 	}
 	b := NewBuiltin(configOpts(nil, nil))
