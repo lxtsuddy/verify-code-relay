@@ -1,0 +1,231 @@
+# 辨識強化與 Web 信件測試設計規格
+
+- 日期：2026-10-21
+- 狀態：已確認設計，待撰寫實作計畫
+- 相關規格：`2026-10-19-verify-code-relay-design.md`（辨識規則 §4）、`2026-10-20-web-admin-design.md`（本規格把其中「不做」的 `.eml` 上傳測試納入）
+
+## 1. 目標與背景
+
+一封 Google 的「設定救援信箱」信件被判為「未辨識／未轉發」：
+
+```
+主旨：Use 123456 to set up recovery email
+內文：… Use this code to finish setting up … as a recovery email:
+      123456
+      This code will expire in 24 hours.
+```
+
+原因是內建驗證碼辨識先要求命中關鍵字，而清單沒有涵蓋「this code」這類寫法；就算加了關鍵字，主旨中的候選也只有 39 分（門檻 40），因為在關鍵字前面的候選距離加倍計算。
+
+本次一併參考外部建議（Gemini Argon 的擷取模組建議）全面檢查辨識邏輯，並新增 Web 上的信件測試，讓使用者能自行驗證與調整規則。
+
+### 已確定的決策
+
+| 項目 | 決策 |
+|---|---|
+| 內文來源 | HTML 轉出的文字優先，純文字版備援（第一輪沒有結果才用另一版重跑） |
+| 純字母驗證碼 | 只在強烈上下文下支援（§3.4） |
+| 泛用連結字（Click here／點此） | 支援，依連結前文判斷，並補反例測試 |
+| 關鍵字擴充 | 只加保守詞組；不加單獨的 `code`／`代碼`（優惠碼、郵遞區號等誤判風險） |
+| 片語碼（correct-horse-battery） | 不做 |
+| 信心分數、多候選輸出 | 不做；轉發只需一個結果，辨識過程（Trace）已列出所有候選分數 |
+| Web 信件測試 | 放在「辨識規則」頁，用頁面上**尚未儲存**的規則與關鍵字測試；不提供實際發送 |
+| 既有測試語料 | 18 封既有 `.eml` 結果必須不變；若「HTML 優先」改變任何一封結果，停下來與使用者討論，不得直接改預期 |
+
+## 2. 信件解析（`internal/mailparse`）
+
+### 2.1 Message 欄位
+
+- `Text`：主要內文。有 HTML 版時為 HTML 轉出的文字；否則為純文字版。（原本是純文字優先。）
+- `AltText`（新增）：另一個版本的內文；只有一種版本時為空。兩版都經過相同的 normalize。
+- `Emphasis []Span`（新增）：`Text` 中強調區段的 rune 位置（僅當 `Text` 來自 HTML）。`Span` 為 `{Start, End int}`，End 不含。
+- `Links`：合併 HTML `<a>` 連結，以及 `Text`、`AltText` 兩者中的裸網址，依 URL 去重（沿用 `mergeLinks`，優先保留有文字的項目）。
+
+### 2.2 強調區段
+
+HTML 轉文字時，以下元素內的文字記為強調：
+
+- `<b>`、`<strong>`、`<code>`、`<kbd>`、`<samp>`、`<h1>`～`<h4>`；
+- 行內 `style` 的 `font-size` ≥ 20px（或 ≥ 1.25em／rem、≥ 15pt）；
+- 行內 `style` 含非零 `letter-spacing`。
+
+記錄的是轉文字時的位元組位置，`normalizeLines` 之後必須換算到最終文字的 rune 位置（normalize 會壓縮空白、移除行首尾空白，因此需要位置對應表，或在 normalize 時一併調整區段）。區段無法準確對應時寧可丟棄，不可錯位。
+
+### 2.3 連結附加資訊
+
+`Link` 新增：
+
+- `Button bool`：`<a>` 本身或其唯一子元素帶有按鈕樣式——`style` 含 `background`／`background-color`（非 transparent／none）或 `padding`，或 `class`／`role` 含 `btn`／`button`。
+- `Before string`：連結開始位置之前、同一行與上一行的文字，最多 120 個 rune，空白壓縮。用於泛用連結字判斷（§4.4）。
+- 連結文字為空且內含 `<img>` 時，`Text` 改用第一個非空的 `alt`。（`<img>` 本身仍不輸出到內文。）
+
+純文字版的裸網址沒有 `Button`、`Before`；`Before` 對裸網址可取該網址前同一行與上一行文字（由 `ExtractURLs` 的位置推得），以支援純文字信「Click the link below to verify:\nhttps://…」。
+
+## 3. 驗證碼辨識（`internal/recognize/code.go`）
+
+### 3.1 兩輪辨識
+
+`Builtin.Run` 與 `Custom.Run` 先以 `Subject + Text`（含 `Emphasis`）辨識；兩者都沒有結果時，若 `AltText` 非空，再以 `Subject + AltText`（無強調資訊）重跑一次。Trace 標示目前是哪一輪（「HTML 內文」／「純文字內文」）。程式碼辨識與連結辨識在同一輪內一起判斷；第一輪任一者有結果就不跑第二輪。
+
+自訂規則：`code_regex` 先比對主要內文，沒有比中再比對 `AltText`。
+
+### 3.2 關鍵字
+
+在 `defaultCodeKeywords` 加入：
+
+- 英文：`this code`、`the code`、`use this code`、`enter this code`、`code below`、`following code`、`temporary code`、`pin code`、`pin`
+- 中文：`安全性代碼`、`驗證代碼`、`验证代码`、`動態密碼`、`动态密码`
+- 日文：`セキュリティコード`
+
+不加入單獨的 `code`、`代碼`、`代码`。
+
+### 3.3 主旨＋獨立行（B 規則）
+
+若某個 4～8 位純數字同時：
+
+1. 出現在主旨中，且不被 §3.6 排除；
+2. 在內文中以相同的值**獨佔一行**；
+
+則即使沒有任何關鍵字命中，也視為有關鍵字：主旨中那串數字的位置被當作一個虛擬關鍵字加入，讓既有的距離評分正常運作。Trace 記為「驗證碼：主旨的 123456 也獨佔內文一行，視為關鍵字」。
+
+若主旨有多個符合條件的數字（罕見），全部加入。
+
+### 3.4 純字母驗證碼
+
+新增候選格式：5～8 個大寫 ASCII 字母（`\b[A-Z]{5,8}\b`），僅在以下條件**全部**成立時才成為候選：
+
+1. 緊接在某個驗證碼關鍵字之後，中間只允許空白、`:`、`：`、`is`、`為`、`为`、`是`；
+2. 獨佔一行，或位於強調區段內。
+
+不符合時不列入（Trace 不必逐一列出，以免雜訊）。
+
+### 3.5 強調加分
+
+候選完全落在某個強調區段內時，分數 +15。
+
+### 3.6 新增排除
+
+候選前 12 個 rune 內（小寫、去空白後比對）出現以下詞時排除：
+
+- 卡號：`末四碼`、`末4碼`、`末四码`、`末4码`、`尾號`、`尾号`、`endingin`、`endsin`、`last4`、`lastfour`——Trace 原因「卡號末碼」；
+- 郵遞區號：`郵遞區號`、`郵政編碼`、`邮编`、`邮政编码`、`zip`、`postal`、`postcode`——Trace 原因「郵遞區號」。
+
+英文詞比對時遵守既有的英文字母邊界規則（`zip` 不比中 `unzip`）。
+
+## 4. 連結辨識（`internal/recognize/link.go`）
+
+### 4.1 入口檢查
+
+原本只在主旨＋內文中找連結關鍵字。改為主旨、目前這輪的內文、**或任一連結的 `Text`** 含關鍵字即可進入評分。
+
+### 4.2 關鍵字
+
+`defaultLinkKeywords` 加入：`complete registration`、`complete your registration`、`authenticate`、`完成註冊`、`完成注册`、`認證`、`认证`、`核驗`、`核验`。
+
+### 4.3 網址特徵詞（修正）
+
+`urlHintWords` 改用字根，修正 `activation`／`validation` 不含 `activate`／`validate` 子字串而比不中的問題：
+
+`verif`、`confirm`、`activat`、`validat`、`magic`、`reset`、`login`、`signin`、`sign-in`、`auth`、`token=`、`code=`、`ticket=`
+
+分數不變（任一命中 +30）。
+
+### 4.4 評分調整
+
+- `Button` 為真：+10。
+- **泛用連結字**：連結文字（去空白、小寫）完全等於下列之一時，改看 `Before` 是否含連結關鍵字，含則給「文字含關鍵字」的 +50：
+  `click here`、`here`、`click`、`this link`、`link`、`點此`、`點這裡`、`點擊這裡`、`点击这里`、`點擊此處`、`点击此处`、`按此`、`這裡`、`这里`、`此處`、`此处`、`ここ`、`こちら`。
+- 其餘不變。
+
+### 4.5 排除
+
+`linkExcludeWords` 加入：`opt-out`、`optout`、`contact`、`view in browser`、`view this email`、`在瀏覽器中檢視`、`在浏览器中查看`、`聯絡我們`、`联系我们`、`幫助`、`帮助`。
+
+圖片副檔名排除擴充為靜態資源：`.png .jpg .jpeg .gif .webp .svg .bmp .ico .css .js .pdf`（Trace 原因「靜態資源」）。
+
+## 5. Web 信件測試
+
+### 5.1 介面
+
+「辨識規則」頁（`/rules`）下方新增「用信件測試」區塊：
+
+- 檔案拖放區／選擇檔案（`.eml`），或切換到「貼上原始碼」文字框（Gmail「顯示原始郵件」、Outlook「檢視訊息原始碼」可直接複製）。
+- 「預覽訊息使用的信箱」下拉選單：預設「（不指定，用全域範本）」，顯示名稱為「（測試）」，與 CLI 相同；選擇信箱時用該信箱的範本與顯示名稱。
+- 「測試」按鈕。區塊上方註明「使用本頁目前填寫的規則與關鍵字（尚未儲存也會套用）」。
+- 結果區：結論列（轉發驗證碼／轉發連結／被規則略過／不轉發）、驗證碼／連結／服務／規則、Telegram 訊息預覽（沿用範本預覽的元件與按鈕呈現）、可展開的辨識過程（Trace 逐行）、連結清單（URL 與文字）、信件摘要（寄件者、主旨、警告、內文前 500 字）。
+- 介面以 frontend-design skill 設計；完成後以 headless chromium 截圖確認。
+
+### 5.2 API
+
+`POST /api/rules/test`，`multipart/form-data`：
+
+- `eml`：檔案，或 `eml_text`：貼上的原始碼（擇一，檔案優先）；
+- `mailbox`：選填；
+- 規則與關鍵字：與 `POST /rules` 相同的欄位（`rule_*` 平行陣列、`extra_code_keywords`、`extra_link_keywords`），以相同的讀取與驗證程式處理（`readRules`、`readKeywords`、規則驗證）。
+
+回應 JSON：
+
+```json
+{"ok":true,
+ "message":{"from":"…","subject":"…","warnings":["…"],"text":"前 500 字","links":[{"url":"…","text":"…"}]},
+ "trace":["…"],
+ "result":{"kind":"code|link|both|ignored|none","code":"…","url":"…","service":"…","rule":"…"},
+ "preview":{"html":"…","buttons":[…],"length":n,"max":4096}}
+```
+
+或 `{"ok":false,"error":"…","errors":{"rules[0].code_regex":"…"}}`（規則欄位錯誤時附欄位錯誤，前端標在對應欄位）。`preview` 僅在有結果且非略過時存在。
+
+### 5.3 限制與安全
+
+- 需登入（`authed`），沿用 Origin／Sec-Fetch-Site 檢查。
+- 這個路由的請求本文上限放寬為 6 MiB（全域 1 MiB）；信件原始碼超過 5 MiB（`pipeline.MaxMessageSize`）時回「信件超過 5 MiB，實際運作時也會略過不辨識」。
+- 信件只在記憶體中處理：不寫資料庫、不寫檔、不寫日誌；Trace 含驗證碼與連結，**不得**出現在任何 log。錯誤日誌只記錯誤類型，不記內容。
+- 不提供實際發送（CLI `relay test --send` 保留）。
+- 自訂規則的正規表示式由使用者輸入：沿用 Go `regexp`（RE2，線性時間），無回溯爆炸風險。
+
+### 5.4 共用
+
+CLI `relay test` 與 Web 共用「解析 → 辨識 → 渲染」的邏輯，抽成一個函式（例如 `internal/pipeline` 或新檔），兩邊只負責輸入與輸出格式，避免兩份實作漂移。
+
+## 6. 測試
+
+### 6.1 語料（`testdata/eml/gen.py` 產生）
+
+應辨識：
+
+| 名稱 | 預期 |
+|---|---|
+| `google-recovery-en` | 本次的 Google 救援信箱信 → `123456` |
+| `verify-button-zh-tw`／`verify-button-zh-cn`／`verify-button-en` | 只有「驗證」「验证」「Verify」按鈕，連結為追蹤網址 → 該連結 |
+| `image-button-en` | 按鈕是 `<img alt="Verify email">` → 該連結 |
+| `click-here-en` | 「Please verify your email by clicking the link below」＋「Click here」 → 該連結 |
+| `html-only-useful-en` | 純文字版只有「請使用 HTML 郵件軟體」，HTML 版有粗體驗證碼 → 該碼 |
+| `alpha-code-en` | 「Your code is:」下一行粗體 `QWERTY` → `QWERTY` |
+| `activation-url-en` | 連結文字為「Continue」、網址含 `/activation?` → 該連結（驗證 §4.3 修正） |
+
+反例（`none: true`）：
+
+| 名稱 | 內容 |
+|---|---|
+| `promo-code-en` | 「Use promo code SAVE20」「Your discount code: 8888」 |
+| `order-subject-zh` | 主旨與內文都有訂單號 `20261021`，且內文獨佔一行 |
+| `card-last4-zh` | 信用卡消費通知：「您末四碼 1234 的信用卡…」，同段有「請勿將驗證碼告訴他人」 |
+| `newsletter-click-here-en` | 電子報「Click here to read more」 |
+| `footer-zip-en` | 安全提醒信「We will never ask for your verification code」，200 字內的頁尾有 `Zip: 94043`，沒有驗證連結 |
+
+> 註：`order-subject-zh` 檢驗 B 規則不會把訂單號當驗證碼——訂單號前若有「訂單」等字會被既有排除擋下；若語料顯示 B 規則仍會誤判，需在 B 規則加條件（例如主旨數字不得被排除、主旨不得含訂單詞），並與使用者討論。
+
+### 6.2 單元測試
+
+- `mailparse`：HTML 優先與 `AltText`；強調區段的 rune 位置（含 normalize 後的位移、CJK）；`Button`、`Before`、圖片 alt。
+- `recognize`：B 規則、純字母條件、強調加分、新排除、兩輪辨識、入口檢查、網址字根、泛用連結字。
+- `web`：`/api/rules/test` 的成功、未登入、跨來源、超過大小、規則欄位錯誤、未儲存規則生效、無信箱與指定信箱的預覽。
+
+### 6.3 既有測試
+
+既有 18 封語料與所有既有測試必須維持通過且預期不變。
+
+## 7. 文件
+
+- README：辨識規則章節更新（HTML 優先、B 規則、純字母碼、按鈕連結）；新增「用信件測試」說明。
+- `docs/TODO.md`：移除已完成的 `.eml` 上傳測試延後項目（若有），記錄本次不做的項目（片語碼、信心分數）。
