@@ -16,7 +16,7 @@
 - 不新增任何依賴。
 - CSP：`script-src 'self'; style-src 'self'`——不得使用 inline `<style>`、`style=` 屬性、inline `<script>`、`onclick` 等事件屬性。
 - Trace 與信件內容含驗證碼與連結：**不得**寫進任何日誌（`slog`）、資料庫或檔案。
-- 既有 18 封語料（`testdata/eml/*.eml`）結果必須不變。任何一封改變結果時**停下來回報**，不得改它的 `.expected.yaml`。
+- 既有 18 封語料（`testdata/eml/*.eml`）結果必須不變。任何一封改變結果時**停下來回報**，不得改它的 `.expected.yaml`。同理，`testdata` 以外的既有測試（例如 `cmd/relay/e2e_test.go`、`web_e2e_test.go`、`dashboard_test.go`）若因 HTML 優先或新規則而改變結果，也要停下來回報，不得改斷言；計畫中明列要更新的測試除外。
 - 測試語料只能用 `testdata/eml/gen.py` 產生（`python3 testdata/eml/gen.py`），不要手寫 `.eml`。
 - 前端任務（Task 12）實作者**必須先叫用 frontend-design skill**；行動裝置寬度也要可用。
 - 每個任務完成前必須通過：`gofmt -l .` 無輸出、`go vet ./...`、`go test -race -count=1 ./...`。
@@ -251,7 +251,7 @@ func renderHTML(src string) (string, []Link, []Span) {
 }
 ```
 
-（`<a>` 分支提早 `return`，`defer` 仍會執行，所以 `<a>` 本身或其內的強調都會記錄。）
+**先完整讀過現在的 `html.go` 再改**——上面以「…」表示的部分必須與現行程式碼一字不差。（`<a>` 分支提早 `return`，`defer` 仍會執行，所以 `<a>` 本身或其內的強調都會記錄。）
 
 4. 位置對應的 normalize：
 
@@ -1061,8 +1061,9 @@ var (
 	cardWords = []string{"末四碼", "末4碼", "末四码", "末4码", "尾號", "尾号", "endingin", "endsin", "last4", "lastfour"}
 	zipWords  = []string{"郵遞區號", "郵政編碼", "邮编", "邮政编码", "zip", "postal", "postcode"}
 	// streetWords after a number make it a house number ("1600 Amphitheatre Parkway").
+	// Product names ("G Suite") rule out words like suite or floor.
 	streetWords = map[string]bool{"st": true, "street": true, "ave": true, "avenue": true, "rd": true, "road": true,
-		"blvd": true, "boulevard": true, "parkway": true, "pkwy": true, "suite": true, "floor": true}
+		"blvd": true, "boulevard": true, "parkway": true, "pkwy": true}
 	usStates = map[string]bool{}
 )
 
@@ -1789,7 +1790,7 @@ Expected: 全部 PASS（共 33 封）。若新語料失敗：先讀 Trace 找原
 
 - [ ] **Step 3: 更新規格 §6.1**
 
-把 `footer-zip-en` 一列的描述改為：「安全提醒信「We will never ask for your verification code」，頁尾 `Example Inc., 1600 Main Street, Mountain View, CA 94043`，沒有驗證連結」。
+把 `footer-zip-en` 一列的描述改為：「安全提醒信「We will never ask for your verification code」，頁尾 `Example Inc., 1600 Main Street, Mountain View, CA 94043`，沒有驗證連結」；`author-link-en` 一列改為：「同網域「Read more」按鈕連到 `https://blog.example.com/author/jane`，內文有「verify your own profile」（讓連結入口檢查通過）」。
 
 - [ ] **Step 4: Commit**
 
@@ -2773,7 +2774,7 @@ Run: `go test ./internal/web -run TestRulesPageHasMailTest` → FAIL。
 
   document.addEventListener("submit", function (e) {
     var form = e.target.closest ? e.target.closest("form[data-mailtest]") : null;
-    if (!form) return;
+    if (!form || e.defaultPrevented) return; // the shared handler blocks a second click while busy
     e.preventDefault();
     // The shared submit handler (registered earlier) has already marked the form as
     // submitting and the button busy; undo both when done, as the page stays.
@@ -2925,7 +2926,7 @@ chromium --headless --disable-gpu --hide-scrollbars --window-size=390,2400 --vir
   --screenshot=$CLAUDE_JOB_DIR/tmp/rules-mailtest-mobile.png "http://127.0.0.1:18080/rules?demo=1"
 ```
 
-用 Read 工具看兩張截圖：面板與結果（結論列、驗證碼 123456、Telegram 預覽、辨識過程）都要清楚、對齊、不破版。不滿意就調整 CSS 後重拍。確認後刪除 `zz_shot_test.go`。
+等 proxy 用 curl 重試迴圈（`until curl -sf -o /dev/null http://127.0.0.1:18080/rules; do sleep 1; done`），不要固定等待。若截圖中結果區是空的，表示 fetch 沒在 `--virtual-time-budget` 內完成，先把 budget 調高再檢查 CSS。用 Read 工具看兩張截圖：面板與結果（結論列、驗證碼 123456、Telegram 預覽、辨識過程）都要清楚、對齊、不破版。不滿意就調整 CSS 後重拍。確認後刪除 `zz_shot_test.go`。
 
 - [ ] **Step 8: Commit**
 

@@ -114,7 +114,7 @@ HTML 轉文字時，以下元素內的文字記為強調：
 
 另新增地址排除（Trace 原因「地址」）：
 
-- 門牌：候選後方同一行 30 個 rune 內，有獨立的英文字詞（以英數字切詞）`st`、`street`、`ave`、`avenue`、`rd`、`road`、`blvd`、`boulevard`、`parkway`、`pkwy`、`suite`、`floor`；或候選後緊接（可隔一個空白）`號`、`号`、`路`、`街`、`樓`、`楼`。例：`1600 Amphitheatre Parkway`、`1600 Main St`、`100 號`。
+- 門牌：候選後方同一行 30 個 rune 內，有獨立的英文字詞（以英數字切詞）`st`、`street`、`ave`、`avenue`、`rd`、`road`、`blvd`、`boulevard`、`parkway`、`pkwy`（不含 suite、floor：會撞到「G Suite」這類產品名）；或候選後緊接（可隔一個空白）`號`、`号`、`路`、`街`、`樓`、`楼`。例：`1600 Amphitheatre Parkway`、`1600 Main St`、`100 號`。
 - 美國郵遞區號：恰好 5 位數字（或 `12345-6789`），前面緊接美國州名縮寫（兩個大寫字母，例如 `CA 94043`）。
 
 ## 4. 連結辨識（`internal/recognize/link.go`）
