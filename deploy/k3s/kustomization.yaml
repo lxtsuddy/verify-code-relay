@@ -25,7 +25,7 @@ secretGenerator:
 images:
   - name: verify-code-relay
     newName: ghcr.io/lxtsuddy/verify-code-relay
-    newTag: "0.3.0"
+    newTag: "0.3.1"
 
 labels:
   - pairs:
