@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -822,5 +823,29 @@ func TestMailboxRoutesCard(t *testing.T) {
 	if !strings.Contains(body, `id="f-route-folder-1" name="route_folder" value="" list="f-folder-options" placeholder="資料夾，例如 INBOX" autocomplete="off" spellcheck="false" aria-invalid="true"`) ||
 		!strings.Contains(body, `id="f-route-err-1"`) {
 		t.Error("blank folder not marked on its row")
+	}
+}
+
+// The list shows each folder's own targets after its state.
+func TestMailboxListShowsTargetsPerFolder(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) {
+		withSample(c)
+		c.Targets["fam"] = config.Target{Bot: "main", ChatID: 7}
+		c.Mailboxes["gmail"].Routes = []config.Route{{Folder: "INBOX", Target: "me"}, {Folder: "Spam", Target: "fam"}}
+	})
+	e.login()
+	_, body := e.get("/mailboxes")
+	spam := regexp.MustCompile(`(?s)title="Spam">Spam</span>.*?</li>`).FindString(body)
+	if spam == "" || !strings.Contains(spam, `<span class="route-chat mono">fam</span>`) || strings.Contains(spam, ">me<") {
+		t.Errorf("Spam row = %q", spam)
+	}
+	inbox := regexp.MustCompile(`(?s)title="INBOX">INBOX</span>.*?</li>`).FindString(body)
+	if !strings.Contains(inbox, `<span class="route-chat mono">me</span>`) || strings.Contains(inbox, ">fam<") {
+		t.Errorf("INBOX row = %q", inbox)
+	}
+	// the overview's card lists both folders
+	_, body = e.get("/")
+	if !strings.Contains(body, `data-folder="Spam"`) {
+		t.Error("overview card lacks the Spam folder")
 	}
 }

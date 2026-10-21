@@ -241,6 +241,7 @@ func checkMailboxName(name string, taken bool) string {
 type folderRow struct {
 	Name, Label, Class string
 	Live               bool
+	Targets            []string // where this folder's mail goes
 }
 
 type mailboxRow struct {
@@ -249,7 +250,6 @@ type mailboxRow struct {
 	Microsoft, NeedsAuth                     bool // NeedsAuth: no token stored
 	NeedsLogin                               bool // a folder's watcher reports needs_login
 	Folders                                  []folderRow
-	Targets                                  []string
 }
 
 type mailboxesData struct {
@@ -296,7 +296,7 @@ func (s *Server) getMailboxes(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		row := mailboxRow{Name: name, DisplayName: m.DisplayName, Username: m.Username, Host: m.Host, Port: m.Port, Glyph: glyphFor(m.Host),
-			Microsoft: m.Auth.Type == authMicrosoft, Targets: m.Targets}
+			Microsoft: m.Auth.Type == authMicrosoft}
 		if row.Port == 0 {
 			row.Port = 993
 		}
@@ -311,13 +311,9 @@ func (s *Server) getMailboxes(w http.ResponseWriter, r *http.Request) {
 			}
 			row.NeedsAuth = !ok
 		}
-		folders := m.Folders
-		if len(folders) == 0 {
-			folders = []string{"INBOX"}
-		}
-		for _, f := range folders {
+		for _, f := range m.WatchedFolders() {
 			st, ok := status[[2]string{name, f}]
-			fr := folderRow{Name: f}
+			fr := folderRow{Name: f, Targets: m.TargetsOf(f)}
 			if ok {
 				fr.Label, fr.Class, fr.Live = statusBadge(st)
 			} else {

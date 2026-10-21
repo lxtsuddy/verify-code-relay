@@ -1037,6 +1037,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .tg-handle.is-err { color: var(--red-700); font-weight: 600; }
 .tg-handle .icon { display: inline-block; width: 15px; height: 15px; margin-right: 4px; vertical-align: -2.5px; }
 .tg-uses { font-size: var(--fs-sm); color: var(--ink-2); overflow-wrap: anywhere; }
+.tg-uses .mono { white-space: nowrap; } /* a mailbox or folder name stays in one piece */
 .tg-actions { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 8px; }
 .tg-actions form { display: contents; }
 @container list (min-width: 720px) {
@@ -1135,15 +1136,16 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
    many buttons a row has) line up from row to row. The tracks never change (a container
    cannot query itself); what changes with the list's own width ("list" container) is
    which tracks a row's parts span:
-     narrow  (default)   glyph | the account, then folders, route and actions under it
-     medium  (>= 600px)  glyph | account | actions; folders and route under the account
-     wide    (>= 900px)  glyph | account | folders | route | actions
+     narrow  (default)   glyph | the account, then the folders and the actions under it
+     medium  (>= 600px)  glyph | account | actions; the folders under the account
+     wide    (>= 900px)  glyph | account | folders | actions
+   Each folder line reads: name, state, then the routing line to that folder's targets.
    A subgrid's padding is taken from its edge tracks, so the glyph track includes it. */
 .mb-list {
   --row-pad: 20px;
   container: list / inline-size;
   display: grid;
-  grid-template-columns: calc(44px + var(--row-pad)) minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 0.7fr) auto;
+  grid-template-columns: calc(44px + var(--row-pad)) minmax(0, 1fr) minmax(0, 1.5fr) auto;
   margin: 0; padding: 0; list-style: none;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1);
 }
@@ -1154,7 +1156,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   display: grid; grid-column: 1 / -1; grid-template-columns: subgrid; gap: 10px 16px; align-items: center;
   padding: 14px var(--row-pad); border-bottom: 1px solid var(--line);
 }
-.mb-item > .mb-glyph { grid-column: 1; grid-row: span 4; align-self: start; }
+.mb-item > .mb-glyph { grid-column: 1; grid-row: span 3; align-self: start; }
 .mb-item > :not(.mb-glyph) { grid-column: 2 / -1; }
 .mb-item:last-child { border-bottom: 0; }
 .mb-item:hover { background: #fafcf9; }
@@ -1172,9 +1174,9 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 /* an address never breaks mid-word: a long one ends in … (the full one is the title) */
 .mb-user { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mb-host { color: var(--muted); }
-.mb-folders { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 0; padding: 0; list-style: none; min-width: 0; }
+.mb-folders { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; min-width: 0; }
 /* a folder keeps its badge on its line: a long name ends in … (the full name is the title) */
-.mb-folder { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; font-size: var(--fs-sm); }
+.mb-folder { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0; max-width: 100%; font-size: var(--fs-sm); }
 .mb-folder-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
 .mb-folder .badge { flex: none; font-size: var(--fs-xs); line-height: 18px; }
 .mb-route { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: var(--fs-sm); }
@@ -1183,20 +1185,19 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 
 @container list (min-width: 600px) {
   .mb-item { padding-top: 16px; padding-bottom: 16px; }
-  .mb-item > .mb-glyph { grid-row: span 3; }
-  .mb-item > .mb-main { grid-column: 2 / 5; grid-row: 1; }
-  .mb-item > .mb-actions { grid-column: 5; grid-row: 1; align-self: start; justify-content: flex-end; }
+  .mb-item > .mb-glyph { grid-row: span 2; }
+  .mb-item > .mb-main { grid-column: 2 / 4; grid-row: 1; }
+  .mb-item > .mb-actions { grid-column: 4; grid-row: 1; align-self: start; justify-content: flex-end; }
 }
 
 @container list (min-width: 900px) {
   .mb-item { gap: 8px 20px; }
   .mb-item > .mb-glyph { grid-row: auto; align-self: center; }
   .mb-item > .mb-main { grid-column: 2; }
-  /* folder names in one column, their states lined up in the next */
-  .mb-item > .mb-folders { grid-column: 3; display: grid; grid-template-columns: minmax(0, max-content) max-content; gap: 5px 10px; align-items: center; }
+  /* folder names in one column, their states and their targets lined up in the next two */
+  .mb-item > .mb-folders { grid-column: 3; grid-template-columns: minmax(0, max-content) max-content minmax(0, 1fr); gap: 5px 10px; align-items: center; }
   .mb-folder { display: contents; }
-  .mb-item > .mb-route { grid-column: 4; }
-  .mb-item > .mb-actions { align-self: center; }
+  .mb-item > .mb-actions { grid-column: 4; align-self: center; }
 }
 .mb-after { margin-top: 18px; }
 .empty-steps li.is-done::before { content: "✓"; background: var(--green-100); color: var(--green-800); }

@@ -277,11 +277,7 @@ func dashCard(name string, m *config.Mailbox, status map[[2]string]watcher.Statu
 	if c.DisplayName == "" {
 		c.DisplayName = name
 	}
-	folders := m.Folders
-	if len(folders) == 0 {
-		folders = []string{"INBOX"}
-	}
-	for _, f := range folders {
+	for _, f := range m.WatchedFolders() {
 		st, ok := status[[2]string{name, f}]
 		c.Folders = append(c.Folders, dashFolder{Name: f, Status: string(st), Known: ok})
 	}

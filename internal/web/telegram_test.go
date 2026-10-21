@@ -180,20 +180,20 @@ func TestDeleteBotAndTarget(t *testing.T) {
 	e.login()
 	// target me: used by mailbox gmail and as the admin target
 	resp, _ := e.postForm("/telegram/targets/me/delete", nil)
-	if f := e.flash(resp); resp.StatusCode != 303 || f != "目標 me 仍被信箱 gmail 及通知對象（系統設定）使用" {
+	if f := e.flash(resp); resp.StatusCode != 303 || f != "目標 me 仍被信箱 gmail（INBOX）及通知對象（系統設定）使用" {
 		t.Fatalf("delete used target = %d %q", resp.StatusCode, f)
 	}
-	if _, page := e.get("/telegram"); !strings.Contains(page, "它仍被信箱 gmail 及系統通知使用") {
+	if _, page := e.get("/telegram"); !strings.Contains(page, "它仍被信箱 gmail（INBOX）及系統通知使用") {
 		t.Error("target delete confirm text")
 	}
 	raw, _, _ := runtime.LoadConfig(context.Background(), e.st)
 	raw.Admin = ""
 	saveRaw(e, raw)
 	resp, _ = e.postForm("/telegram/targets/me/delete", nil)
-	if f := e.flash(resp); f != "目標 me 仍被信箱 gmail 使用" {
+	if f := e.flash(resp); f != "目標 me 仍被信箱 gmail（INBOX）使用" {
 		t.Fatalf("delete target used by a mailbox = %q", f)
 	}
-	if _, page := e.get("/telegram"); !strings.Contains(page, "它仍被信箱 gmail 使用") {
+	if _, page := e.get("/telegram"); !strings.Contains(page, "它仍被信箱 gmail（INBOX）使用") {
 		t.Error("target delete confirm text (mailbox only)")
 	}
 	resp, _ = e.postForm("/telegram/bots/main/delete", nil)
@@ -358,5 +358,25 @@ func TestTelegramAPI(t *testing.T) {
 	resp, _ = e.postJSON("/api/telegram/chats", map[string]string{"bot": "nope"})
 	if resp.StatusCode != 404 {
 		t.Fatalf("chats unknown bot = %d", resp.StatusCode)
+	}
+}
+
+// A target's usage names the mailbox folders routed to it.
+func TestTargetUsageNamesFolders(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) {
+		withSample(c)
+		c.Targets["fam"] = config.Target{Bot: "main", ChatID: 7}
+		c.Mailboxes["gmail"].Routes = []config.Route{{Folder: "INBOX", Target: "me"}, {Folder: "Spam", Target: "fam"}, {Folder: "Spam", Target: "me"}}
+		c.Admin = ""
+	})
+	e.login()
+	_, body := e.get("/telegram")
+	text := regexpStripTags(body)
+	if !strings.Contains(text, "信箱 gmail（INBOX、Spam）") || !strings.Contains(text, "信箱 gmail（Spam）") {
+		t.Errorf("usage without folders:\n%s", text)
+	}
+	resp, _ := e.postForm("/telegram/targets/fam/delete", nil)
+	if f := e.flash(resp); f != "目標 fam 仍被信箱 gmail（Spam）使用" {
+		t.Errorf("delete used target = %q", f)
 	}
 }

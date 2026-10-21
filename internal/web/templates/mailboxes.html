@@ -19,13 +19,9 @@
       <p class="mb-title"><a class="mb-link" href="/mailboxes/{{.Name}}">{{.DisplayName}}</a>{{if ne .DisplayName .Name}} <span class="tag mono">{{.Name}}</span>{{end}}{{if .NeedsAuth}} <span class="badge badge-warn">尚未授權</span>{{end}}</p>
       <p class="mb-account"><span class="mb-user mono" title="{{.Username}}">{{.Username}}</span><span class="mb-host"> · {{.Host}}{{if ne .Port 993}}:{{.Port}}{{end}}</span></p>
     </div>
-    <ul class="mb-folders" aria-label="資料夾與狀態">
-      {{range .Folders}}<li class="mb-folder"><span class="mb-folder-name mono" title="{{.Name}}">{{.Name}}</span><span class="badge {{.Class}}{{if .Live}} badge-live{{end}}">{{.Label}}</span></li>{{end}}
+    <ul class="mb-folders" aria-label="資料夾、狀態與轉發目標">
+      {{range .Folders}}<li class="mb-folder"><span class="mb-folder-name mono" title="{{.Name}}">{{.Name}}</span><span class="badge {{.Class}}{{if .Live}} badge-live{{end}}">{{.Label}}</span><span class="mb-route" aria-label="轉發到"><span class="route-line" aria-hidden="true"></span>{{range .Targets}}<span class="route-chat mono">{{.}}</span>{{end}}</span></li>{{end}}
     </ul>
-    <p class="mb-route" aria-label="轉發到">
-      <span class="route-line" aria-hidden="true"></span>
-      {{range .Targets}}<span class="route-chat mono">{{.}}</span>{{end}}
-    </p>
     <div class="mb-actions">
       {{if and .Microsoft (or .NeedsAuth .NeedsLogin)}}<button type="button" class="btn btn-sm btn-auth" data-oauth-start="{{.Name}}" data-oauth-user="{{.Username}}" aria-label="{{if .NeedsAuth}}授權{{else}}重新授權{{end}}信箱 {{.Name}}">{{template "icon" "lock"}}<span>{{if .NeedsAuth}}授權{{else}}重新授權{{end}}</span></button>{{end}}
       <a class="btn btn-sm" href="/mailboxes/{{.Name}}" aria-label="編輯信箱 {{.Name}}">{{template "icon" "edit"}}<span class="tg-btn-text">編輯</span></a>
