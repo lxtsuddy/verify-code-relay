@@ -6,8 +6,22 @@
   驗證碼輸入（.otp-input）是六個與其他欄位同款的圓角格（白底、細灰框，下一格亮綠框），
   不搶郵遞區號格的戲。其餘元件保持安靜：白卡、細線、系統字型。
 
-  版面：桌機為左側導覽軌（目前頁面的分頁「接」進內容區）；860px 以下改為頂部列與
-  可橫向捲動的分頁列。
+  版面：1200px 以上為左側導覽軌（目前頁面的分頁「接」進內容區）；861–1199px 為圖示導覽軌
+  （圖示＋小字，筆電開縮放時把空間讓給內容）；860px 以下為頂部列與可橫向捲動的分頁列。
+  內容欄在導覽軌右側置中：清單與總覽寬 --page-wide，表單頁在範本加 {{define "width"}}form{{end}}
+  改用 --page-form（見 layout.html）。
+
+  斷點：視窗斷點只有 640／860／1200，只給外框與全域元素（導覽軌、留白、對話框、toast）。
+  元件看自己拿到的寬度（container queries），容器：
+    table  .table-wrap        紀錄表的卡片／精簡／完整三種排法
+    list   .mb-list .tg-list  清單列的堆疊／欄位排法
+    board  .board             總覽的郵戳與數字、開始使用三步驟
+    card   .card              卡片裡的東西：範本編輯器與預覽、信件測試結果、Microsoft 卡片、設定列
+  容器不能查詢自己：容器本身的樣式（例如清單的欄軌）不放在 @container 裡。
+
+  分層：@layer tokens, base, layout, components, pages, utilities。後面的層蓋過前面的層，
+  與選擇器權重無關；新規則放進所屬的層，元件的 @media／@container 寫在該元件區塊的尾端。
+  字級用 --fs-*，卡片左右留白 --card-pad-x、區段間距 --section-gap。
 
   元件配方（範本請照抄結構）：
     頁首    <header class="page-head"><div><h1 class="page-title">…</h1><p class="page-desc">…</p></div><div class="page-actions">…</div></header>
@@ -25,6 +39,8 @@
             以 data-modal-open="x" 開啟。
     代碼    <p class="postcode"><span>8</span><span>3</span>…</p>
     清單    <ul class="tg-list"><li class="tg-item">主要文字 | 使用情況 | .tg-actions</li></ul>（Telegram 頁；每列一筆可操作的項目）
+            .mb-list／.tg-list 是 grid、每列是 subgrid：欄軌固定（第一軌含列的左右留白 --row-pad），
+            依清單寬度改變的是各部分跨哪些軌，所以每列的欄位（含動作按鈕欄）永遠對齊。
     郵票    <label class="stamp-pick"><input type="radio"><span class="stamp"><span class="stamp-face">…</span></span></label>
             信箱頁的服務選擇：打孔邊緣（mask）、刻字縮寫；選中時蓋上郵戳。每頁只用在一處。
     勾選卡  <label class="route-pick"><input type="checkbox"><span class="route-card">…<span class="route-check">check icon</span></span></label>
@@ -43,7 +59,10 @@
             （.is-ok｜.is-warn｜.is-muted｜.is-err，驗證碼用 .postcode）＋ .mt-result（細節與 .tg-chat 預覽）。
     健康    總覽頁首的 section.health：郵戳（.health-mark）的顏色與中間字是整體狀態，底弧是最近一次更新時間；
             顏色來自外層 [data-state]（ok｜info｜warn｜err｜idle），信箱卡片 .dash-card[data-state] 為 ok｜busy｜bad。
-    紀錄    table.table.log-table，每列用 {{template "log-row" …}}（_logs.html）；640px 以下每列變成一張小卡。
+    紀錄    table.table.log-table，每列用 {{template "log-row" …}}（_logs.html）；表頭 th 也加 c-time／c-mb／… class。
+            每列是欄寬與內容無關的 grid：表格寬 < 600 為小卡、≥ 600 精簡、≥ 880 完整（有規則欄的表格
+            加 .log-table-rule，≥ 1000 才完整）。主旨最多兩行、寄件者一行，完整文字在 title。
+    驗證碼  <input class="otp-input" data-otp …>（小一號加 .otp-sm）；app.js 包成 .otp 並畫出六格 .otp-cell。
 */
 
 @layer tokens, base, layout, components, pages, utilities;
