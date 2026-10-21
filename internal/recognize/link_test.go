@@ -34,7 +34,7 @@ func TestLinkFinder(t *testing.T) {
 			{URL: "https://www.facebook.com/example", Text: "Facebook"},
 			{URL: "https://example.com/account/reset?code=123", Text: "重設密碼"},
 		}, "https://example.com/account/reset?code=123"},
-		{"no keyword", "Newsletter", "Our news", []mailparse.Link{{URL: "https://example.com/verify", Text: "Verify"}}, ""},
+		{"no keyword", "Newsletter", "Our news", []mailparse.Link{{URL: "https://example.com/verify", Text: "Open"}}, ""},
 		{"below threshold", "Please confirm", "text", []mailparse.Link{{URL: "https://example.com/blog/post", Text: "Read more"}}, ""},
 		{"image excluded", "Verify", "x", []mailparse.Link{{URL: "https://example.com/verify.png", Text: "Verify"}}, ""},
 		{"keyword case insensitive", "CONFIRM YOUR EMAIL", "x", []mailparse.Link{{URL: "https://example.com/a", Text: "CONFIRM EMAIL"}}, "https://example.com/a"},
@@ -60,6 +60,45 @@ func TestLinkFinder(t *testing.T) {
 		{"zh terms text", "驗證", "x", []mailparse.Link{{URL: "https://example.com/verify?t=1", Text: "服務條款"}}, ""},
 		{"zh help text", "驗證", "x", []mailparse.Link{{URL: "https://example.com/verify?t=1", Text: "說明中心"}}, ""},
 		{"zh unsubscribe url", "验证", "x", []mailparse.Link{{URL: "https://example.com/verify/退订", Text: "验证"}}, ""},
+		{"verify button on a tracking link", "Welcome", "Verify", []mailparse.Link{
+			{URL: "https://u1.ct.sendgrid.net/ls/click?upn=abc", Text: "Verify", Button: true},
+		}, "https://u1.ct.sendgrid.net/ls/click?upn=abc"},
+		{"button alone is not enough", "Please verify", "x", []mailparse.Link{
+			{URL: "https://example.com/blog/post", Text: "Read more", Button: true},
+		}, ""},
+		{"click here after a pointing line", "Welcome", "Please verify your email by clicking the link below.", []mailparse.Link{
+			{URL: "https://example.com/account/email?k=8d1f", Text: "Click here", Before: "Please verify your email by clicking the link below.\n"},
+		}, "https://example.com/account/email?k=8d1f"},
+		{"click here on the keyword's line", "Welcome", "To verify your email, click here", []mailparse.Link{
+			{URL: "https://example.com/a/b", Text: "click here.", Before: "Hi\nTo verify your email,"},
+		}, "https://example.com/a/b"},
+		{"click here below an unrelated mention", "Account", "Confirm your settings in your account.", []mailparse.Link{
+			{URL: "https://example.com/blog/october", Text: "Click here", Before: "We shipped dark mode. Confirm your settings in your account.\n"},
+		}, ""},
+		{"bare url after a colon line", "Welcome", "Verify your email:\nhttps://example.com/x/y", []mailparse.Link{
+			{URL: "https://example.com/x/y", Before: "Verify your email:\n"},
+		}, "https://example.com/x/y"},
+		{"gate on link text", "Welcome", "Please use an HTML mail client.", []mailparse.Link{
+			{URL: "https://x.test/l/1", Text: "驗證"},
+		}, "https://x.test/l/1"},
+		{"activation stem", "Welcome", "Activate your account to get started.", []mailparse.Link{
+			{URL: "https://example.com/account/activation?key=Qm9yZWFsaXNEaWdpdGFsQWJj", Text: "Continue"},
+		}, "https://example.com/account/activation?key=Qm9yZWFsaXNEaWdpdGFsQWJj"},
+		{"auth path", "Please sign in", "x", []mailparse.Link{
+			{URL: "https://example.com/auth?t=Zx8_kq2LmN0pQr7sTuVwXy-1", Text: "Open"},
+		}, "https://example.com/auth?t=Zx8_kq2LmN0pQr7sTuVwXy-1"},
+		{"author is not auth", "Account verified", "verify", []mailparse.Link{
+			{URL: "https://example.com/author/jane?ref=Zx8_kq2LmN0pQr7sTuVwXy-1", Text: "Read more", Button: true},
+		}, ""},
+		{"pdf excluded", "Please verify", "x", []mailparse.Link{{URL: "https://example.com/verify/guide.pdf", Text: "Verify"}}, ""},
+		{"contact path excluded", "Please verify", "x", []mailparse.Link{{URL: "https://example.com/contact?x=1", Text: "Verify"}}, ""},
+		{"contact in query kept", "Please verify", "x", []mailparse.Link{
+			{URL: "https://example.com/verify?email=contact%40corp.com", Text: "Verify email"},
+		}, "https://example.com/verify?email=contact%40corp.com"},
+		{"view in browser excluded", "Please verify", "x", []mailparse.Link{
+			{URL: "https://example.com/v/verify-123", Text: "View in browser"},
+			{URL: "https://example.com/verify?t=1", Text: "Verify"},
+		}, "https://example.com/verify?t=1"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
