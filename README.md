@@ -37,6 +37,7 @@ docker logs -f relay
   ```bash
   docker exec -i relay /relay test --eml /dev/stdin < 信件.eml
   ```
+  只想看辨識結果時，用 Web 的「用信件測試」更方便，見「辨識規則」。
 
 ## 部署到 K3s
 
@@ -238,7 +239,7 @@ kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay config i
 | `mailboxes.<名稱>` | `display_name`、`host`、`port`（預設 993）、`username`、`auth`、`folders`（預設 `INBOX`）、`targets`，以及覆寫用的 `max_age`、`ttl`、`poll_interval`、`templates` |
 | `mailboxes.<名稱>.auth` | `{type: password, password: …}`，或 `{type: microsoft_oauth}`（匯入後在 Web 授權）；`client_id`、`tenant` 選填，寫了就覆寫 `microsoft` 的值 |
 | `templates` | 全域範本 `code`、`link`、`both`（見「範本」） |
-| `rules` | 自訂規則（見「辨識不到或辨識錯誤時」） |
+| `rules` | 自訂規則（見「辨識規則」） |
 | `recognize` | `extra_code_keywords`、`extra_link_keywords` |
 
 ## 指令
@@ -253,20 +254,52 @@ kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay config i
 | `relay config validate [檔案]` | 檢查 YAML 設定檔，不寫入資料庫 |
 | `relay admin reset` | 重設管理員密碼並清除 TOTP，登出所有裝置 |
 | `relay login <信箱>` | Microsoft 授權（備援；建議在 Web 上授權），完成後需重新啟動 |
-| `relay test --eml <檔案> [--mailbox <信箱>] [--send <目標>]` | 對 .eml 檔顯示辨識過程與訊息；Gmail 網頁版「下載郵件」即可取得 .eml |
+| `relay test --eml <檔案> [--mailbox <信箱>] [--send <目標>]` | 對 .eml 檔顯示辨識過程與訊息（與 Web 的「用信件測試」相同的辨識；只有這裡能 `--send` 實際送出）；Gmail 網頁版「下載郵件」即可取得 .eml |
 | `relay send-test <目標>` | 發送測試訊息（Web 的 Telegram 頁也有「發送測試」） |
 | `relay healthcheck` | 檢查 `:8081/readyz`（映像的 `HEALTHCHECK` 使用） |
 
 `import`、`validate` 的檔案也可以用 `--config` 或環境變數 `RELAY_CONFIG` 指定。其他指令一律讀取資料庫中的設定；設定在 Web 存檔即生效，不需要重新啟動。
 
-## 辨識不到或辨識錯誤時
+## 辨識規則
 
-1. 下載該信的 `.eml`，執行 `relay test --eml 信件.eml`（K3s／Docker 的寫法見上面「測試 .eml」），看「辨識過程」。
-2. 缺關鍵字：在 **規則與範本 → 辨識規則** 的「辨識關鍵字」加入驗證碼或連結的關鍵字。
+### 內建辨識怎麼運作
+
+- **內文來源**：以 HTML 版內文為主；HTML 版辨識不到時，才改用純文字版再辨識一次（有些信的 HTML 版才有粗體的驗證碼，也有些信的純文字版才有完整說明）。
+- **驗證碼**：數字前後出現「驗證碼」「this code」「code below」「PIN is」「one-time PIN」「動態密碼」「安全性代碼」等關鍵字時會被辨識，粗體、大字或字距加寬的文字加分。單獨的「PIN」與「the code」不算關鍵字（常見於「忘記 PIN 請來電」或優惠碼）；只寫「PIN: 4821」的信請自行加關鍵字。
+  - 主旨中的數字，若也獨佔內文一行（例如主旨「Use 123456 to set up recovery email」，內文另起一行寫 `123456`），即使附近沒有「驗證碼」等字樣也會被當成驗證碼；1900～2099 的年份，以及主旨提到訂單、發票、出貨、付款、訂房、案件、帳號等（order、invoice、payment、booking、case、account …）時除外。
+  - 純英文字母的驗證碼（5～8 個大寫字母）只在緊接「code: / code is / 驗證碼：」等字樣、且獨佔一行或本身就是一段粗體時辨識（標題「YOUR CODE IS READY」裡的 READY 不算）。
+- **連結**：關鍵字（驗證、確認、登入、重設密碼、verify、confirm、sign in …）可以出現在主旨、內文，或任何一個連結的文字。
+  - 按鈕只寫「驗證」「验证」「Verify」等字樣，或按鈕是圖片（取圖片的替代文字）時，也會辨識。
+  - 「Click here」「點此」這類泛用的連結文字，只有在同一行說明用途（「To verify your email, click here」），或上一行說明用途並指向下文（含 below、link、以下、下方，或以冒號結尾）時才採用；純文字信裡的裸網址同樣處理。這裡的英文關鍵字要完整成字（「confirmation」不算「confirm」），而且前文或主旨提到訂單、收據、付款、出貨（order、receipt、payment、訂單、付款 …）時不採用，以免轉發「Order confirmation:」下面的訂單頁。
+  - 網址中的 `activation`、`validation`、`verify`、`token=` 等字樣也有加分。
+- **會排除**：
+  - 卡號末碼（末四碼、尾號、ending in、last 4 …）、郵遞區號（郵遞區號、邮编、zip、postal 與美國 `CA 94043`）、地址門牌（`1600 Main St`、`100 號`），以及電話、金額、時間、年份、訂單編號。
+  - 優惠碼：同一行或上一行提到 promo、coupon、discount、voucher、checkout、% off、優惠、折扣、折價的碼（例如「Use this code SAVE20 at checkout」）。
+  - 電子報常見連結：取消訂閱、在瀏覽器中檢視、聯絡我們、contact（只看連結文字與網址路徑），以及圖片、`.pdf`、`.css`、`.js` 等靜態檔案。這些連結的文字也不會讓信件通過「含連結關鍵字」的檢查。
+  - 一封信最多看 500 個不同的連結。
+
+### 辨識不到或辨識錯誤時
+
+1. 到 **規則與範本 → 辨識規則**，用頁面下方的「用信件測試」上傳那封信，看「辨識過程」（見下節）。也可以用命令列 `relay test --eml 信件.eml`（K3s／Docker 的寫法見上面「測試 .eml」），兩者的辨識過程相同。
+2. 缺關鍵字：在同一頁的「辨識關鍵字」加入驗證碼或連結的關鍵字。
 3. 特定寄件者格式特殊：在同一頁的「自訂規則」新增規則（比對寄件者、主旨，指定驗證碼或連結的正規表示式），或把處理方式設為「略過，不轉發」。
    - 驗證碼的正規表示式：對「主旨＋換行＋內文」比對；有擷取群組時取第一個有值的群組，沒有群組時取整段比對結果。
    - 連結的正規表示式：用來**挑選**連結，不是擷取網址的一部分。只要某個連結的網址符合，就轉發該連結的完整網址。
-4. 存檔即生效；再寄一次或用 `relay test --eml` 確認。
+4. 存檔即生效；再寄一次或用「用信件測試」確認。
+
+### 用信件測試
+
+在 **規則與範本 → 辨識規則** 頁最下方：
+
+- 上傳 `.eml`（也可以把檔案拖放到框內），或切換到「貼上原始碼」貼上信件原始碼。取得方式：
+  - Gmail：信件右上「⋮」→「下載郵件」得到 `.eml`；或「顯示原始郵件」→「複製到剪貼簿」後貼上（不要全選整頁，頁首的摘要表格會破壞格式）。
+  - Outlook：「⋯」→「檢視」→「檢視訊息原始碼」，複製後貼上。
+- 使用**本頁目前填寫**的自訂規則與關鍵字，尚未儲存也會套用，所以可以先調整、測試，滿意再存檔。
+- 「預覽訊息使用的信箱」可選填：不指定時用全域範本；選擇信箱則使用該信箱的範本與顯示名稱。
+- 結果包含：結論（轉發驗證碼／轉發連結／被規則略過／不轉發）、驗證碼或連結、Telegram 訊息預覽、辨識過程（每個候選的分數與排除原因）、信件摘要（寄件者、主旨、內文前 500 字、連結清單）。
+- 信件只在記憶體中處理：不會儲存、不會發送到 Telegram、不會寫進日誌。上限 5 MiB（與實際運作時略過的上限相同；超過時頁面直接提示，不會上傳）。需要啟用 JavaScript。
+
+命令列 `relay test --eml` 仍可使用，並與網頁共用同一套辨識與渲染；只有它能用 `--send` 實際送出到 Telegram。
 
 ## 範本
 
@@ -306,4 +339,5 @@ RELAY_DATA_DIR=./data RELAY_ADMIN_PASSWORD='change-me-at-least-12-chars' ./relay
 - [ ] 連續寄兩封測試信（間隔一兩秒），兩封都應立即轉發，不會有一封延遲到 25 分鐘後才到（確認伺服器在 IDLE 開始時會回報先前到達的信）。
 - [ ] 落入垃圾郵件匣的驗證信也會轉發（Gmail 需在信箱的資料夾勾選 `[Gmail]/Spam`，並在標籤設定勾選「在 IMAP 中顯示」）。
 - [ ] 備援的命令列授權：`kubectl exec -it … /relay login <信箱>` 授權成功，重新啟動後仍有效。
+- [ ] 在 **規則與範本 → 辨識規則** 的「用信件測試」上傳一封真實驗證信（`.eml` 與貼上原始碼各試一次），結果與 Telegram 預覽符合預期。
 - [ ] `relay test --eml 信件.eml --send <目標>` 實際送出，Telegram 收到的訊息格式與按鈕（複製驗證碼、開啟連結）正常。

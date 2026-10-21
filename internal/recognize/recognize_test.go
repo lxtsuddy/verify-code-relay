@@ -1,6 +1,8 @@
 package recognize
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 
 	"verify-code-relay/internal/mailparse"
@@ -61,4 +63,65 @@ func TestServiceName(t *testing.T) {
 			t.Errorf("ServiceName(%+v) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+// textStage finds a result when the message text contains want, recording each text it saw.
+type textStage struct {
+	want string
+	seen *[]string
+}
+
+func (s textStage) Run(msg *mailparse.Message, _ *Trace) (*Result, bool) {
+	*s.seen = append(*s.seen, msg.Text)
+	if strings.Contains(msg.Text, s.want) {
+		return &Result{Code: "1"}, false
+	}
+	return nil, false
+}
+
+func TestChainSecondRoundUsesAltText(t *testing.T) {
+	var seen []string
+	c := NewChain(textStage{want: "PLAIN", seen: &seen})
+	msg := &mailparse.Message{Text: "html", AltText: "PLAIN", Emphasis: []mailparse.Span{{Start: 0, End: 4}}}
+	res, _, tr := c.Recognize(msg)
+	if res == nil || !reflect.DeepEqual(seen, []string{"html", "PLAIN"}) {
+		t.Fatalf("res=%+v seen=%q", res, seen)
+	}
+	steps := strings.Join(tr.Steps, "\n")
+	if !strings.Contains(steps, "第一輪：HTML 內文") || !strings.Contains(steps, "第二輪：純文字內文") {
+		t.Fatalf("trace = %q", tr.Steps)
+	}
+	if msg.Text != "html" || msg.AltText != "PLAIN" || len(msg.Emphasis) != 1 {
+		t.Fatalf("message was modified: %+v", msg)
+	}
+}
+
+func TestChainNoSecondRound(t *testing.T) {
+	var seen []string
+	c := NewChain(textStage{want: "html", seen: &seen})
+	if res, _, _ := c.Recognize(&mailparse.Message{Text: "html", AltText: "PLAIN"}); res == nil || len(seen) != 1 {
+		t.Fatalf("first-round result: res=%+v seen=%q", res, seen)
+	}
+	seen = nil
+	res, _, tr := c.Recognize(&mailparse.Message{Text: "nothing"})
+	if res != nil || len(seen) != 1 || strings.Contains(strings.Join(tr.Steps, "\n"), "第一輪") {
+		t.Fatalf("no AltText: res=%+v seen=%q trace=%q", res, seen, tr.Steps)
+	}
+}
+
+func TestChainSecondRoundSeesNoEmphasis(t *testing.T) {
+	var got []mailparse.Span
+	stage := stageFunc(func(msg *mailparse.Message) { got = msg.Emphasis })
+	NewChain(stage).Recognize(&mailparse.Message{Text: "a", AltText: "b", Emphasis: []mailparse.Span{{Start: 0, End: 1}}})
+	if got != nil {
+		t.Fatalf("second round emphasis = %v", got)
+	}
+}
+
+// stageFunc calls f with every message it is run on and finds nothing.
+type stageFunc func(msg *mailparse.Message)
+
+func (f stageFunc) Run(msg *mailparse.Message, _ *Trace) (*Result, bool) {
+	f(msg)
+	return nil, false
 }

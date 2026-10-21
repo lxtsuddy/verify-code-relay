@@ -20,7 +20,7 @@ var authedPosts = []string{
 	"/api/telegram/getme", "/api/telegram/chats",
 	"/mailboxes/new", "/mailboxes/gmail", "/mailboxes/gmail/delete", "/api/mailboxes/probe",
 	"/api/mailboxes/gmail/oauth/start",
-	"/rules", "/templates", "/api/templates/preview",
+	"/rules", "/templates", "/api/templates/preview", "/api/rules/test",
 }
 
 func TestRoutesRequireLogin(t *testing.T) {

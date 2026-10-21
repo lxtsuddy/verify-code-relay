@@ -38,22 +38,36 @@ type Chain struct{ stages []Stage }
 
 func NewChain(stages ...Stage) *Chain { return &Chain{stages: stages} }
 
+// Recognize runs the stages on the message; when none finds anything and the message
+// has a second body (AltText), it runs them again on a copy reading that body instead.
 func (c *Chain) Recognize(msg *mailparse.Message) (*Result, bool, *Trace) {
 	tr := &Trace{}
-	for _, s := range c.stages {
-		res, ignore := s.Run(msg, tr)
-		if res != nil {
-			cp := *res // the stage may reuse its Result; never modify it
-			res = &cp
+	rounds := []*mailparse.Message{msg}
+	if msg.AltText != "" {
+		alt := *msg
+		alt.Text, alt.AltText, alt.Emphasis = msg.AltText, "", nil
+		rounds = append(rounds, &alt)
+		tr.Addf("第一輪：HTML 內文")
+	}
+	for i, m := range rounds {
+		if i == 1 {
+			tr.Addf("第二輪：純文字內文")
 		}
-		if ignore {
-			return res, true, tr
-		}
-		if res != nil {
-			if res.Service == "" {
-				res.Service = ServiceName(msg.From)
+		for _, s := range c.stages {
+			res, ignore := s.Run(m, tr)
+			if res != nil {
+				cp := *res // the stage may reuse its Result; never modify it
+				res = &cp
 			}
-			return res, false, tr
+			if ignore {
+				return res, true, tr
+			}
+			if res != nil {
+				if res.Service == "" {
+					res.Service = ServiceName(msg.From)
+				}
+				return res, false, tr
+			}
 		}
 	}
 	tr.Addf("結果：不符合任何規則")

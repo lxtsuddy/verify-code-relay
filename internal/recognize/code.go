@@ -2,6 +2,7 @@ package recognize
 
 import (
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,16 +14,21 @@ import (
 var defaultCodeKeywords = []string{
 	"驗證碼", "验证码", "校驗碼", "校验码", "動態碼", "动态码", "確認碼", "确认码", "安全碼", "安全码",
 	"認證碼", "认证码", "一次性密碼", "一次性密码", "登入碼", "登录码",
+	"安全性代碼", "驗證代碼", "验证代码", "動態密碼", "动态密码",
 	"verification code", "security code", "confirmation code", "authentication code", "login code",
 	"sign-in code", "one-time code", "one-time password", "otp", "passcode", "2fa", "two-factor",
-	"your code", "code is",
-	"認証コード", "確認コード", "ワンタイムパスワード",
+	"your code", "code is", "this code", "use this code", "enter this code", "code below",
+	"following code", "temporary code", "pin code", "pin is", "one-time pin", "temporary pin", "security pin",
+	"認証コード", "確認コード", "セキュリティコード", "ワンタイムパスワード",
 }
 
 var (
-	digitsRe   = regexp.MustCompile(`\b\d{4,8}\b`)
-	splitRe    = regexp.MustCompile(`\b\d{3}[ -]\d{3}\b`)
-	alnumRe    = regexp.MustCompile(`\b[A-Z0-9]{4,8}\b`)
+	digitsRe = regexp.MustCompile(`\b\d{4,8}\b`)
+	splitRe  = regexp.MustCompile(`\b\d{3}[ -]\d{3}\b`)
+	alnumRe  = regexp.MustCompile(`\b[A-Z0-9]{4,8}\b`)
+	// alphaRe finds letter-only codes; they are candidates only right after a keyword and
+	// alone on their line or emphasised on their own (see find), as plain words look the same.
+	alphaRe    = regexp.MustCompile(`\b[A-Z]{5,8}\b`)
 	urlLikeRe  = regexp.MustCompile(`(?i)(https?://|www\.)\S+`)
 	emailRe    = regexp.MustCompile(`[\w.+-]+@[\w-]+(\.[\w-]+)+`)
 	monthRe    = regexp.MustCompile(`(?i)\b(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|june?|july?|aug(ust)?|sep(t(ember)?)?|oct(ober)?|nov(ember)?|dec(ember)?)\b|\bmay\s+\d|\d\s+may\b`)
@@ -33,9 +39,96 @@ var (
 	orderWords = toRuneKeywords([]string{"訂單", "订单", "order", "invoice", "#"})
 )
 
+var (
+	// cardWords and zipWords are matched in the lower-cased text just before a candidate,
+	// white space collapsed to one space: card numbers ("ending in 4821") and postcodes
+	// are not codes.
+	cardWords = []string{"末四碼", "末4碼", "末四码", "末4码", "尾號", "尾号", "ending in", "ends in", "last 4", "last4", "last four"}
+	zipWords  = []string{"郵遞區號", "郵政編碼", "邮编", "邮政编码", "zip", "postal", "postcode"}
+	// promoWords on a candidate's line or the nearest non-blank line above it make it a
+	// coupon ("Use this code SAVE20 at checkout"); English words match whole (see containsWord).
+	promoWords = []string{"promo", "promos", "coupon", "coupons", "discount", "discounts", "voucher", "vouchers",
+		"checkout", "% off", "優惠", "折扣", "折價", "优惠", "折扣码", "折价"}
+	// streetWords after a number make it a house number ("1600 Amphitheatre Parkway").
+	// Product names ("G Suite") rule out words like suite or floor.
+	streetWords = map[string]bool{"st": true, "street": true, "ave": true, "avenue": true, "rd": true, "road": true,
+		"blvd": true, "boulevard": true, "parkway": true, "pkwy": true}
+	usStates = map[string]bool{}
+)
+
+func init() {
+	for _, s := range strings.Fields("AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY") {
+		usStates[s] = true
+	}
+}
+
+const (
+	// contextRunes is how far before a candidate cardWords and zipWords are looked for;
+	// it covers "last 4 digits 4821".
+	contextRunes = 16
+	// streetScanRunes is how far after a candidate, on its line, a street word is looked for.
+	streetScanRunes = 30
+)
+
+// hasContextWord reports whether s contains one of words; a word starting with an ASCII
+// letter must not follow another ASCII letter ("zip" is not in "unzip").
+func hasContextWord(s string, words []string) bool {
+	for _, w := range words {
+		for i := 0; ; {
+			j := strings.Index(s[i:], w)
+			if j < 0 {
+				break
+			}
+			j += i
+			if !isASCIILetter(rune(w[0])) || j == 0 || !isASCIILetter(rune(s[j-1])) {
+				return true
+			}
+			i = j + 1
+		}
+	}
+	return false
+}
+
+// addressReason returns "地址" when c looks like part of a postal address: a house
+// number (a street word later on its line, or 號/路/街/樓 right after it) or a US ZIP
+// code ("CA 94043").
+func addressReason(c codeCand, t *codeText) string {
+	rs, lower := t.rs, t.lower
+	j := c.end
+	if j < len(rs) && rs[j] == ' ' {
+		j++
+	}
+	if j < len(rs) && strings.ContainsRune("號号路街樓楼", rs[j]) {
+		return "地址"
+	}
+	end := min(len(rs), c.end+streetScanRunes)
+	var word []rune
+	for i := c.end; i <= end; i++ {
+		if i < end && rs[i] != '\n' && isWordRune(lower[i]) {
+			word = append(word, lower[i])
+			continue
+		}
+		// A word running past the window is cut ("Stay" → "st"), not a street word.
+		if (i < end || end == len(rs) || !isWordRune(lower[end])) && streetWords[string(word)] {
+			return "地址"
+		}
+		word = word[:0]
+		if i < end && rs[i] == '\n' {
+			break
+		}
+	}
+	if len(c.value) == 5 && isAllDigits(c.value) && c.start >= 3 && rs[c.start-1] == ' ' &&
+		usStates[string(rs[c.start-3:c.start-1])] && (c.start == 3 || !unicode.IsLetter(rs[c.start-4])) {
+		return "地址"
+	}
+	return ""
+}
+
 const (
 	codeMaxDistance = 200
 	codeThreshold   = 40.0
+	// emphasisBonus is added to the score of a candidate inside an emphasised span.
+	emphasisBonus = 15
 )
 
 type codeFinder struct{ keywords [][]rune }
@@ -75,11 +168,16 @@ type codeText struct {
 	kws       []span // keyword occurrences sorted by start
 	maxKwLen  int
 	blocked   []span // URL and e-mail spans, merged and sorted
+	emph      []span // emphasised spans of the scanned text, merged and sorted
 	yearLine  map[int]bool
+	// body is where the body starts in the scanned text (after Subject+"\n"); the
+	// promo check does not look from the body up into the subject.
+	body      int
+	promoLine map[int]bool // by line index: promoNear's answer
 }
 
 func newCodeText(rs, lower []rune, kws, blocked []span) *codeText {
-	t := &codeText{rs: rs, lower: lower, yearLine: map[int]bool{}}
+	t := &codeText{rs: rs, lower: lower, yearLine: map[int]bool{}, promoLine: map[int]bool{}}
 	for s := 0; ; {
 		e := s
 		for e < len(rs) && rs[e] != '\n' {
@@ -130,10 +228,101 @@ func (t *codeText) dateLine(pos int) bool {
 	return v
 }
 
+// promoNear reports whether the line holding pos, or the nearest non-blank line above
+// it within the same part (subject or body), mentions a promotion (promoWords).
+func (t *codeText) promoNear(pos int) bool {
+	li := t.line(pos)
+	if v, ok := t.promoLine[li]; ok {
+		return v
+	}
+	mentions := func(j int) bool {
+		_, ok := containsAnyWord(string(t.lower[t.lines[j].start:t.lines[j].end]), promoWords)
+		return ok
+	}
+	v := mentions(li)
+	for j := li - 1; !v && j >= 0; j-- {
+		if t.lines[li].start >= t.body && t.lines[j].start < t.body {
+			break
+		}
+		if t.trimmed[j].start < t.trimmed[j].end {
+			v = mentions(j)
+			break
+		}
+	}
+	t.promoLine[li] = v
+	return v
+}
+
 // blockedAt reports whether c overlaps a URL or e-mail address.
 func (t *codeText) blockedAt(c span) bool {
 	i := sort.Search(len(t.blocked), func(i int) bool { return t.blocked[i].end > c.start })
 	return i < len(t.blocked) && t.blocked[i].start < c.end
+}
+
+// emphSpans returns msg.Emphasis as spans of the scanned text (Subject+"\n"+Text, cut to n runes).
+func emphSpans(msg *mailparse.Message, subjLen, n int) []span {
+	var out []span
+	for _, e := range msg.Emphasis {
+		if s, end := e.Start+subjLen+1, min(e.End+subjLen+1, n); s < end {
+			out = append(out, span{s, end})
+		}
+	}
+	return out
+}
+
+// emphasized reports whether c lies inside an emphasised span.
+func (t *codeText) emphasized(c span) bool {
+	i := sort.Search(len(t.emph), func(i int) bool { return t.emph[i].end > c.start })
+	return i < len(t.emph) && t.emph[i].start <= c.start && c.end <= t.emph[i].end
+}
+
+// emphasizedAlone reports whether c is a whole emphasised span (white space aside), as
+// a letter-only code set in bold is; a heading merely containing c does not count.
+func (t *codeText) emphasizedAlone(c span) bool {
+	i := sort.Search(len(t.emph), func(i int) bool { return t.emph[i].end > c.start })
+	if i == len(t.emph) {
+		return false
+	}
+	s, e := t.emph[i].start, t.emph[i].end
+	for s < e && unicode.IsSpace(t.rs[s]) {
+		s++
+	}
+	for e > s && unicode.IsSpace(t.rs[e-1]) {
+		e--
+	}
+	return s == c.start && e == c.end
+}
+
+// keywordEndsAt reports whether a keyword ends exactly at pos.
+func (t *codeText) keywordEndsAt(pos int) bool {
+	i := sort.Search(len(t.kws), func(i int) bool { return t.kws[i].start >= pos-t.maxKwLen })
+	for ; i < len(t.kws) && t.kws[i].start < pos; i++ {
+		if t.kws[i].end == pos {
+			return true
+		}
+	}
+	return false
+}
+
+// afterKeyword reports whether a keyword ends right before pos, with only white space,
+// colons and the words "is", 為, 为, 是 in between ("Your code is: QWERTY").
+func (t *codeText) afterKeyword(pos int) bool {
+	j := pos
+	for {
+		if t.keywordEndsAt(j) {
+			return true
+		}
+		switch {
+		case j == 0:
+			return false
+		case unicode.IsSpace(t.lower[j-1]) || strings.ContainsRune(":：為为是", t.lower[j-1]):
+			j--
+		case j >= 2 && t.lower[j-2] == 'i' && t.lower[j-1] == 's' && (j == 2 || !isASCIILetter(t.lower[j-3])):
+			j -= 2
+		default:
+			return false
+		}
+	}
 }
 
 // mergeSpans returns the union of list as sorted, disjoint spans.
@@ -151,25 +340,98 @@ func mergeSpans(list []span) []span {
 	return out
 }
 
+// commerceWords name orders, payments and deliveries. A subject using one is about a
+// purchase; so is the text before a generic link (see linkFinder.introducesLink).
+var commerceWords = []string{"訂單", "订单", "order", "orders", "invoice", "invoices", "receipt", "receipts",
+	"tracking", "shipment", "shipments", "shipping", "payment", "payments", "purchase", "purchases",
+	"包裹", "物流", "出貨", "出货", "發票", "发票", "付款", "購買", "购买", "繳費"}
+
+// subjectOrderWords in a subject mean its numbers are references, not codes: commerce,
+// bookings, support cases and account or member numbers.
+var subjectOrderWords = toRuneKeywords(append(append([]string{}, commerceWords...),
+	"booking", "bookings", "reservation", "reservations", "ticket", "tickets", "case", "reference", "ref",
+	"account", "member", "flight", "預訂", "訂房", "訂位", "預約", "案件", "編號", "單號", "帳號", "帳戶",
+	"预订", "预约", "账号", "账户"))
+
+// addKeyword adds k to the sorted keyword list.
+func (t *codeText) addKeyword(k span) {
+	i := sort.Search(len(t.kws), func(i int) bool { return t.kws[i].start >= k.start })
+	t.kws = slices.Insert(t.kws, i, k)
+	t.maxKwLen = max(t.maxKwLen, k.end-k.start)
+}
+
+// subjectEcho returns the subject's numbers that also stand alone on a body line, such
+// as "Use 123456 to set up …" over a body line "123456": the number in the subject is
+// then treated as a keyword. digits are the digit runs of the scanned text, by start.
+// Years, excluded numbers and subjects naming an order or shipment never qualify.
+func subjectEcho(t *codeText, digits []span, subjLen int) []span {
+	subjLen = min(subjLen, len(t.rs))
+	for i := 0; i < subjLen; i++ {
+		for _, w := range subjectOrderWords {
+			if i+len(w) <= subjLen && keywordAt(t.lower[:subjLen], w, i) {
+				return nil
+			}
+		}
+	}
+	var out []span
+	var echoed map[string]struct{} // values standing alone on a body line; built on first use
+	for _, s := range digits {
+		if s.start >= subjLen {
+			break
+		}
+		v := string(t.rs[s.start:s.end])
+		// Stricter than excludeReason's year check (no date-line condition) on purpose.
+		if y, _ := strconv.Atoi(v); len(v) == 4 && y >= 1900 && y <= 2099 {
+			continue
+		}
+		if excludeReason(codeCand{s, v, v}, t) != "" {
+			continue
+		}
+		if echoed == nil {
+			echoed = map[string]struct{}{}
+			for _, b := range digits {
+				if b.start <= subjLen || !t.aloneOnLine(b) {
+					continue
+				}
+				bv := string(t.rs[b.start:b.end])
+				if _, ok := echoed[bv]; !ok && excludeReason(codeCand{b, bv, bv}, t) == "" {
+					echoed[bv] = struct{}{}
+				}
+			}
+		}
+		if _, ok := echoed[v]; ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func (f *codeFinder) find(msg *mailparse.Message, tr *Trace) string {
 	rs := scanRunes(msg)
 	full := string(rs)
 	lower := lowerRunes(rs)
 	subjLen := len([]rune(msg.Subject))
+	b2r := byteToRune(full)
+	blocked := append(regexpSpans(urlLikeRe, full, b2r), regexpSpans(emailRe, full, b2r)...)
 	kws := findKeywords(lower, f.keywords)
-	if len(kws) == 0 {
+	t := newCodeText(rs, lower, kws, blocked)
+	t.emph = mergeSpans(emphSpans(msg, subjLen, len(rs)))
+	t.body = subjLen + 1
+	digits := regexpSpans(digitsRe, full, b2r)
+	for _, s := range subjectEcho(t, digits, subjLen) {
+		tr.Addf("驗證碼：主旨的 %s 也獨佔內文一行，視為關鍵字", string(rs[s.start:s.end]))
+		t.addKeyword(s)
+	}
+	if len(t.kws) == 0 {
 		tr.Addf("驗證碼：沒有找到驗證碼關鍵字")
 		return ""
 	}
 	for _, k := range kws {
 		tr.Addf("驗證碼：關鍵字 %q 位於 %d", string(rs[k.start:k.end]), k.start)
 	}
-	b2r := byteToRune(full)
-	blocked := append(regexpSpans(urlLikeRe, full, b2r), regexpSpans(emailRe, full, b2r)...)
-	t := newCodeText(rs, lower, kws, blocked)
 
 	var cands []codeCand
-	for _, sp := range regexpSpans(digitsRe, full, b2r) {
+	for _, sp := range digits {
 		raw := string(rs[sp.start:sp.end])
 		cands = append(cands, codeCand{sp, raw, raw})
 	}
@@ -180,6 +442,12 @@ func (f *codeFinder) find(msg *mailparse.Message, tr *Trace) string {
 	for _, sp := range regexpSpans(alnumRe, full, b2r) {
 		raw := string(rs[sp.start:sp.end])
 		if strings.IndexFunc(raw, unicode.IsDigit) >= 0 && strings.IndexFunc(raw, unicode.IsUpper) >= 0 {
+			cands = append(cands, codeCand{sp, raw, raw})
+		}
+	}
+	for _, sp := range regexpSpans(alphaRe, full, b2r) {
+		if t.afterKeyword(sp.start) && (t.aloneOnLine(sp) || t.emphasizedAlone(sp)) {
+			raw := string(rs[sp.start:sp.end])
 			cands = append(cands, codeCand{sp, raw, raw})
 		}
 	}
@@ -205,6 +473,9 @@ func (f *codeFinder) find(msg *mailparse.Message, tr *Trace) string {
 		}
 		if len(c.value) == 6 && isAllDigits(c.value) {
 			score += 10
+		}
+		if t.emphasized(c.span) {
+			score += emphasisBonus
 		}
 		tr.Addf("  候選 %q：分數 %.1f", c.raw, score)
 		if score > bestScore {
@@ -260,6 +531,9 @@ func isAllDigits(s string) bool {
 }
 
 func isDigit(r rune) bool { return r >= '0' && r <= '9' }
+
+// isWordRune reports whether r is part of an English word (or number) for the street scan.
+func isWordRune(r rune) bool { return isASCIILetter(r) || isDigit(r) }
 
 // phoneSeps are the separators allowed between two digit groups of a phone
 // number. Anything longer, such as " - " or a double space, ends the run.
@@ -348,5 +622,16 @@ func excludeReason(c codeCand, t *codeText) string {
 			}
 		}
 	}
-	return ""
+	if t.promoNear(c.start) {
+		return "優惠碼"
+	}
+	// Spaces are collapsed, not removed, so that hasContextWord can still see word boundaries.
+	ctx := strings.Join(strings.Fields(string(lower[max(0, c.start-contextRunes):c.start])), " ")
+	if hasContextWord(ctx, cardWords) {
+		return "卡號末碼"
+	}
+	if hasContextWord(ctx, zipWords) {
+		return "郵遞區號"
+	}
+	return addressReason(c, t)
 }

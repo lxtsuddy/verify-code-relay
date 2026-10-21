@@ -1,0 +1,20 @@
+From: Example <security@example.com>
+To: me@gmail.com
+Subject: Your Example account
+Date: Mon, 19 Oct 2026 08:00:00 +0800
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="BOUNDARY"
+
+--BOUNDARY
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+VGhpcyBtZXNzYWdlIHJlcXVpcmVzIGFuIEhUTUwtY2FwYWJsZSBlbWFpbCBjbGllbnQuCg==
+--BOUNDARY
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PHA+WW91ciBzaWduLWluIGNvZGU8L3A+PHA+PHN0cm9uZyBzdHlsZT0iZm9udC1zaXplOjI4cHg7
+bGV0dGVyLXNwYWNpbmc6NnB4Ij40MDgyMTc8L3N0cm9uZz48L3A+PHA+SXQgZXhwaXJlcyBpbiAx
+MCBtaW51dGVzLjwvcD4=
+--BOUNDARY--

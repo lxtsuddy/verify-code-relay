@@ -7,9 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"verify-code-relay/internal/mailparse"
 	"verify-code-relay/internal/pipeline"
-	"verify-code-relay/internal/render"
 	"verify-code-relay/internal/telegram"
 )
 
@@ -31,10 +29,6 @@ func cmdTest(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, err)
 	}
-	msg, err := mailparse.Parse(raw)
-	if err != nil {
-		return fail(stderr, fmt.Errorf("解析信件：%w", err))
-	}
 	displayName, username := "（測試）", ""
 	if *mailbox != "" {
 		m, ok := a.Config.Mailboxes[*mailbox]
@@ -44,41 +38,43 @@ func cmdTest(args []string, stdout, stderr io.Writer) int {
 		displayName, username = m.DisplayName, m.Username
 	}
 
+	t, err := pipeline.RunTrial(raw, a.Recognizer, a.Renderer, pipeline.Mailbox{Name: *mailbox, DisplayName: displayName, Username: username})
+	if t == nil {
+		return fail(stderr, err)
+	}
+	msg := t.Msg
 	fmt.Fprintf(stdout, "寄件者：%s <%s>\n主旨：%s\n", msg.From.Name, msg.From.Addr, msg.Subject)
 	for _, w := range msg.Warnings {
 		fmt.Fprintf(stdout, "警告：%s\n", w)
 	}
-	fmt.Fprintf(stdout, "── 內文（純文字，前 500 字）──\n%s\n", truncateRunes(msg.Text, 500))
+	fmt.Fprintf(stdout, "── 內文（前 500 字）──\n%s\n", truncateRunes(msg.Text, 500))
 	fmt.Fprintf(stdout, "── 連結 %d 個 ──\n", len(msg.Links))
 	for _, l := range msg.Links {
 		fmt.Fprintf(stdout, "  %s  [%s]\n", l.URL, l.Text)
 	}
-	res, ignore, tr := a.Recognizer.Recognize(msg)
 	fmt.Fprintln(stdout, "── 辨識過程 ──")
-	for _, s := range tr.Steps {
+	for _, s := range t.Trace.Steps {
 		fmt.Fprintln(stdout, "  "+s)
 	}
 	fmt.Fprintln(stdout, "── 結果 ──")
-	switch {
-	case ignore:
+	switch t.Kind {
+	case "ignored":
 		rule := ""
-		if res != nil {
-			rule = res.Rule
+		if t.Result != nil {
+			rule = t.Result.Rule
 		}
 		fmt.Fprintf(stdout, "被規則 %s 明確略過，不轉發\n", rule)
 		return 0
-	case res == nil:
+	case "none":
 		fmt.Fprintln(stdout, "不符合任何規則，不轉發")
 		return 0
 	}
+	res := t.Result
 	fmt.Fprintf(stdout, "規則：%s\n驗證碼：%s\n連結：%s\n服務：%s\n", res.Rule, res.Code, res.URL, res.Service)
-
-	out, err := a.Renderer.Render(*mailbox, render.Data{Code: res.Code, URL: res.URL, Service: res.Service,
-		FromName: msg.From.Name, FromAddr: msg.From.Addr, To: pipeline.Recipient(msg.To, username),
-		Subject: msg.Subject, Mailbox: displayName, Rule: res.Rule, Date: msg.Date})
 	if err != nil {
 		return fail(stderr, err)
 	}
+	out := t.Output
 	fmt.Fprintf(stdout, "── Telegram 訊息 ──\n%s\n── 按鈕 ──\n%s\n", out.Text, out.ReplyMarkup)
 
 	if *sendTo != "" {

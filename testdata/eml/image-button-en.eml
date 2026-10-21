@@ -1,0 +1,13 @@
+From: Example <hello@example.com>
+To: me@gmail.com
+Subject: One more step
+Date: Mon, 19 Oct 2026 08:00:00 +0800
+MIME-Version: 1.0
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PHA+VGhhbmtzIGZvciBzaWduaW5nIHVwISBQbGVhc2UgY29uZmlybSB5b3VyIGVtYWlsIGFkZHJl
+c3MuPC9wPjxhIGhyZWY9Imh0dHBzOi8vdC5leGFtcGxlLmNvbS9yLzQyIj48aW1nIHNyYz0iaHR0
+cHM6Ly9jZG4uZXhhbXBsZS5jb20vYnRuLXZlcmlmeS5wbmciIGFsdD0iVmVyaWZ5IGVtYWlsIj48
+L2E+PHA+PGEgaHJlZj0iaHR0cHM6Ly9leGFtcGxlLmNvbS91bnN1YnNjcmliZSI+VW5zdWJzY3Jp
+YmU8L2E+PC9wPg==

@@ -1,9 +1,11 @@
 package mailparse
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestHTMLToText(t *testing.T) {
@@ -27,7 +29,7 @@ func TestHTMLToText(t *testing.T) {
 			t.Errorf("text missing %q:\n%s", want, text)
 		}
 	}
-	wantLinks := []Link{{URL: "https://example.com/verify?t=abc", Text: "Verify email"}}
+	wantLinks := []Link{{URL: "https://example.com/verify?t=abc", Text: "Verify email", Before: "c\n"}}
 	if !reflect.DeepEqual(links, wantLinks) {
 		t.Errorf("links = %+v", links)
 	}
@@ -76,5 +78,215 @@ func TestExtractURLsFullWidthPunctuation(t *testing.T) {
 	want := []string{"https://a.com/x", "https://b.com/y", "https://c.com/z", "https://d.com/w", "https://e.com/v", "https://f.com/u"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %q", got)
+	}
+}
+
+// normalizeLinesRef is normalizeLines as it was before it tracked positions: the
+// position-tracking version must produce exactly the same text.
+func normalizeLinesRef(s string, verbatim []span) string {
+	lines := strings.Split(s, "\n")
+	out := make([]string, 0, len(lines))
+	blank := true
+	off := 0
+	for _, l := range lines {
+		start, end := off, off+len(l)
+		off = end + 1
+		for len(verbatim) > 0 && verbatim[0].end <= start {
+			verbatim = verbatim[1:]
+		}
+		if len(verbatim) > 0 && verbatim[0].start < end {
+			l = strings.TrimRight(l, " \t\r\f\v")
+		} else {
+			l = strings.TrimSpace(spaceRun.ReplaceAllString(l, " "))
+		}
+		if l == "" {
+			if !blank {
+				out = append(out, "")
+			}
+			blank = true
+			continue
+		}
+		out = append(out, l)
+		blank = false
+	}
+	return strings.TrimRight(strings.Join(out, "\n"), "\n")
+}
+
+func TestNormalizeLinesMapMatchesReference(t *testing.T) {
+	cases := []struct {
+		s        string
+		verbatim []span
+	}{
+		{"", nil},
+		{"  a   b  \n\n\n c\t\td \n", nil},
+		{"　全形空白　\n nbsp ", nil},
+		{"a\u0085\nb ", nil},
+		{"bad \xff byte\n\xef\xbf\xbd ok", nil},
+		{"x\n  keep   inner  \ny", []span{{2, 20}}},
+		{"\n\n\nlead\n\n\ntrail\n\n\n", nil},
+		{"中文  字\t\t間\n第二行", nil},
+		{"\u3000 a \u00a0 \n\t b\v\f\r", nil},
+		{"pre\n\t  x \t\n\n  y\nz  ", []span{{4, 16}}},
+	}
+	for _, c := range cases {
+		want := normalizeLinesRef(c.s, c.verbatim)
+		if got := normalizeLines(c.s, c.verbatim); got != want {
+			t.Errorf("normalizeLines(%q) = %q, want %q", c.s, got, want)
+		}
+		got, pos := normalizeLinesMap(c.s, c.verbatim)
+		if got != want {
+			t.Errorf("normalizeLinesMap(%q) = %q, want %q", c.s, got, want)
+		}
+		if len(pos) != len(c.s)+1 {
+			t.Fatalf("len(pos) = %d, want %d", len(pos), len(c.s)+1)
+		}
+		for i := 1; i < len(pos); i++ {
+			if pos[i] < pos[i-1] || int(pos[i]) > len(got) {
+				t.Fatalf("pos not monotonic within [0,%d]: %v", len(got), pos)
+			}
+		}
+	}
+}
+
+func TestNormalizeLinesMapPositions(t *testing.T) {
+	// "a b\n\nc": a collapsed run maps to its single space, dropped bytes to the next kept one.
+	text, pos := normalizeLinesMap("a  b\n\n c", nil)
+	if want := []int32{0, 1, 2, 2, 5, 5, 5, 5, 6}; text != "a b\n\nc" || !reflect.DeepEqual(pos, want) {
+		t.Errorf("got %q %v, want %v", text, pos, want)
+	}
+}
+
+func TestRenderHTMLEmphasis(t *testing.T) {
+	cases := []struct {
+		src, text string
+		want      []Span
+	}{
+		{`<p>Your code is <b>123456</b></p>`, "Your code is 123456", []Span{{13, 19}}},
+		{`<p>您的驗證碼為 <strong>482913</strong>。</p>`, "您的驗證碼為 482913。", []Span{{7, 13}}},
+		{`<p>a    b <b>  777777  </b> c</p>`, "a b 777777 c", []Span{{4, 10}}},
+		{`<div style="font-size: 28px">654321</div>`, "654321", []Span{{0, 6}}},
+		{`<table><tr><td style="color:#333;letter-spacing:6px">ABCDEF</td></tr></table>`, "ABCDEF", []Span{{0, 6}}},
+		{`<span style="font-size:12px">111111</span>`, "111111", nil},
+		{`<span style="font-size:1.5em">2</span><span style="font-size:16pt">3</span>`, "23", []Span{{0, 1}, {1, 2}}},
+		{`<p>x</p><h2>
+  Code
+</h2>`, "x\n\nCode", []Span{{3, 7}}},
+		{`<b>   </b>tail`, "tail", nil},
+	}
+	for _, c := range cases {
+		text, _, emph := renderHTML(c.src)
+		if text != c.text {
+			t.Errorf("renderHTML(%q) text = %q, want %q", c.src, text, c.text)
+		}
+		if !reflect.DeepEqual(emph, c.want) {
+			t.Errorf("renderHTML(%q) emphasis = %v, want %v", c.src, emph, c.want)
+		}
+	}
+}
+
+func TestRenderHTMLLinkDetails(t *testing.T) {
+	cases := []struct {
+		name, src string
+		want      Link
+	}{
+		{"image alt", `<a href="https://x.test/a"><img src="b.png" alt=" Verify  email "></a>`,
+			Link{URL: "https://x.test/a", Text: "Verify email", Before: "\n"}},
+		{"text beats alt", `<a href="https://x.test/a">Go <img alt="Verify"></a>`,
+			Link{URL: "https://x.test/a", Text: "Go", Before: "\n"}},
+		{"bg on a", `<a href="https://x.test/v" style="background-color:#1a73e8;color:#fff">Verify</a>`,
+			Link{URL: "https://x.test/v", Text: "Verify", Button: true, Before: "\n"}},
+		{"padding on a", `<a href="https://x.test/v" style="padding:12px 24px">Go</a>`,
+			Link{URL: "https://x.test/v", Text: "Go", Button: true, Before: "\n"}},
+		{"class btn", `<a class="btn btn-primary" href="https://x.test/v">Go</a>`,
+			Link{URL: "https://x.test/v", Text: "Go", Button: true, Before: "\n"}},
+		{"bgcolor parent td", `<table><tr><td bgcolor="#1a73e8"><a href="https://x.test/v">Verify</a></td></tr></table>`,
+			Link{URL: "https://x.test/v", Text: "Verify", Button: true, Before: "\n"}},
+		{"white parent is not a button", `<table><tr><td style="background:#FFFFFF"><a href="https://x.test/v">Verify</a></td></tr></table>`,
+			Link{URL: "https://x.test/v", Text: "Verify", Before: "\n"}},
+		{"padding on parent is not a button", `<table><tr><td style="padding:10px"><a href="https://x.test/v">Go</a></td></tr></table>`,
+			Link{URL: "https://x.test/v", Text: "Go", Before: "\n"}},
+		{"parent with text is not a button", `<p style="background:#00f">Read <a href="https://x.test/v">more</a></p>`,
+			Link{URL: "https://x.test/v", Text: "more", Before: "\nRead"}},
+		{"styled only child", `<a href="https://x.test/v"><span style="background:#e00;padding:8px">Verify</span></a>`,
+			Link{URL: "https://x.test/v", Text: "Verify", Button: true, Before: "\n"}},
+		{"before: previous non-blank line", `<p>Please verify your email by clicking the link below.</p><p><a href="https://x.test/v">Click here</a></p>`,
+			Link{URL: "https://x.test/v", Text: "Click here", Before: "Please verify your email by clicking the link below.\n"}},
+		{"before: same line", `<p>Thanks.</p><p>To finish,   <a href="https://x.test/v">click here</a></p>`,
+			Link{URL: "https://x.test/v", Text: "click here", Before: "Thanks.\nTo finish,"}},
+		{"before: empty link ending its line", `<p>Intro</p><p>To verify, open <a href="https://x.test/v"></a></p><p>Thanks</p>`,
+			Link{URL: "https://x.test/v", Before: "Intro\nTo verify, open"}},
+		{"before: empty link alone on its line", `<p>To verify, open:</p><p><a href="https://x.test/v"> </a></p><p>Thanks</p>`,
+			Link{URL: "https://x.test/v", Before: "To verify, open:\n"}},
+		{"before: empty link ending a <pre> line", `<pre>Verify at <a href="https://x.test/v"></a>
+next</pre>`,
+			Link{URL: "https://x.test/v", Before: "\nVerify at"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, links, _ := renderHTML(c.src)
+			if len(links) != 1 || links[0] != c.want {
+				t.Errorf("links = %+v, want [%+v]", links, c.want)
+			}
+		})
+	}
+}
+
+func TestRenderHTMLDuplicateLinks(t *testing.T) {
+	_, links, _ := renderHTML(`<p>First <a href="https://x.test/v"><img src="a.png"></a></p>` +
+		`<p>Second <a href="https://x.test/v" class="btn">Verify</a> <a href="https://x.test/w">Other</a></p>`)
+	want := []Link{
+		{URL: "https://x.test/v", Text: "Verify", Before: "\nFirst"},
+		{URL: "https://x.test/w", Text: "Other", Before: "First\nSecond Verify"},
+	}
+	if !reflect.DeepEqual(links, want) {
+		t.Errorf("links = %+v, want %+v", links, want)
+	}
+}
+
+func TestLinksAreCapped(t *testing.T) {
+	var plain, page strings.Builder
+	for i := 0; i < maxLinks+100; i++ {
+		fmt.Fprintf(&plain, "https://x.test/%d\n", i)
+		fmt.Fprintf(&page, `<a href="https://y.test/%d">%d</a>`, i, i)
+	}
+	if got := len(bareLinks(plain.String())); got != maxLinks {
+		t.Errorf("bareLinks kept %d, want %d", got, maxLinks)
+	}
+	if _, links, _ := renderHTML(page.String()); len(links) != maxLinks {
+		t.Errorf("renderHTML kept %d links, want %d", len(links), maxLinks)
+	}
+	var both []Link
+	for i := 0; i < maxLinks; i++ {
+		both = append(both, Link{URL: fmt.Sprintf("https://z.test/%d", i)})
+	}
+	if got := len(mergeLinks(both, bareLinks(plain.String()))); got != maxLinks {
+		t.Errorf("mergeLinks kept %d, want %d", got, maxLinks)
+	}
+}
+
+func TestBareLinksDuplicateKeepsFirst(t *testing.T) {
+	got := bareLinks("Verify here:\nhttps://x.test/v\nor again https://x.test/v")
+	if want := []Link{{URL: "https://x.test/v", Before: "Verify here:\n"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestTextBeforeWindowStartsOnARune(t *testing.T) {
+	// Whatever the window size, some line lengths put its edge inside a rune of the line above.
+	prev := "x" + strings.Repeat("驗", 2000) + "\n"
+	for n := 700; n < 4200; n++ {
+		text := prev + strings.Repeat("a", n)
+		if got := textBefore(text, len(text)); strings.ContainsRune(got, utf8.RuneError) {
+			t.Fatalf("textBefore split a rune (line of %d bytes): %q", n, got)
+		}
+	}
+}
+
+func TestTextBeforeCutsTo120Runes(t *testing.T) {
+	long := strings.Repeat("驗", 200)
+	got := textBefore(long+"\n\n"+long+" x", len(long)*2+2+len(" x"))
+	prev, cur, _ := strings.Cut(got, "\n")
+	if utf8.RuneCountInString(prev) != 120 || utf8.RuneCountInString(cur) != 120 {
+		t.Fatalf("prev %d runes, cur %d runes", utf8.RuneCountInString(prev), utf8.RuneCountInString(cur))
 	}
 }

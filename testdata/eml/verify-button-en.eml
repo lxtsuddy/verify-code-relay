@@ -1,0 +1,22 @@
+From: Example <hello@example.com>
+To: me@gmail.com
+Subject: Welcome to Example
+Date: Mon, 19 Oct 2026 08:00:00 +0800
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="BOUNDARY"
+
+--BOUNDARY
+Content-Type: text/plain; charset=utf-8
+Content-Transfer-Encoding: base64
+
+V2VsY29tZSB0byBFeGFtcGxlISBPcGVuIHRoaXMgZW1haWwgaW4gYW4gSFRNTC1jYXBhYmxlIGNs
+aWVudCB0byBjb250aW51ZS4K
+--BOUNDARY
+Content-Type: text/html; charset=utf-8
+Content-Transfer-Encoding: base64
+
+PGgxPldlbGNvbWUgdG8gRXhhbXBsZSE8L2gxPjxwPjxhIGhyZWY9Imh0dHBzOi8vbGlua3MuZXhh
+bXBsZS5uZXQvbHMvY2xpY2s/dXBuPVZmWThhMiIgc3R5bGU9ImJhY2tncm91bmQtY29sb3I6IzEx
+MTtjb2xvcjojZmZmO3BhZGRpbmc6MTJweCAyMHB4Ij5WZXJpZnk8L2E+PC9wPjxwPjxhIGhyZWY9
+Imh0dHBzOi8vZXhhbXBsZS5jb20vcHJpdmFjeSI+UHJpdmFjeTwvYT48L3A+
+--BOUNDARY--

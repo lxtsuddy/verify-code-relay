@@ -127,4 +127,83 @@ write("activate-link-zh-tw-big5",
       [("text/html", "big5", "<p>感謝註冊！請點擊下方按鈕啟用帳號：</p><p><a href=\"https://forum.example.com.tw/account/activate?key=Qm9yZWFsaXNEaWdpdGFs\">啟用帳號</a></p><p>如有問題請參閱<a href=\"https://forum.example.com.tw/help\">說明</a>。<a href=\"https://forum.example.com.tw/unsubscribe\">取消訂閱</a></p><p>2026年10月19日</p>")],
       'url: "https://forum.example.com.tw/account/activate?key=Qm9yZWFsaXNEaWdpdGFs"')
 
+# Recognition v2: wordings without a classic keyword, button-only links, HTML-only
+# content, letter codes, and the distractors that must stay unforwarded.
+write("google-recovery-en",
+      [("From", "Google <noreply@google.com>"), ("To", "bar@outlook.com"), ("Subject", "Use 123456 to set up recovery email"), DATE],
+      [("text/plain", "utf-8", "foo@gmail.com wants to use your email address as their recovery email. Use this code to finish setting up bar@outlook.com as a recovery email:\n123456\n\nThis code will expire in 24 hours.\n\nIf you don’t recognize foo@gmail.com, you can remove your email address from their account. Remove email\n")],
+      'code: "123456"')
+
+write("verify-button-zh-tw",
+      [("From", word("範例服務", "utf-8") + " <noreply@service.example.com.tw>"), ("To", "me@example.com"), ("Subject", word("歡迎加入範例服務", "utf-8")), DATE],
+      [("text/html", "utf-8", "<p>感謝您註冊範例服務。</p><table><tr><td bgcolor=\"#1a73e8\"><a href=\"https://u123.ct.sendgrid.net/ls/click?upn=Tw3bQ9xYz\">驗證</a></td></tr></table><p><a href=\"https://service.example.com.tw/help\">說明中心</a></p>")],
+      'url: "https://u123.ct.sendgrid.net/ls/click?upn=Tw3bQ9xYz"')
+
+write("verify-button-zh-cn",
+      [("From", word("示例服务", "utf-8") + " <noreply@example.cn>"), ("To", "me@example.com"), ("Subject", word("欢迎加入示例服务", "utf-8")), DATE],
+      [("text/html", "utf-8", "<p>感谢您注册示例服务。</p><p><a class=\"btn\" href=\"https://email.example.cn/c/eJxVj0sOgjAQhp9\">验证</a></p>")],
+      'url: "https://email.example.cn/c/eJxVj0sOgjAQhp9"')
+
+write("verify-button-en",
+      [("From", "Example <hello@example.com>"), ("To", "me@gmail.com"), ("Subject", "Welcome to Example"), DATE],
+      [("text/plain", "utf-8", "Welcome to Example! Open this email in an HTML-capable client to continue.\n"),
+       ("text/html", "utf-8", "<h1>Welcome to Example!</h1><p><a href=\"https://links.example.net/ls/click?upn=VfY8a2\" style=\"background-color:#111;color:#fff;padding:12px 20px\">Verify</a></p><p><a href=\"https://example.com/privacy\">Privacy</a></p>")],
+      'url: "https://links.example.net/ls/click?upn=VfY8a2"')
+
+write("image-button-en",
+      [("From", "Example <hello@example.com>"), ("To", "me@gmail.com"), ("Subject", "One more step"), DATE],
+      [("text/html", "utf-8", "<p>Thanks for signing up! Please confirm your email address.</p><a href=\"https://t.example.com/r/42\"><img src=\"https://cdn.example.com/btn-verify.png\" alt=\"Verify email\"></a><p><a href=\"https://example.com/unsubscribe\">Unsubscribe</a></p>")],
+      'url: "https://t.example.com/r/42"')
+
+write("click-here-en",
+      [("From", "Example <no-reply@example.com>"), ("To", "me@gmail.com"), ("Subject", "Welcome to Example"), DATE],
+      [("text/html", "utf-8", "<p>Hi,</p><p>Please verify your email by clicking the link below.</p><p><a href=\"https://example.com/account/email?k=8d1f\">Click here</a></p><p>Thanks,<br>Example</p>")],
+      'url: "https://example.com/account/email?k=8d1f"')
+
+write("html-only-useful-en",
+      [("From", "Example <security@example.com>"), ("To", "me@gmail.com"), ("Subject", "Your Example account"), DATE],
+      [("text/plain", "utf-8", "This message requires an HTML-capable email client.\n"),
+       ("text/html", "utf-8", "<p>Your sign-in code</p><p><strong style=\"font-size:28px;letter-spacing:6px\">408217</strong></p><p>It expires in 10 minutes.</p>")],
+      'code: "408217"')
+
+write("alpha-code-en",
+      [("From", "Example <security@example.com>"), ("To", "me@gmail.com"), ("Subject", "Sign in to Example"), DATE],
+      [("text/html", "utf-8", "<p>Your code is:</p><p><b>QWERTY</b></p><p>It expires in 10 minutes.</p>")],
+      'code: "QWERTY"')
+
+write("activation-url-en",
+      [("From", "Example <hello@example.com>"), ("To", "me@gmail.com"), ("Subject", "Your account is almost ready"), DATE],
+      [("text/html", "utf-8", "<p>Thanks for joining Example. Activate your account to get started.</p><a href=\"https://example.com/account/activation?key=Qm9yZWFsaXNEaWdpdGFsQWJj\">Continue</a>")],
+      'url: "https://example.com/account/activation?key=Qm9yZWFsaXNEaWdpdGFsQWJj"')
+
+write("promo-code-en",
+      [("From", "Example Shop <deals@shop.example.com>"), ("To", "me@gmail.com"), ("Subject", "20% off this weekend"), DATE],
+      [("text/plain", "utf-8", "Use promo code SAVE20 at checkout.\nYour discount code: 8888\nShop now: https://shop.example.com/sale\n")],
+      "none: true")
+
+write("order-subject-zh",
+      [("From", word("範例購物", "utf-8") + " <order@shop.example.com.tw>"), ("To", "me@example.com"), ("Subject", word("您的訂單已出貨：20261021", "utf-8")), DATE],
+      [("text/plain", "utf-8", "出貨通知\n貨運單號\n20261021\n感謝您的購買。\n")],
+      "none: true")
+
+write("card-last4-zh",
+      [("From", word("範例銀行", "utf-8") + " <notify@bank.example.com.tw>"), ("To", "me@example.com"), ("Subject", word("信用卡消費通知", "utf-8")), DATE],
+      [("text/plain", "utf-8", "您末四碼 1234 的信用卡於 10/19 消費 NT$ 520。\n請勿將驗證碼告訴他人。\n")],
+      "none: true")
+
+write("newsletter-click-here-en",
+      [("From", "Example <news@example.com>"), ("To", "me@gmail.com"), ("Subject", "New in October"), DATE],
+      [("text/html", "utf-8", "<h2>New in October</h2><p>We shipped dark mode and faster sync. Confirm your settings in your account.</p><p><a href=\"https://example.com/blog/october\">Click here</a> to read more.</p><p><a href=\"https://example.com/unsubscribe\">Unsubscribe</a></p>")],
+      "none: true")
+
+write("author-link-en",
+      [("From", "Example Blog <blog@example.com>"), ("To", "me@gmail.com"), ("Subject", "Meet our authors"), DATE],
+      [("text/html", "utf-8", "<p>Every author on our blog is verified — verify your own profile any time.</p><p><a href=\"https://blog.example.com/author/jane\" style=\"background:#0a7;padding:10px\">Read more</a></p>")],
+      "none: true")
+
+write("footer-zip-en",
+      [("From", "Example <security@example.com>"), ("To", "me@gmail.com"), ("Subject", "Security tip"), DATE],
+      [("text/html", "utf-8", "<p>We will never ask for your verification code by phone or email.</p><p>Example Inc., 1600 Main Street, Mountain View, CA 94043</p>")],
+      "none: true")
+
 print("ok")

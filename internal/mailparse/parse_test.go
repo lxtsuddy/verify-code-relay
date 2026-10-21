@@ -2,6 +2,7 @@ package mailparse
 
 import (
 	"encoding/base64"
+	"reflect"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -49,8 +50,14 @@ Content-Type: text/html; charset=utf-8
 	if m.Date.IsZero() || m.Date.UTC().Hour() != 0 {
 		t.Errorf("date = %v", m.Date)
 	}
-	if !strings.Contains(m.Text, "Your code is 123456\nhttps://github.com/plain-link") {
-		t.Errorf("text should come from text/plain: %q", m.Text)
+	if !strings.Contains(m.Text, "Your code is 123456") || strings.Contains(m.Text, "plain-link") {
+		t.Errorf("text should come from text/html: %q", m.Text)
+	}
+	if !strings.Contains(m.AltText, "Your code is 123456\nhttps://github.com/plain-link") {
+		t.Errorf("alt text should come from text/plain: %q", m.AltText)
+	}
+	if !reflect.DeepEqual(m.Emphasis, []Span{{13, 19}}) {
+		t.Errorf("emphasis = %v", m.Emphasis)
 	}
 	urls := map[string]string{}
 	for _, l := range m.Links {
@@ -294,5 +301,58 @@ func TestParseTruncatesHugePart(t *testing.T) {
 	}
 	if !hasWarning(m, "截斷") {
 		t.Errorf("truncation should be reported: %q", m.Warnings)
+	}
+}
+
+func TestParseTextSources(t *testing.T) {
+	multi := func(plain, html string) []byte {
+		return crlf("From: a@b.c\nSubject: s\nContent-Type: multipart/alternative; boundary=\"b\"\n\n--b\nContent-Type: text/plain; charset=utf-8\n\n" +
+			plain + "\n--b\nContent-Type: text/html; charset=utf-8\n\n" + html + "\n--b--\n")
+	}
+	single := func(ct, body string) []byte {
+		return crlf("From: a@b.c\nSubject: s\nContent-Type: " + ct + "; charset=utf-8\n\n" + body + "\n")
+	}
+	cases := []struct {
+		name      string
+		raw       []byte
+		text, alt string
+		emphasis  []Span
+	}{
+		{"plain only", single("text/plain", "Code 1234"), "Code 1234", "", nil},
+		{"html only", single("text/html", "<p>Code <b>1234</b></p>"), "Code 1234", "", []Span{{5, 9}}},
+		{"html first", multi("Please use an HTML mail client.", "<p>Code <b>1234</b></p>"), "Code 1234", "Please use an HTML mail client.", []Span{{5, 9}}},
+		{"same text kept once", multi("Code 1234", "<p>Code 1234</p>"), "Code 1234", "", nil},
+		{"blank html falls back", multi("Code 1234", "<p> </p>"), "Code 1234", "", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m, err := Parse(c.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.Text != c.text || m.AltText != c.alt || !reflect.DeepEqual(m.Emphasis, c.emphasis) {
+				t.Errorf("text %q alt %q emphasis %v", m.Text, m.AltText, m.Emphasis)
+			}
+		})
+	}
+}
+
+func TestParseBareLinkBefore(t *testing.T) {
+	raw := crlf("From: a@b.c\nSubject: s\nContent-Type: multipart/alternative; boundary=\"b\"\n\n" +
+		"--b\nContent-Type: text/plain; charset=utf-8\n\nClick the link below to verify:\nhttps://x.test/v?t=1\n\nOr open https://x.test/both\n" +
+		"--b\nContent-Type: text/html; charset=utf-8\n\n<p>Welcome</p><a href=\"https://x.test/both\" class=\"btn\">Verify</a>\n--b--\n")
+	m, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byURL := map[string]Link{}
+	for _, l := range m.Links {
+		byURL[l.URL] = l
+	}
+	if l := byURL["https://x.test/v?t=1"]; l.Before != "Click the link below to verify:\n" || l.Text != "" {
+		t.Errorf("bare link = %+v", l)
+	}
+	if l := byURL["https://x.test/both"]; l.Text != "Verify" || !l.Button || l.Before != "Welcome\n" {
+		t.Errorf("html link should win over the bare one: %+v", l)
 	}
 }

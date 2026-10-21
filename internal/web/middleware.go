@@ -14,6 +14,14 @@ const csp = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-
 // maxBody caps request bodies; no form or JSON call in the admin comes near it.
 const maxBody = 1 << 20
 
+// bodyLimit is the body cap of a request: the mail test takes a whole message.
+func bodyLimit(r *http.Request) int64 {
+	if r.URL.Path == mailTestPath {
+		return maxMailTestBody
+	}
+	return maxBody
+}
+
 func (s *Server) securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
@@ -56,7 +64,7 @@ func (s *Server) checkOrigin(next http.Handler) http.Handler {
 			s.fail(w, r, http.StatusForbidden, "請求來源不符。請從管理介面本身操作；若持續發生，請重新整理頁面。")
 			return
 		}
-		r.Body = http.MaxBytesReader(w, r.Body, maxBody)
+		r.Body = http.MaxBytesReader(w, r.Body, bodyLimit(r))
 		next.ServeHTTP(w, r)
 	})
 }
