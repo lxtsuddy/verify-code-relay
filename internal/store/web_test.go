@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -160,5 +161,47 @@ func TestDeleteOAuthToken(t *testing.T) {
 	}
 	if _, ok, _ := s.GetOAuthToken(ctx, "m"); ok {
 		t.Error("token survived")
+	}
+}
+
+func TestListLogFilters(t *testing.T) {
+	s := openTest(t)
+	now := time.Now().Truncate(time.Second)
+	for i, e := range []LogEntry{
+		{At: now.Add(-48 * time.Hour), Kind: "code", FromAddr: "old@github.com", Subject: "Your code"},
+		{At: now.Add(-time.Hour), Kind: "link", FromAddr: "noreply@slack.com", Subject: "Sign in to Slack"},
+		{At: now.Add(-time.Minute), Kind: "none", FromAddr: "news@shop.test", Subject: "50% off_today"},
+		{At: now, Kind: "both", FromAddr: "a@b.c", Subject: "Verify"},
+		{At: now, Kind: "skipped_age", FromAddr: "x@y.z", Subject: "late"},
+	} {
+		e.Mailbox, e.Folder, e.UID, e.Result = "m", "INBOX", uint32(i+1), "sent"
+		if _, err := s.RecordMessage(ctx, e, nil, MailboxState{UIDValidity: 1, LastUID: uint32(i + 1)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		q    LogQuery
+		want []string // subjects, newest first
+	}{
+		{"kinds", LogQuery{Kinds: []string{"code", "link", "both"}}, []string{"Verify", "Sign in to Slack", "Your code"}},
+		{"since", LogQuery{Since: now.Add(-2 * time.Hour)}, []string{"late", "Verify", "50% off_today", "Sign in to Slack"}},
+		{"search subject", LogQuery{Search: "sign IN"}, []string{"Sign in to Slack"}},
+		{"search sender", LogQuery{Search: "github"}, []string{"Your code"}},
+		{"search is literal", LogQuery{Search: "%"}, []string{"50% off_today"}},
+		{"underscore is literal", LogQuery{Search: "f_t"}, []string{"50% off_today"}},
+		{"combined", LogQuery{Kinds: []string{"code", "link", "both"}, Since: now.Add(-2 * time.Hour), Search: "e"}, []string{"Verify", "Sign in to Slack"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.q.Limit = 10
+			rows, total, err := s.ListLog(ctx, tc.q)
+			var got []string
+			for _, r := range rows {
+				got = append(got, r.Subject)
+			}
+			if err != nil || total != len(tc.want) || strings.Join(got, "|") != strings.Join(tc.want, "|") {
+				t.Fatalf("got %q total %d err %v, want %q", got, total, err, tc.want)
+			}
+		})
 	}
 }

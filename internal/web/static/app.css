@@ -1793,7 +1793,9 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .log-table td { vertical-align: middle; }
 .log-table .c-time { white-space: nowrap; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .log-table .c-mb { min-width: 7em; }
-.log-mb { display: block; font-weight: 600; overflow-wrap: anywhere; }
+/* one line per mailbox name: the subject column takes the rest of the width, and a
+   wrapping name would make every row several lines tall */
+.log-mb { display: block; max-width: 20em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 /* the config key beside a display name, as on the mailbox cards */
 .log-key { margin-left: 6px; font-size: 11.5px; font-weight: 500; color: var(--muted); }
 /* a folder path never breaks mid-word ("[Gmail]/Spa m"); a long one ends in … (full name in title) */
@@ -1821,11 +1823,41 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   margin-bottom: 18px; padding: 16px 18px;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow-1);
 }
-.log-filter .field { flex: 1 1 200px; max-width: 300px; }
+.log-filter .field { flex: 1 1 150px; max-width: 220px; }
+.log-filter .log-search { flex: 2 1 260px; max-width: none; }
+.log-filter .log-size { flex: 0 1 96px; }
+.log-search-box { position: relative; }
+.log-search-box .icon { position: absolute; left: 12px; top: 50%; width: 17px; height: 17px; transform: translateY(-50%); color: var(--faint); pointer-events: none; }
+.log-search-box .input { padding-left: 38px; }
+.log-search-box:focus-within .icon { color: var(--green-700); }
 .log-filter-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .log-count { margin: 0 0 10px; font-size: 13.5px; color: var(--muted); }
-.pager { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 18px; }
-.pager-pos { font-size: 14px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+/* log page: whole log or forwarded mail only (links, so the choice stays in the URL) */
+.log-view { display: inline-flex; gap: 2px; margin-bottom: 12px; padding: 3px; border-radius: 9px; background: var(--sunken); }
+.log-view-item {
+  display: inline-flex; align-items: center; gap: 7px; min-height: 36px; padding: 0 14px; border-radius: 7px; white-space: nowrap;
+  color: var(--muted); font-size: 14px; font-weight: 600; letter-spacing: 0.03em; text-decoration: none;
+  transition: background-color 0.15s, box-shadow 0.15s;
+}
+.log-view-item .icon { width: 16px; height: 16px; }
+.log-view-item:hover { color: var(--ink); }
+.log-view-item[aria-current="true"] { background: #fff; color: var(--green-800); box-shadow: 0 0 0 1px var(--line), var(--shadow-1); }
+.log-view-sm { margin: 0 0 0 auto; }
+.log-view-sm .log-view-item { min-height: 30px; padding: 0 11px; font-size: 13px; }
+
+/* pager: step buttons around page numbers (first, last and the pages next to the current one) */
+.pager { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 14px; margin-top: 18px; }
+.pager-pages { display: flex; align-items: center; gap: 4px; margin: 0; padding: 0; list-style: none; }
+.pager-num {
+  display: inline-grid; place-items: center; min-width: 34px; height: 34px; padding: 0 8px; border-radius: 8px;
+  color: var(--ink-2); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; text-decoration: none;
+  border: 1px solid transparent; transition: background-color 0.15s, border-color 0.15s;
+}
+.pager-num:hover { background: var(--sunken); }
+.pager-num[aria-current="page"] { background: var(--green-900); border-color: var(--green-900); color: #fff; }
+.pager-gap { min-width: 18px; text-align: center; color: var(--faint); }
+.pager-pos { display: none; font-size: 14px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .pager [aria-disabled="true"] { opacity: 0.45; pointer-events: none; }
 
 @media (max-width: 860px) {
@@ -1871,7 +1903,7 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .log-table .c-result { grid-area: result; justify-self: end; }
   .log-table .c-msg { grid-area: msg; width: auto; min-width: 0; }
   .log-table .c-mb { grid-area: mb; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; font-size: 13px; }
-  .log-table .c-mb .log-mb { display: inline; }
+  .log-table .c-mb .log-mb { display: inline; max-width: none; white-space: normal; overflow-wrap: anywhere; }
   .log-table .c-mb .log-folder { display: inline-block; max-width: 100%; vertical-align: bottom; }
   .log-table .c-kind { grid-area: kind; justify-self: end; align-self: center; }
   .log-table .c-rule { grid-area: rule; font-size: 12.5px; color: var(--muted); }
@@ -1881,7 +1913,14 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .log-filter .field { max-width: none; }
   .log-filter-actions { width: 100%; }
   .log-filter-actions .btn { flex: 1; }
+  /* the page numbers take a row of their own under the step buttons */
   .pager { justify-content: space-between; }
+  .pager-pages { order: 3; flex: 1 1 100%; justify-content: center; }
+  .log-view { display: flex; }
+  .log-view-item { flex: 1; justify-content: center; }
+  /* on the overview the switch takes its own row under the title */
+  .section-head:has(.log-view-sm) { flex-wrap: wrap; }
+  .log-view-sm { order: 3; flex: 1 1 100%; margin: 6px 0 0; }
 }
 
 /* ---------- motion ---------- */

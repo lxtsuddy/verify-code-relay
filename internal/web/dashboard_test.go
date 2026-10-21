@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -121,7 +122,7 @@ func TestDashboardPage(t *testing.T) {
 		t.Fatalf("= %d", resp.StatusCode)
 	}
 	for _, want := range []string{`data-mb="gmail"`, `data-mb="outlook"`, "個人 Gmail", `data-folder="INBOX"`, "連線中",
-		`id="dlg-oauth"`, "data-status-board", "最近轉發", "還沒有轉發紀錄"} {
+		`id="dlg-oauth"`, "data-status-board", "最近轉發", "還沒有轉發驗證碼或連結"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("dashboard lacks %q", want)
 		}
@@ -197,20 +198,36 @@ func TestLogsPagination(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	_, body := e.get("/logs")
+	// 50 a page when asked; the page size stays in every link
+	_, body := e.get("/logs?size=50")
 	if !strings.Contains(body, "主旨-120") || !strings.Contains(body, "主旨-071") || strings.Contains(body, "主旨-070") {
 		t.Error("page 1 should hold the newest 50")
 	}
-	if !strings.Contains(body, "第 1 / 3 頁") || !strings.Contains(body, "共 120 筆") || !strings.Contains(body, `href="/logs?page=2"`) {
+	if !strings.Contains(body, "第 1 / 3 頁") || !strings.Contains(body, "共 120 筆") || !strings.Contains(body, `href="/logs?page=2&amp;size=50"`) {
 		t.Error("page 1 navigation wrong")
 	}
-	_, body = e.get("/logs?page=3")
-	if !strings.Contains(body, "主旨-001") || strings.Contains(body, "主旨-021") || !strings.Contains(body, `href="/logs?page=2"`) {
+	_, body = e.get("/logs?size=50&page=3")
+	if !strings.Contains(body, "主旨-001") || strings.Contains(body, "主旨-021") || !strings.Contains(body, `href="/logs?page=2&amp;size=50"`) {
 		t.Error("page 3 wrong")
 	}
-	// out-of-range and junk pages are clamped, never an error
-	for q, want := range map[string]string{"page=0": "第 1 / 3 頁", "page=-4": "第 1 / 3 頁", "page=abc": "第 1 / 3 頁",
-		"page=99999999999999999999": "第 3 / 3 頁", "page=4": "第 3 / 3 頁", "page=999999999": "第 3 / 3 頁"} {
+	// the default is 20 a page; page numbers around the current one, first and last
+	_, body = e.get("/logs?page=3")
+	if !strings.Contains(body, "第 3 / 6 頁") || !strings.Contains(body, "主旨-080") || !strings.Contains(body, "主旨-061") ||
+		strings.Contains(body, "主旨-081") || strings.Contains(body, "主旨-060") {
+		t.Error("default page size should be 20")
+	}
+	for _, want := range []string{`href="/logs"`, `href="/logs?page=2"`, `href="/logs?page=4"`, `href="/logs?page=6"`, `aria-current="page">3<`} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page 3 lacks %q", want)
+		}
+	}
+	if _, body = e.get("/logs?page=2"); strings.Contains(body, `href="/logs?page=4"`) || !strings.Contains(body, "pager-gap") {
+		t.Error("pages 4 and 5 are not next to page 2: they should be a gap")
+	}
+	// out-of-range and junk pages and sizes are clamped, never an error
+	for q, want := range map[string]string{"page=0": "第 1 / 6 頁", "page=-4": "第 1 / 6 頁", "page=abc": "第 1 / 6 頁",
+		"page=99999999999999999999": "第 6 / 6 頁", "page=7": "第 6 / 6 頁", "page=999999999": "第 6 / 6 頁",
+		"size=7": "第 1 / 6 頁", "size=100": "第 1 / 2 頁"} {
 		resp, body := e.get("/logs?" + q)
 		if resp.StatusCode != 200 || !strings.Contains(body, want) {
 			t.Errorf("%s = %d, want %q", q, resp.StatusCode, want)
@@ -221,18 +238,69 @@ func TestLogsPagination(t *testing.T) {
 	if !strings.Contains(body, "共 40 筆") || !strings.Contains(body, "未轉發") || strings.Contains(body, "主旨-119") {
 		t.Error("result filter wrong")
 	}
-	_, body = e.get("/logs?result=sent&page=2")
-	if !strings.Contains(body, `href="/logs?result=sent"`) || !strings.Contains(body, "第 2 / 2 頁") {
+	_, body = e.get("/logs?result=sent&size=50&page=2")
+	if !strings.Contains(body, `href="/logs?result=sent&amp;size=50"`) || !strings.Contains(body, "第 2 / 2 頁") {
 		t.Error("filter not kept in page links")
 	}
-	// unknown values: an empty list, not an error; a bad result filter is ignored
+	// unknown values: an empty list, not an error; bad filters are ignored
 	resp, body := e.get("/logs?mailbox=ghost")
 	if resp.StatusCode != 200 || !strings.Contains(body, "沒有符合條件的紀錄") || !strings.Contains(body, `value="ghost" selected`) {
 		t.Errorf("unknown mailbox = %d", resp.StatusCode)
 	}
-	_, body = e.get("/logs?result=bogus")
-	if !strings.Contains(body, "共 120 筆") {
-		t.Error("an unknown result filter should be ignored")
+	for _, q := range []string{"result=bogus", "kind=bogus", "since=bogus"} {
+		if _, body := e.get("/logs?" + q); !strings.Contains(body, "共 120 筆") {
+			t.Errorf("%s should be ignored", q)
+		}
+	}
+}
+
+func TestLogsKindSinceAndSearch(t *testing.T) {
+	e := newEnv(t, withSample)
+	e.login()
+	ctx := context.Background()
+	for i, r := range []store.LogEntry{
+		{At: e.now.Add(-10 * 24 * time.Hour), Kind: "code", FromAddr: "old@github.com", Subject: "舊的驗證碼", Result: "sent"},
+		{At: e.now.Add(-2 * time.Hour), Kind: "link", FromAddr: "noreply@slack.com", Subject: "Sign in to Slack", Result: "sent"},
+		{At: e.now.Add(-time.Minute), Kind: "none", FromAddr: "news@shop.test", Subject: "週末特賣", Result: "not_forwarded"},
+		{At: e.now, Kind: "ignored", FromAddr: "promo@news.example.com", Subject: "電子報", Result: "not_forwarded"},
+	} {
+		r.Mailbox, r.Folder, r.UID = "gmail", "INBOX", uint32(i+1)
+		if _, err := e.st.RecordMessage(ctx, r, nil, store.MailboxState{UIDValidity: 1, LastUID: uint32(i + 1)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for q, want := range map[string][]string{
+		"kind=hit":             {"舊的驗證碼", "Sign in to Slack"},
+		"kind=none":            {"週末特賣"},
+		"kind=ignored":         {"電子報"},
+		"since=24h":            {"Sign in to Slack", "週末特賣", "電子報"},
+		"since=7d&kind=hit":    {"Sign in to Slack"},
+		"q=slack":              {"Sign in to Slack"},
+		"q=github":             {"舊的驗證碼"},
+		"q=%E9%80%B1%E6%9C%AB": {"週末特賣"},
+	} {
+		_, body := e.get("/logs?" + q)
+		for _, subj := range []string{"舊的驗證碼", "Sign in to Slack", "週末特賣", "電子報"} {
+			if strings.Contains(body, subj) != slices.Contains(want, subj) {
+				t.Errorf("%s: %q shown = %v", q, subj, !slices.Contains(want, subj))
+			}
+		}
+		if !strings.Contains(body, "清除篩選") {
+			t.Errorf("%s: no way to clear the filters", q)
+		}
+	}
+	// an over-long search is cut without an ellipsis, so it can still match
+	if _, body := e.get("/logs?q=" + strings.Repeat("s", 150)); strings.Contains(body, "…") {
+		t.Error("the search box should not gain an ellipsis")
+	}
+	// "全部紀錄" is current only without a kind filter
+	if _, body := e.get("/logs?kind=none"); strings.Contains(body, `aria-current="true"`) {
+		t.Error("no switch item is current under another kind filter")
+	}
+	// the quick switch keeps the other filters
+	_, body := e.get("/logs?q=slack")
+	if !strings.Contains(body, `href="/logs?kind=hit&amp;q=slack"`) {
+		t.Error("only-forwarded switch should keep the search")
 	}
 }
 
@@ -274,16 +342,16 @@ func TestLogRowsShowDisplayName(t *testing.T) {
 		e.st.RecordMessage(ctx, store.LogEntry{At: e.now.Add(time.Duration(i) * time.Second), Mailbox: mb, Folder: "[Gmail]/Spam", UID: uint32(i + 1),
 			FromAddr: "a@b", Subject: "s" + mb, Kind: "none", Result: "not_forwarded"}, nil, store.MailboxState{UIDValidity: 1, LastUID: uint32(i + 1)})
 	}
-	for _, path := range []string{"/logs", "/"} {
+	for _, path := range []string{"/logs", "/?recent=all"} {
 		_, body := e.get(path)
-		if !strings.Contains(body, `<span class="log-mb">個人 Gmail<span class="log-key mono">gmail</span></span>`) {
+		if !strings.Contains(body, `<span class="log-mb" title="個人 Gmail">個人 Gmail<span class="log-key mono">gmail</span></span>`) {
 			t.Errorf("%s: display name row missing", path)
 		}
-		if !strings.Contains(body, `<span class="log-mb">gone</span>`) {
+		if !strings.Contains(body, `<span class="log-mb" title="gone">gone</span>`) {
 			t.Errorf("%s: deleted mailbox row missing", path)
 		}
 	}
-	_, body := e.get("/api/status")
+	_, body := e.get("/api/status?recent=all")
 	if !strings.Contains(body, `"mailbox":"gmail","mailbox_label":"個人 Gmail"`) || !strings.Contains(body, `"mailbox":"gone","mailbox_label":"gone"`) {
 		t.Errorf("status recent = %s", body)
 	}
@@ -296,5 +364,66 @@ func TestLogsPageWording(t *testing.T) {
 	_, body := e.get("/logs")
 	if strings.Contains(body, "主旨裡的驗證碼已遮蔽") || !strings.Contains(body, "已辨識的驗證碼會在主旨中遮蔽") {
 		t.Error("log page wording")
+	}
+}
+
+// The overview lists the latest forwarded mail by default; "recent=all" lists every
+// checked mail, and the status poll follows the same choice.
+func TestDashboardRecentScope(t *testing.T) {
+	e := newEnv(t, withSample)
+	e.login()
+	ctx := context.Background()
+	for i, r := range []store.LogEntry{
+		{Kind: "code", Subject: "****** is your code", Result: "sent"},
+		{Kind: "none", Subject: "週末特賣", Result: "not_forwarded"},
+	} {
+		r.At, r.Mailbox, r.Folder, r.UID, r.FromAddr = e.now.Add(time.Duration(i)*time.Second), "gmail", "INBOX", uint32(i+1), "a@b"
+		if _, err := e.st.RecordMessage(ctx, r, nil, store.MailboxState{UIDValidity: 1, LastUID: uint32(i + 1)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, body := e.get("/")
+	if !strings.Contains(body, "is your code") || strings.Contains(body, "週末特賣") || !strings.Contains(body, `href="/?recent=all"`) ||
+		!strings.Contains(body, `href="/logs?kind=hit"`) {
+		t.Error("default overview should list forwarded mail only and link to the rest")
+	}
+	_, body = e.get("/?recent=all")
+	if !strings.Contains(body, "is your code") || !strings.Contains(body, "週末特賣") || !strings.Contains(body, `data-recent-scope="all"`) {
+		t.Error("recent=all should list every checked mail")
+	}
+	_, body = e.get("/api/status")
+	if strings.Contains(body, "週末特賣") || !strings.Contains(body, "is your code") {
+		t.Errorf("status poll should list forwarded mail only: %s", body)
+	}
+	if _, body = e.get("/api/status?recent=all"); !strings.Contains(body, "週末特賣") {
+		t.Error("status poll with recent=all should list every mail")
+	}
+}
+
+// A single hidden page is shown as its number, not as a gap.
+func TestPageLinksGaps(t *testing.T) {
+	render := func(page, pages int) string {
+		var out []string
+		for _, l := range pageLinks(logFilter{Size: defaultLogPageSize, Page: page}, pages) {
+			switch {
+			case l.Gap:
+				out = append(out, "…")
+			case l.Current:
+				out = append(out, fmt.Sprintf("[%d]", l.Num))
+			default:
+				out = append(out, fmt.Sprint(l.Num))
+			}
+		}
+		return strings.Join(out, " ")
+	}
+	for _, tc := range []struct {
+		page, pages int
+		want        string
+	}{
+		{1, 1, "[1]"}, {1, 5, "[1] 2 … 5"}, {4, 7, "1 2 3 [4] 5 6 7"}, {5, 9, "1 … 4 [5] 6 … 9"}, {4, 5, "1 2 3 [4] 5"}, {3, 6, "1 2 [3] 4 5 6"}, {2, 6, "1 [2] 3 … 6"}, {5, 5, "1 … 4 [5]"},
+	} {
+		if got := render(tc.page, tc.pages); got != tc.want {
+			t.Errorf("page %d of %d: %q, want %q", tc.page, tc.pages, got, tc.want)
+		}
 	}
 }

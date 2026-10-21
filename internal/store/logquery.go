@@ -19,11 +19,17 @@ type LogRow struct {
 }
 
 type LogQuery struct {
-	Mailbox string // "" = all
-	Result  string // "" = all
-	Limit   int    // <= 0 means DefaultLogLimit
+	Mailbox string    // "" = all
+	Result  string    // "" = all
+	Kinds   []string  // any of these kinds; empty = all
+	Since   time.Time // rows at or after; zero = all
+	Search  string    // case-insensitive substring of the subject or sender, taken literally; "" = all
+	Limit   int       // <= 0 means DefaultLogLimit
 	Offset  int
 }
+
+// likeEscaper escapes LIKE's wildcards so a search is taken literally (ESCAPE '\').
+var likeEscaper = strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`)
 
 // DefaultLogLimit is the page size used when LogQuery.Limit is not positive.
 const DefaultLogLimit = 50
@@ -40,6 +46,22 @@ func (s *Store) ListLog(ctx context.Context, q LogQuery) (rows []LogRow, total i
 	if q.Result != "" {
 		conds = append(conds, "result = ?")
 		args = append(args, q.Result)
+	}
+	if len(q.Kinds) > 0 {
+		conds = append(conds, "kind IN (?"+strings.Repeat(", ?", len(q.Kinds)-1)+")")
+		for _, k := range q.Kinds {
+			args = append(args, k)
+		}
+	}
+	if !q.Since.IsZero() {
+		conds = append(conds, "at >= ?")
+		args = append(args, unix(q.Since))
+	}
+	if q.Search != "" {
+		// LIKE is case-insensitive for ASCII only; that is enough for addresses and most subjects
+		pat := "%" + likeEscaper.Replace(q.Search) + "%"
+		conds = append(conds, `(subject LIKE ? ESCAPE '\' OR from_addr LIKE ? ESCAPE '\')`)
+		args = append(args, pat, pat)
 	}
 	where := ""
 	if len(conds) > 0 {

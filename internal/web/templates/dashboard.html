@@ -103,10 +103,14 @@
 {{template "oauth-dialog"}}
 {{end}}
 
-<section class="dash-section" aria-labelledby="recent-title">
+<section class="dash-section" aria-labelledby="recent-title" data-recent-scope="{{if $d.RecentAll}}all{{else}}hits{{end}}">
   <div class="section-head">
     <h2 class="section-title" id="recent-title">最近轉發</h2>
-    <a class="section-link" href="/logs">全部紀錄{{template "icon" "arrow-right"}}</a>
+    <nav class="log-view log-view-sm" aria-label="最近轉發的範圍">
+      <a class="log-view-item" href="/"{{if not $d.RecentAll}} aria-current="true"{{end}}>只看轉發</a>
+      <a class="log-view-item" href="/?recent=all"{{if $d.RecentAll}} aria-current="true"{{end}}>全部檢查過的信</a>
+    </nav>
+    <a class="section-link" href="{{if $d.RecentAll}}/logs{{else}}/logs?kind=hit{{end}}">查看全部紀錄{{template "icon" "arrow-right"}}</a>
   </div>
   <div class="table-wrap" data-recent-wrap{{if not $d.Recent}} hidden{{end}}>
     <table class="table log-table">
@@ -114,7 +118,7 @@
       <tbody data-recent>{{range $d.Recent}}{{template "log-row" (dict "R" . "Rule" false)}}{{end}}</tbody>
     </table>
   </div>
-  <p class="quiet-empty" data-recent-empty{{if $d.Recent}} hidden{{end}}>{{template "icon" "inbox"}}<span>還沒有轉發紀錄。信箱收到新郵件後，處理結果會出現在這裡。</span></p>
+  <p class="quiet-empty" data-recent-empty{{if $d.Recent}} hidden{{end}}>{{template "icon" "inbox"}}<span>{{if $d.RecentAll}}還沒有檢查過的郵件。信箱收到新郵件後，處理結果會出現在這裡。{{else}}還沒有轉發驗證碼或連結。其他檢查過的信在「全部檢查過的信」裡。{{end}}</span></p>
 </section>
 
 </div>
