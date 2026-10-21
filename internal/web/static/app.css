@@ -46,6 +46,10 @@
     紀錄    table.table.log-table，每列用 {{template "log-row" …}}（_logs.html）；640px 以下每列變成一張小卡。
 */
 
+@layer tokens, base, layout, components, pages, utilities;
+
+@layer tokens {
+
 :root {
   --green-950: #08291e;
   --green-900: #0d3d2c;
@@ -96,6 +100,10 @@
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 }
 
+}
+
+@layer base {
+
 /* ---------- base ---------- */
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -144,6 +152,14 @@ b, strong { font-weight: 700; }
 .stack > * + * { margin-top: 20px; }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 20px; }
+
+@media (max-width: 640px) {
+  .grid-2 { grid-template-columns: minmax(0, 1fr); }
+}
+
+}
+
+@layer layout {
 
 /* ---------- brand ---------- */
 
@@ -226,6 +242,38 @@ b, strong { font-weight: 700; }
 .main { width: 100%; max-width: 1120px; padding: 36px 44px 72px; }
 .main:focus { outline: none; }
 
+@media (max-width: 860px) {
+  .shell { grid-template-columns: minmax(0, 1fr); background: none; }
+  .rail {
+    position: sticky; top: 0; z-index: 30; height: auto;
+    grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto;
+    grid-template-areas: "brand logout" "nav nav";
+    padding: 10px 12px 0;
+  }
+  .rail .brand { padding: 2px 0 10px 2px; }
+  .brand-mark { width: 32px; height: 32px; }
+  .rail-logout { margin: 0 0 10px; align-self: center; }
+  .logout-btn { padding: 6px 10px; gap: 6px; font-size: 14px; }
+  .logout-btn .icon { width: 16px; height: 16px; }
+  /* tabs that do not fit fade out at the edges, so the clipped ones read as "scroll for
+     more"; the fades only cover the padding once scrolled to either end (the ::after
+     spacer keeps room at the end), so no tab stays faded */
+  .nav {
+    flex-direction: row; gap: 2px;
+    margin: 0 -12px; padding: 0 12px;
+    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 36px), transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 36px), transparent);
+  }
+  .nav::after { content: ""; flex: none; width: 24px; }
+  .nav::-webkit-scrollbar { display: none; }
+  .nav-item { flex: none; margin: 0; padding: 8px 14px 10px; border-radius: 9px 9px 0 0; font-size: 14.5px; }
+  .nav-item .icon { display: none; }
+  .nav-item[aria-current="page"] { border-radius: 9px 9px 0 0; }
+  .nav-item[aria-current="page"]::before { top: auto; right: auto; bottom: 0; left: -12px; background: radial-gradient(circle at 0 0, transparent 11.5px, var(--paper) 12px); }
+  .nav-item[aria-current="page"]::after { bottom: 0; right: -12px; background: radial-gradient(circle at 100% 0, transparent 11.5px, var(--paper) 12px); }
+}
+
 /* ---------- page header ---------- */
 
 .page-head {
@@ -238,6 +286,20 @@ b, strong { font-weight: 700; }
 .page-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 
 .section-title { margin: 36px 0 14px; font-size: 18px; font-weight: 700; letter-spacing: 0.03em; }
+
+@media (max-width: 860px) {
+  .main { padding: 24px 16px 56px; }
+  .page-head { margin-bottom: 22px; padding-bottom: 16px; }
+  .page-title { font-size: 24px; }
+}
+
+@media (max-width: 640px) {
+  .page-actions, .form-actions { width: 100%; }
+}
+
+}
+
+@layer components {
 
 /* ---------- cards ---------- */
 
@@ -267,6 +329,15 @@ b, strong { font-weight: 700; }
 .facts > div:last-child { border-right: 0; }
 .facts dt { font-size: 13px; color: var(--muted); }
 .facts dd { margin-top: 2px; font-family: var(--mono); font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+@media (max-width: 640px) {
+  .card-head, .card-body { padding-left: 16px; padding-right: 16px; }
+  .card-foot { padding-left: 16px; padding-right: 16px; }
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .facts > div { border-right: 0; border-bottom: 1px solid var(--line); }
+  .facts > div:nth-child(odd) { border-right: 1px solid var(--line); }
+  .facts > div:nth-last-child(-n + 2):nth-child(odd), .facts > div:last-child { border-bottom: 0; }
+}
 
 /* ---------- badges & tags ---------- */
 
@@ -397,6 +468,10 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; margin:
 }
 .secret-toggle:hover { color: var(--ink-2); background: var(--sunken); }
 .secret-toggle[aria-pressed="true"] { color: var(--green-700); }
+
+@media (max-width: 640px) {
+  .form-actions .btn { flex: 1; }
+}
 
 /* ---------- the signature: postcode boxes ---------- */
 
@@ -529,6 +604,11 @@ input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; margin:
 .toast-error .icon { color: #ffd2cd; }
 .toast.is-leaving { opacity: 0; transform: translateY(6px); }
 
+@media (max-width: 640px) {
+  .toasts, .toasts[popover] { inset: auto 16px calc(16px + env(safe-area-inset-bottom)) 16px; align-items: stretch; }
+  .toast { max-width: none; }
+}
+
 /* ---------- modal ---------- */
 
 dialog.modal {
@@ -545,8 +625,19 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px;
   padding: 14px 22px; border-top: 1px solid var(--line); background: var(--surface-2);
 }
-.modal-confirm { width: min(420px, calc(100vw - 24px)); }
 .modal-confirm .modal-body { padding-top: 4px; color: var(--ink-2); white-space: pre-line; }
+
+@media (max-width: 640px) {
+  dialog.modal {
+    width: 100%; max-width: 100%; max-height: 88vh;
+    margin: auto 0 0; border-radius: 16px 16px 0 0;
+  }
+  dialog.modal[open] { animation-name: sheet-in; }
+}
+
+}
+
+@layer pages {
 
 /* ---------- centred pages (login, TOTP, errors) ---------- */
 
@@ -613,6 +704,13 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 
 .otp-form { margin-top: 12px; }
 .otp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 16px 22px; margin-bottom: 8px; }
+
+@media (max-width: 640px) {
+  .auth-card { padding: 26px 20px 24px; }
+  .auth-foot { margin: 24px -20px -24px; padding: 10px 12px 10px 20px; }
+  .step { padding-left: 44px; }
+  .qr { width: 176px; height: 176px; }
+}
 
 /* ---------- settings page ---------- */
 
@@ -742,6 +840,17 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .ms-app-body { grid-template-columns: minmax(0, 1fr); }
 }
 
+@media (max-width: 640px) {
+  .setting-row { grid-template-columns: minmax(0, 1fr); padding: 14px 16px; }
+  .setting-note { padding-left: 16px; padding-right: 16px; }
+  .card-section { padding: 16px; }
+  .foot-note { flex-basis: 100%; }
+  .ip-card { grid-template-columns: minmax(0, 1fr); padding: 20px 16px; }
+  .postmark { width: 132px; height: 132px; }
+  .ip-value { font-size: 26px; }
+  .ip-facts > div { grid-template-columns: minmax(0, 1fr); gap: 0; }
+}
+
 /* ---------- version history ---------- */
 
 .ledger {
@@ -766,6 +875,11 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .ledger-action { display: flex; justify-content: flex-end; }
 .tag-src-restore { background: var(--blue-50); color: var(--blue); }
 .tag-src-import, .tag-src-bootstrap { background: var(--amber-50); color: var(--amber-ink); }
+
+@media (max-width: 640px) {
+  .ledger-item { grid-template-columns: 3.6em minmax(0, 1fr); gap: 4px 12px; padding: 14px 16px; }
+  .ledger-action { grid-column: 2; justify-content: flex-start; margin-top: 6px; }
+}
 
 /* ---------- telegram page ---------- */
 
@@ -824,7 +938,6 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 }
 
 /* forms in dialogs: the form is the dialog's column */
-.modal-form { width: min(560px, calc(100vw - 24px)); }
 .modal-form > form { display: flex; flex-direction: column; min-height: 0; flex: 1; }
 .modal-form .modal-body { padding-top: 14px; }
 .modal-form .modal-body .callout { margin-bottom: 0; }
@@ -841,7 +954,6 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .getme-out .icon { display: inline-block; width: 15px; height: 15px; margin-right: 5px; vertical-align: -2.5px; }
 
 /* chat picker */
-.modal-chats { width: min(540px, calc(100vw - 24px)); }
 .modal-chats .modal-body { padding: 8px 0 0; }
 .chats-hint {
   display: flex; align-items: flex-start; gap: 8px; margin: 0 22px 12px;
@@ -874,6 +986,20 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .chats-state.is-err strong { color: var(--red-700); }
 .chats-state.is-err .icon { color: var(--red); }
 .spinner { width: 22px; height: 22px; border: 2.5px solid var(--green-200); border-right-color: var(--green-700); border-radius: 50%; animation: spin 0.7s linear infinite; }
+
+@media (max-width: 640px) {
+  .tg-item, .tg-bot { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 14px 16px; }
+  .tg-bot { grid-template-columns: 38px minmax(0, 1fr); column-gap: 12px; }
+  .tg-bot .tg-avatar { align-self: start; }
+  .tg-bot .tg-uses, .tg-bot .tg-actions { grid-column: 2; }
+  .tg-actions { justify-content: flex-start; }
+  .tg-btn-text { display: none; }
+  .token-row { grid-template-columns: minmax(0, 1fr); }
+  .token-row > .btn { justify-self: start; }
+  .chats-hint { margin: 0 16px 12px; }
+  .chat-row { padding: 11px 16px; }
+  .chat-pick { display: none; }
+}
 
 /* ---------- mailboxes ---------- */
 
@@ -1088,11 +1214,25 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .danger-body { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 24px; padding: 16px 20px; }
 .danger-body .card-title { color: var(--red-700); }
 
+@media (max-width: 640px) {
+  .mb-item { padding: 14px 16px; }
+  .stamps { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .stamp-face { min-height: 112px; }
+  .stamp-glyph { font-size: 40px; }
+  .grid-3 { grid-template-columns: minmax(0, 1fr); }
+  .oauth-state { grid-template-columns: 34px minmax(0, 1fr); }
+  .oauth-state .btn { grid-column: 2; justify-self: start; }
+  .mb-form .card-head { flex-wrap: wrap; }
+  .mb-form .advanced > summary { flex-wrap: nowrap; }
+  .stamp-pick input:checked + .stamp .stamp-face::after { width: 38px; height: 38px; right: 2px; bottom: 24px; }
+  .save-bar .btn { flex: 1; }
+  .danger-body { padding: 14px 16px; }
+}
+
 /* ---------- Microsoft authorisation dialog ----------
    The user code is the hero, in red postcode boxes; once the sign-in is done a postmark
    cancels it like a used stamp, and an expired code turns grey. The time left drains
    along a thin meter (scaled through --left, set from script). */
-.modal-oauth { width: min(540px, calc(100vw - 24px)); }
 .modal-oauth [hidden] { display: none !important; }
 .modal-oauth .modal-body { padding-top: 6px; }
 .modal-oauth .modal-foot { align-items: center; }
@@ -1196,6 +1336,17 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 }
 
 .callout p, .flash-text { white-space: pre-line; }
+
+@media (max-width: 640px) {
+  .modal-oauth .modal-body { padding-left: 16px; padding-right: 16px; }
+  .modal-oauth .modal-foot { padding-left: 16px; padding-right: 16px; }
+  .oauth-step { padding-left: 34px; }
+  .oauth-note { flex-basis: 100%; }
+  .modal-oauth .modal-foot .btn { flex: 1; }
+  .oauth-link { width: 100%; }
+  /* with an authorise button the actions need a row of their own */
+  .mb-item:has(.btn-auth) .mb-actions { grid-column: 2 / 4; grid-row: auto; justify-content: flex-start; }
+}
 
 /* ---------- rules and templates ----------
    Rules are a sorting chain: each rule sits in a numbered slot (the number is its place in
@@ -1923,6 +2074,16 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
   .log-view-sm { order: 3; flex: 1 1 100%; margin: 6px 0 0; }
 }
 
+}
+
+@layer utilities {
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+
+}
+
 /* ---------- motion ---------- */
 
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -1932,117 +2093,4 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 @keyframes pop-in { from { opacity: 0; transform: translateY(6px) scale(0.98); } }
 @keyframes stamp { from { opacity: 0; transform: rotate(-2deg) scale(1.25); } }
 @keyframes shake { 20%, 60% { transform: translateX(-5px); } 40%, 80% { transform: translateX(5px); } }
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
-}
-
-/* ---------- narrow screens ---------- */
-
-@media (max-width: 860px) {
-  .shell { grid-template-columns: minmax(0, 1fr); background: none; }
-  .rail {
-    position: sticky; top: 0; z-index: 30; height: auto;
-    grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto auto;
-    grid-template-areas: "brand logout" "nav nav";
-    padding: 10px 12px 0;
-  }
-  .rail .brand { padding: 2px 0 10px 2px; }
-  .brand-mark { width: 32px; height: 32px; }
-  .rail-logout { margin: 0 0 10px; align-self: center; }
-  .logout-btn { padding: 6px 10px; gap: 6px; font-size: 14px; }
-  .logout-btn .icon { width: 16px; height: 16px; }
-
-  /* tabs that do not fit fade out at the edges, so the clipped ones read as "scroll for
-     more"; the fades only cover the padding once scrolled to either end (the ::after
-     spacer keeps room at the end), so no tab stays faded */
-  .nav {
-    flex-direction: row; gap: 2px;
-    margin: 0 -12px; padding: 0 12px;
-    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
-    -webkit-mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 36px), transparent);
-    mask-image: linear-gradient(90deg, transparent, #000 12px, #000 calc(100% - 36px), transparent);
-  }
-  .nav::after { content: ""; flex: none; width: 24px; }
-  .nav::-webkit-scrollbar { display: none; }
-  .nav-item { flex: none; margin: 0; padding: 8px 14px 10px; border-radius: 9px 9px 0 0; font-size: 14.5px; }
-  .nav-item .icon { display: none; }
-  .nav-item[aria-current="page"] { border-radius: 9px 9px 0 0; }
-  .nav-item[aria-current="page"]::before { top: auto; right: auto; bottom: 0; left: -12px; background: radial-gradient(circle at 0 0, transparent 11.5px, var(--paper) 12px); }
-  .nav-item[aria-current="page"]::after { bottom: 0; right: -12px; background: radial-gradient(circle at 100% 0, transparent 11.5px, var(--paper) 12px); }
-
-  .main { padding: 24px 16px 56px; }
-  .page-head { margin-bottom: 22px; padding-bottom: 16px; }
-  .page-title { font-size: 24px; }
-}
-
-@media (max-width: 640px) {
-  .grid-2 { grid-template-columns: minmax(0, 1fr); }
-  .card-head, .card-body { padding-left: 16px; padding-right: 16px; }
-  .card-foot { padding-left: 16px; padding-right: 16px; }
-  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .facts > div { border-right: 0; border-bottom: 1px solid var(--line); }
-  .facts > div:nth-child(odd) { border-right: 1px solid var(--line); }
-  .facts > div:nth-last-child(-n + 2):nth-child(odd), .facts > div:last-child { border-bottom: 0; }
-  .page-actions, .form-actions { width: 100%; }
-  .form-actions .btn { flex: 1; }
-
-  .toasts, .toasts[popover] { inset: auto 16px calc(16px + env(safe-area-inset-bottom)) 16px; align-items: stretch; }
-  .toast { max-width: none; }
-
-  dialog.modal {
-    width: 100%; max-width: 100%; max-height: 88vh;
-    margin: auto 0 0; border-radius: 16px 16px 0 0;
-  }
-  dialog.modal[open] { animation-name: sheet-in; }
-
-  .auth-card { padding: 26px 20px 24px; }
-  .auth-foot { margin: 24px -20px -24px; padding: 10px 12px 10px 20px; }
-  .step { padding-left: 44px; }
-
-  .setting-row { grid-template-columns: minmax(0, 1fr); padding: 14px 16px; }
-  .setting-note { padding-left: 16px; padding-right: 16px; }
-  .card-section { padding: 16px; }
-  .foot-note { flex-basis: 100%; }
-  .ip-card { grid-template-columns: minmax(0, 1fr); padding: 20px 16px; }
-  .postmark { width: 132px; height: 132px; }
-  .ip-value { font-size: 26px; }
-  .ip-facts > div { grid-template-columns: minmax(0, 1fr); gap: 0; }
-  .ledger-item { grid-template-columns: 3.6em minmax(0, 1fr); gap: 4px 12px; padding: 14px 16px; }
-  .ledger-action { grid-column: 2; justify-content: flex-start; margin-top: 6px; }
-  .qr { width: 176px; height: 176px; }
-
-  .tg-item, .tg-bot { grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 14px 16px; }
-  .tg-bot { grid-template-columns: 38px minmax(0, 1fr); column-gap: 12px; }
-  .tg-bot .tg-avatar { align-self: start; }
-  .tg-bot .tg-uses, .tg-bot .tg-actions { grid-column: 2; }
-  .tg-actions { justify-content: flex-start; }
-  .tg-btn-text { display: none; }
-  .token-row { grid-template-columns: minmax(0, 1fr); }
-  .token-row > .btn { justify-self: start; }
-  .chats-hint { margin: 0 16px 12px; }
-  .chat-row { padding: 11px 16px; }
-  .chat-pick { display: none; }
-  .mb-item { padding: 14px 16px; }
-  .stamps { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .stamp-face { min-height: 112px; }
-  .stamp-glyph { font-size: 40px; }
-  .grid-3 { grid-template-columns: minmax(0, 1fr); }
-  .oauth-state { grid-template-columns: 34px minmax(0, 1fr); }
-  .oauth-state .btn { grid-column: 2; justify-self: start; }
-  .mb-form .card-head { flex-wrap: wrap; }
-  .mb-form .advanced > summary { flex-wrap: nowrap; }
-  .stamp-pick input:checked + .stamp .stamp-face::after { width: 38px; height: 38px; right: 2px; bottom: 24px; }
-  .save-bar .btn { flex: 1; }
-  .danger-body { padding: 14px 16px; }
-  .modal-oauth .modal-body { padding-left: 16px; padding-right: 16px; }
-  .modal-oauth .modal-foot { padding-left: 16px; padding-right: 16px; }
-  .oauth-step { padding-left: 34px; }
-  .oauth-note { flex-basis: 100%; }
-  .modal-oauth .modal-foot .btn { flex: 1; }
-  .oauth-link { width: 100%; }
-  /* with an authorise button the actions need a row of their own */
-  .mb-item:has(.btn-auth) .mb-actions { grid-column: 2 / 4; grid-row: auto; justify-content: flex-start; }
-}
-
 @keyframes sheet-in { from { transform: translateY(24px); opacity: 0; } }
