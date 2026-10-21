@@ -23,6 +23,10 @@ defaults:
   poll_interval: 30s         # 伺服器不支援 IDLE 時的輪詢間隔
   alert_after: 10m           # 連續斷線多久才告警
 
+microsoft:                   # 選填：Microsoft 信箱共用的 Azure 應用程式（Web：系統設定 → Microsoft 應用程式）
+  client_id: "00000000-0000-0000-0000-000000000000"   # 見 README「信箱設定 → Microsoft」
+  tenant: consumers          # 個人帳號 consumers；公司帳號 organizations 或租戶 ID；省略為 common
+
 mailboxes:
   personal_gmail:
     display_name: 個人 Gmail
@@ -37,9 +41,8 @@ mailboxes:
     host: outlook.office365.com
     username: me@outlook.com
     auth:
-      type: microsoft_oauth
-      client_id: "00000000-0000-0000-0000-000000000000"   # 見 README「信箱設定 → Microsoft」；匯入後在 Web 的信箱頁授權
-      tenant: consumers      # 個人帳號 consumers；公司帳號 organizations 或租戶 ID
+      type: microsoft_oauth  # 沿用上面 microsoft 的 client_id 與 tenant；匯入後在 Web 的信箱頁授權
+      # client_id: "…"       # 選填：只有這個信箱要用別的 Azure 應用程式時才寫（tenant 同理）
     targets: [me, work_chan]
     max_age: 5m
     templates:

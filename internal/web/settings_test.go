@@ -425,3 +425,113 @@ func TestSecurityFormsAreNovalidate(t *testing.T) {
 		}
 	}
 }
+
+// withOwnAppAndTeam is withOutlookMailbox ("outlook" with its own client_id and tenant
+// consumers) plus "team", a Microsoft mailbox that uses the microsoft section.
+func withOwnAppAndTeam(c *config.Config) {
+	withSample(c)
+	withOutlookMailbox(c)
+	c.Microsoft = config.Microsoft{ClientID: "global-app"}
+	c.Mailboxes["team"] = &config.Mailbox{Host: "outlook.office365.com", Username: "team@outlook.com",
+		Auth: config.Auth{Type: "microsoft_oauth"}, Targets: []string{"me"}}
+}
+
+func TestSettingsMicrosoftApp(t *testing.T) {
+	e := newEnv(t, func(c *config.Config) { withSample(c); withOutlookMailbox(c) })
+	e.login()
+	ctx := context.Background()
+	_, body := e.get("/settings")
+	if !strings.Contains(body, `id="microsoft"`) || !strings.Contains(body, "Microsoft 應用程式") || !strings.Contains(body, "允許公用用戶端流程") {
+		t.Fatal("settings page has no Microsoft application card")
+	}
+	// nothing relies on the default tenant yet: suggest consumers
+	if !strings.Contains(body, `name="ms_tenant" type="text" value="consumers"`) {
+		t.Error("tenant not pre-filled with consumers")
+	}
+	tok := store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)}
+	e.st.SaveOAuthToken(ctx, "outlook", tok)
+	resp, body := e.postForm("/settings/microsoft", url.Values{"ms_client_id": {" global-app "}, "ms_tenant": {"consumers"}})
+	if resp.StatusCode != 303 || e.flash(resp) != "已儲存 Microsoft 應用程式設定並套用" {
+		t.Fatalf("save = %d %q %s", resp.StatusCode, e.flash(resp), body)
+	}
+	raw, _, _ := runtime.LoadConfig(ctx, e.st)
+	if raw.Microsoft != (config.Microsoft{ClientID: "global-app", Tenant: "consumers"}) {
+		t.Fatalf("microsoft = %+v", raw.Microsoft)
+	}
+	if v, _, _ := e.st.LatestConfigVersion(ctx); v.Summary != "修改 Microsoft 應用程式設定" {
+		t.Errorf("summary = %q", v.Summary)
+	}
+	if _, ok, _ := e.st.GetOAuthToken(ctx, "outlook"); !ok {
+		t.Error("a mailbox with its own app lost its token")
+	}
+	if resp, _ := e.postForm("/settings/microsoft", url.Values{"ms_client_id": {"global-app"}, "ms_tenant": {"consumers"}}); e.flash(resp) != msgNoChange {
+		t.Errorf("unchanged save flash = %q", e.flash(resp))
+	}
+}
+
+// The confirmation for a change lists exactly the authorised mailboxes whose token the
+// save then drops, and the flash says which were cleared.
+func TestSettingsMicrosoftAppChangeClearsTokens(t *testing.T) {
+	e := newEnv(t, withOwnAppAndTeam)
+	e.login()
+	ctx := context.Background()
+	tok := store.OAuthToken{RefreshToken: "r", AccessToken: "a", ExpiresAt: time.Now().Add(time.Hour)}
+	e.st.SaveOAuthToken(ctx, "outlook", tok)
+	e.st.SaveOAuthToken(ctx, "team", tok)
+	_, body := e.get("/settings")
+	if !strings.Contains(body, `data-confirm-client="將清除 1 個信箱的 Microsoft 授權，需要重新授權：team"`) {
+		t.Errorf("client_id confirmation missing:\n%s", confirmAttrs(body))
+	}
+	// outlook keeps its own tenant; team uses the global (blank: common)
+	if !strings.Contains(body, `data-confirm-tenant="將清除 1 個信箱的 Microsoft 授權，需要重新授權：team"`) {
+		t.Errorf("tenant confirmation missing:\n%s", confirmAttrs(body))
+	}
+	if !strings.Contains(body, `data-stored-client_id="global-app"`) || !strings.Contains(body, `data-stored-tenant=""`) {
+		t.Error("stored values missing")
+	}
+	if strings.Contains(body, `name="ms_tenant" type="text" value="consumers"`) {
+		t.Error("tenant pre-filled although team relies on the default tenant")
+	}
+	resp, body := e.postForm("/settings/microsoft", url.Values{"ms_client_id": {"global-app-2"}, "ms_tenant": {""}})
+	if resp.StatusCode != 303 {
+		t.Fatalf("save = %d %s", resp.StatusCode, body)
+	}
+	if f := e.flash(resp); !strings.Contains(f, "清除了信箱 team 的 Microsoft 授權") || strings.Contains(f, "outlook") {
+		t.Errorf("flash = %q", f)
+	}
+	if _, ok, _ := e.st.GetOAuthToken(ctx, "team"); ok {
+		t.Error("token of a mailbox using the old global app kept")
+	}
+	if _, ok, _ := e.st.GetOAuthToken(ctx, "outlook"); !ok {
+		t.Error("a mailbox with its own app lost its token")
+	}
+	// nothing authorised uses it any more: no confirmation
+	if _, body = e.get("/settings"); strings.Contains(body, "data-confirm-client=\"將清除") {
+		t.Errorf("confirmation without authorised mailboxes:\n%s", confirmAttrs(body))
+	}
+}
+
+func TestSettingsMicrosoftAppCannotBeClearedWhileUsed(t *testing.T) {
+	e := newEnv(t, withOwnAppAndTeam)
+	e.login()
+	resp, body := e.postForm("/settings/microsoft", url.Values{"ms_client_id": {""}, "ms_tenant": {""}})
+	if resp.StatusCode != 422 {
+		t.Fatalf("clear = %d", resp.StatusCode)
+	}
+	if !strings.Contains(body, "信箱 team 沒有自己的應用程式識別碼") {
+		t.Errorf("no reason on the field:\n%s", regexpStripTags(body))
+	}
+	if raw, _, _ := runtime.LoadConfig(context.Background(), e.st); raw.Microsoft.ClientID != "global-app" {
+		t.Error("cleared although a mailbox needs it")
+	}
+}
+
+func confirmAttrs(body string) string {
+	var out []string
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(line, "data-confirm-") || strings.Contains(line, "data-stored-") {
+			out = append(out, strings.TrimSpace(line))
+		}
+	}
+	return strings.Join(out, "\n")
+}

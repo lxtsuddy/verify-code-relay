@@ -73,7 +73,7 @@ docker logs -f relay
 6. **首次登入**：瀏覽器開 `https://relay.example.com` → 用 `secret.env` 的密碼登入 → 依畫面綁定兩步驟驗證（用 Google Authenticator、1Password 等 App 掃 QR code，輸入一組驗證碼）→ 依序新增：
    1. **Telegram → Bot**：貼上 @BotFather 給的 token。
    2. **Telegram → 目標**：先對 Bot 傳一則訊息，再按「讀取最近對話」選擇聊天室，存檔後按「發送測試」確認收得到。
-   3. **信箱**：選擇服務、填入帳號與應用程式密碼（Outlook 選 Microsoft 授權），按「測試連線」挑選資料夾，勾選要轉發的目標。
+   3. **信箱**：選擇服務、填入帳號與應用程式密碼（Outlook 選 Microsoft 授權，並先在 **系統設定 → Microsoft 應用程式** 填一次 Azure 應用程式，見「信箱設定 → Microsoft」），按「測試連線」挑選資料夾，勾選要轉發的目標。
    4. **系統設定 → 通知對象**：選一個目標接收登入通知與信箱告警（強烈建議，見「安全」）。
 
    也可以改用 `relay config import` 匯入現成的 YAML（見「匯入 YAML」）。
@@ -195,8 +195,11 @@ Microsoft 已停用 IMAP 的帳號密碼登入，必須使用 OAuth2：
    - 重新導向 URI：不需要。
 2. 「驗證」→ 進階設定 →「允許公用用戶端流程」設為「是」。
 3. 「API 權限」→ 新增權限 → 委派的權限：`IMAP.AccessAsUser.All`、`offline_access`。
-4. 在 Web 新增信箱時選「Microsoft 授權」，填入「應用程式（用戶端）識別碼」；個人帳號的 Tenant 填 `consumers`，公司帳號填 `organizations` 或租戶 ID。
-5. 存檔後在信箱頁（或總覽頁）按「授權」，依畫面到 Microsoft 的網頁輸入代碼並登入。授權完成後自動開始監看，不需要重新啟動。
+4. 在 Web 的「系統設定 → Microsoft 應用程式」填入「應用程式（用戶端）識別碼」，只要設定一次，所有 Microsoft 信箱共用。預設 Tenant：個人帳號填 `consumers`，公司或學校帳號填 `organizations` 或租戶 ID，留空為 `common`。
+5. 新增信箱時選 Outlook（或「Microsoft 授權」），填帳號即可。個別信箱要用別的 Azure 應用程式或 tenant 時，在信箱的「進階設定」覆寫，留空就沿用系統設定。
+6. 存檔後在信箱頁（或總覽頁）按「授權」，依畫面到 Microsoft 的網頁輸入代碼並登入。授權完成後自動開始監看，不需要重新啟動。
+
+授權綁定在使用的識別碼與 tenant 上：在系統設定改了它們，沿用的信箱都要重新授權（儲存前會列出哪些信箱的授權會被清除）；覆寫了自己應用程式的信箱不受影響。舊版在每個信箱各自填寫的識別碼與 tenant 會照常使用，視同覆寫。
 
 之後 token 會自動更新。若授權失效（例如改了密碼），通知對象會收到告警、總覽頁會顯示「重新授權」按鈕，再授權一次即可。
 
@@ -218,7 +221,7 @@ kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay config i
 
 - 機密可以寫成 `${環境變數}`，匯入時從**執行 import 的環境**展開後存進資料庫（K3s 上是 Pod 的環境，所以變數要在 `secret.env` 中）。`$$` 代表字面上的 `$`。
 - 服務執行中匯入時，請重新啟動（K3s：`kubectl -n verify-code-relay rollout restart deploy/verify-code-relay`）或在 Web 上任意存檔一次以套用。
-- 匯入會清除不再適用的 Microsoft 授權（信箱被移除，主機、埠號、帳號、client_id 或 tenant 改了，或信箱剛改成 Microsoft 授權），並列出「信箱 X 的 Microsoft 授權已清除，請重新授權」；之後在 Web 上重新授權即可。
+- 匯入會清除不再適用的 Microsoft 授權（信箱被移除，主機、埠號、帳號、client_id 或 tenant 改了，包括 `microsoft` 區段改了而信箱沿用它，或信箱剛改成 Microsoft 授權），並列出「信箱 X 的 Microsoft 授權已清除，請重新授權」；之後在 Web 上重新授權即可。
 - 舊版的 `data_dir`、`http_listen` 會被略過，改用環境變數 `RELAY_DATA_DIR`、`RELAY_LISTEN`。
 - `relay config export` 輸出目前設定（含機密），格式相同，可用於備份或搬家。
 
@@ -231,8 +234,9 @@ kubectl -n verify-code-relay exec -i deploy/verify-code-relay -- /relay config i
 | `targets.<名稱>` | `bot`（Bot 名稱）與 `chat_id` |
 | `admin` | 通知對象（目標名稱）：登入通知與系統告警（斷線、授權失效、發送失敗） |
 | `defaults` | `max_age`（收信時間超過多久就不轉發）、`ttl`（待發送訊息超過多久就丟棄）、`alert_ttl`、`poll_interval`（伺服器不支援 IDLE 時的輪詢間隔）、`alert_after`（連續斷線多久才告警） |
+| `microsoft` | Microsoft 信箱共用的 Azure 應用程式：`client_id`、`tenant`（選填，省略為 `common`；個人帳號用 `consumers`） |
 | `mailboxes.<名稱>` | `display_name`、`host`、`port`（預設 993）、`username`、`auth`、`folders`（預設 `INBOX`）、`targets`，以及覆寫用的 `max_age`、`ttl`、`poll_interval`、`templates` |
-| `mailboxes.<名稱>.auth` | `{type: password, password: …}`，或 `{type: microsoft_oauth, client_id: …, tenant: consumers}`（匯入後在 Web 授權） |
+| `mailboxes.<名稱>.auth` | `{type: password, password: …}`，或 `{type: microsoft_oauth}`（匯入後在 Web 授權）；`client_id`、`tenant` 選填，寫了就覆寫 `microsoft` 的值 |
 | `templates` | 全域範本 `code`、`link`、`both`（見「範本」） |
 | `rules` | 自訂規則（見「辨識不到或辨識錯誤時」） |
 | `recognize` | `extra_code_keywords`、`extra_link_keywords` |

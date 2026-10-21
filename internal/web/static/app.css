@@ -710,6 +710,35 @@ dialog.modal::backdrop { background: rgba(8, 41, 30, 0.5); }
 .ip-facts dd { overflow-wrap: anywhere; }
 .ip-card .callout { margin: 14px 0 0; }
 
+/* Microsoft application: fields beside the Azure registration steps */
+.ms-app-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr); gap: 20px 28px; align-items: start; }
+.ms-uses { margin-top: 0; }
+.ms-uses dd { display: flex; flex-wrap: wrap; gap: 6px; }
+.ms-box {
+  display: inline-block; padding: 1px 8px; border-radius: 999px;
+  background: var(--sunken); color: var(--ink-2); font-size: 13px;
+}
+.ms-guide {
+  padding: 14px 16px; border-radius: var(--radius-sm);
+  background: var(--blue-50); color: #174f7c; font-size: 14px;
+}
+.ms-guide-title { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 700; list-style: none; cursor: pointer; }
+.ms-guide-title::-webkit-details-marker { display: none; }
+.ms-guide-title .icon { width: 17px; height: 17px; flex: none; }
+.ms-guide-title:focus-visible { outline: 2.5px solid var(--green-600); outline-offset: 3px; border-radius: 4px; }
+.ms-guide[open] > .ms-guide-title { margin-bottom: 10px; }
+.ms-guide-chevron {
+  width: 8px; height: 8px; margin-left: auto; margin-right: 4px;
+  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
+  transform: rotate(45deg); transition: transform 0.2s var(--ease);
+}
+.ms-guide[open] .ms-guide-chevron { transform: rotate(-135deg); }
+.ms-guide .mini-steps li { color: #174f7c; font-size: 13.5px; }
+.ms-guide .mini-steps li::before { background: #fff; color: var(--blue); }
+@media (max-width: 860px) {
+  .ms-app-body { grid-template-columns: minmax(0, 1fr); }
+}
+
 /* ---------- version history ---------- */
 
 .ledger {

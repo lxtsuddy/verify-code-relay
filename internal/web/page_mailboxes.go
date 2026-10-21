@@ -345,12 +345,14 @@ type mailboxFormData struct {
 	NeedsLogin      bool                                        // authorised, but a watcher reports the grant no longer works
 	Stored          struct{ Username, ClientID, Tenant string } // what an authorisation is for (Microsoft)
 	Defaults        struct{ MaxAge, TTL, PollInterval string }
+	MS              config.Microsoft // the microsoft section: what blank overrides use
+	NeedsGlobal     bool             // no client_id in the microsoft section or the form
 	AdvancedOpen    bool
 	AdvancedSet     int // advanced fields with a value
 }
 
 func (s *Server) getMailboxNew(w http.ResponseWriter, r *http.Request) {
-	f := mailboxForm{Preset: "gmail", Host: "imap.gmail.com", AuthType: authPassword, Tenant: "consumers", Folders: []string{"INBOX"}}
+	f := mailboxForm{Preset: "gmail", Host: "imap.gmail.com", AuthType: authPassword, Folders: []string{"INBOX"}}
 	raw, _, err := runtime.LoadConfig(r.Context(), s.o.Store)
 	if err != nil {
 		s.serverError(w, r, err)
@@ -413,12 +415,18 @@ func (s *Server) renderMailboxForm(w http.ResponseWriter, r *http.Request, statu
 	}
 	def := raw.Defaulted().Defaults
 	d.Defaults.MaxAge, d.Defaults.TTL, d.Defaults.PollInterval = shortDuration(def.MaxAge.Duration), shortDuration(def.TTL.Duration), shortDuration(def.PollInterval.Duration)
-	for _, k := range []string{"max_age", "ttl", "poll_interval", "tpl_code", "tpl_link", "tpl_both"} {
+	d.MS = raw.Microsoft
+	d.NeedsGlobal = raw.Microsoft.ClientID == "" && f.ClientID == ""
+	for _, k := range []string{"max_age", "ttl", "poll_interval", "tpl_code", "tpl_link", "tpl_both", "client_id", "tenant"} {
 		if errs[k] != "" {
 			d.AdvancedOpen = true
 		}
 	}
-	for _, v := range []string{f.MaxAge, f.TTL, f.PollInterval, f.TplCode, f.TplLink, f.TplBoth} {
+	set := []string{f.MaxAge, f.TTL, f.PollInterval, f.TplCode, f.TplLink, f.TplBoth}
+	if f.AuthType == authMicrosoft {
+		set = append(set, f.ClientID, f.Tenant)
+	}
+	for _, v := range set {
 		if v != "" {
 			d.AdvancedSet++
 		}

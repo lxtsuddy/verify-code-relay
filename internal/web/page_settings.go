@@ -1,6 +1,7 @@
 package web
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -42,7 +43,21 @@ type ipInfo struct {
 	Trusted   int    // number of RELAY_TRUSTED_PROXIES prefixes
 }
 
+// msAppData is the Microsoft application card.
+type msAppData struct {
+	ClientID, Tenant             string   // form values
+	StoredClientID, StoredTenant string   // the microsoft section as stored
+	Suggested                    bool     // Tenant is the suggested consumers, not a stored value
+	Using                        []string // Microsoft mailboxes without their own client_id
+	Own                          []string // Microsoft mailboxes with their own client_id
+	// what a save would clear (authorised mailboxes using the global value), as the text of
+	// the confirmation app.js asks for when the client_id, the tenant or both change; ""
+	// when nothing would be cleared
+	ConfirmClient, ConfirmTenant, ConfirmBoth string
+}
+
 type settingsData struct {
+	MS        msAppData
 	Durations []durationField
 	Admin     string
 	Targets   []targetOption
@@ -62,6 +77,72 @@ var logLevels = []logLevelOption{
 
 // generalPaths are the config paths the general form edits.
 var generalPaths = []string{"defaults.max_age", "defaults.ttl", "defaults.alert_ttl", "defaults.poll_interval", "defaults.alert_after", "admin", "log_level"}
+
+// microsoftPaths are the config paths the Microsoft application form edits.
+var microsoftPaths = []string{"microsoft.client_id", "microsoft.tenant"}
+
+// suggestedTenant is pre-filled while it changes nothing: personal accounts need it.
+const suggestedTenant = "consumers"
+
+// newMSAppData describes the Microsoft application card for raw. authorised reports
+// whether a mailbox has a stored OAuth token.
+func newMSAppData(raw *config.Config, authorised map[string]bool) msAppData {
+	d := msAppData{ClientID: raw.Microsoft.ClientID, Tenant: raw.Microsoft.Tenant,
+		StoredClientID: raw.Microsoft.ClientID, StoredTenant: raw.Microsoft.Tenant}
+	blankTenant := false
+	for _, name := range sortedNames(raw.Mailboxes) {
+		m := raw.Mailboxes[name]
+		if m == nil || m.Auth.Type != authMicrosoft {
+			continue
+		}
+		if m.Auth.ClientID == "" {
+			d.Using = append(d.Using, name)
+		} else {
+			d.Own = append(d.Own, name)
+		}
+		blankTenant = blankTenant || m.Auth.Tenant == ""
+	}
+	if raw.Microsoft == (config.Microsoft{}) && !blankTenant {
+		d.Tenant, d.Suggested = suggestedTenant, true
+	}
+	// the mailboxes a change would clear, decided exactly as saveConfig does
+	cleared := func(change func(g *config.Microsoft)) string {
+		next := *raw // shallow: only the microsoft section differs
+		change(&next.Microsoft)
+		var names []string
+		for _, name := range runtime.StaleOAuthTokens(raw, &next) {
+			if authorised[name] {
+				names = append(names, name)
+			}
+		}
+		if len(names) == 0 {
+			return ""
+		}
+		return fmt.Sprintf("將清除 %d 個信箱的 Microsoft 授權，需要重新授權：%s", len(names), strings.Join(names, "、"))
+	}
+	// a value no mailbox can have stands for "another client_id / tenant"
+	const other = "\x00other"
+	d.ConfirmClient = cleared(func(g *config.Microsoft) { g.ClientID = other })
+	d.ConfirmTenant = cleared(func(g *config.Microsoft) { g.Tenant = other })
+	d.ConfirmBoth = cleared(func(g *config.Microsoft) { g.ClientID, g.Tenant = other, other })
+	return d
+}
+
+// authorisedMailboxes reports which Microsoft mailboxes of raw have a stored OAuth token.
+func (s *Server) authorisedMailboxes(r *http.Request, raw *config.Config) (map[string]bool, error) {
+	out := map[string]bool{}
+	for name, m := range raw.Mailboxes {
+		if m == nil || m.Auth.Type != authMicrosoft {
+			continue
+		}
+		_, ok, err := s.o.Store.GetOAuthToken(r.Context(), name)
+		if err != nil {
+			return nil, err
+		}
+		out[name] = ok
+	}
+	return out, nil
+}
 
 // newSettingsData describes the form for raw (the stored config, without defaults).
 func (s *Server) newSettingsData(r *http.Request, raw *config.Config, version int64) settingsData {
@@ -126,6 +207,12 @@ func (s *Server) renderSettings(w http.ResponseWriter, r *http.Request, status i
 		return
 	}
 	d := s.newSettingsData(r, raw, id)
+	authorised, err := s.authorisedMailboxes(r, raw)
+	if err != nil {
+		s.serverError(w, r, err)
+		return
+	}
+	d.MS = newMSAppData(raw, authorised)
 	if form != nil {
 		form(&d)
 	}
@@ -194,6 +281,58 @@ func (s *Server) postSettingsGeneral(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.redirect(w, r, "/settings", &Flash{Kind: "success", Text: "已儲存並套用"})
+}
+
+func (s *Server) postSettingsMicrosoft(w http.ResponseWriter, r *http.Request) {
+	app := config.Microsoft{ClientID: strings.TrimSpace(r.PostFormValue("ms_client_id")), Tenant: strings.TrimSpace(r.PostFormValue("ms_tenant"))}
+	res, fe, err := s.saveConfig(r, "web", "修改 Microsoft 應用程式設定", func(raw *config.Config) error {
+		if raw.Microsoft == app {
+			return errNoChange
+		}
+		raw.Microsoft = app
+		return nil
+	})
+	switch {
+	case errors.Is(err, errNoChange):
+		s.redirect(w, r, "/settings#microsoft", &Flash{Kind: "info", Text: msgNoChange})
+		return
+	case err != nil:
+		s.serverError(w, r, err)
+		return
+	case len(fe) > 0:
+		s.renderSettings(w, r, http.StatusUnprocessableEntity, microsoftErrors(fe), func(d *settingsData) {
+			d.MS.ClientID, d.MS.Tenant, d.MS.Suggested = app.ClientID, app.Tenant, false
+		})
+		return
+	}
+	text := "已儲存 Microsoft 應用程式設定並套用"
+	if len(res.Dropped) > 0 {
+		text += "，並清除了信箱 " + strings.Join(res.Dropped, "、") + " 的 Microsoft 授權，請到信箱頁重新授權"
+	}
+	if len(res.Failed) > 0 {
+		text += "，但信箱 " + strings.Join(res.Failed, "、") + " 的舊 Microsoft 授權沒有清除成功，詳情請看服務日誌"
+		s.redirect(w, r, "/settings#microsoft", &Flash{Kind: "info", Text: text})
+		return
+	}
+	s.redirect(w, r, "/settings#microsoft", &Flash{Kind: "success", Text: text})
+}
+
+// microsoftErrors keeps the Microsoft form's errors on its fields: mailboxes left without
+// a client_id are named under microsoft.client_id, every other problem goes to "".
+func microsoftErrors(fe FieldErrors) FieldErrors {
+	var needy []string
+	rest := FieldErrors{}
+	for _, k := range sortedNames(fe) {
+		if name, ok := strings.CutPrefix(k, "mailboxes."); ok && strings.HasSuffix(name, ".auth.client_id") {
+			needy = append(needy, strings.TrimSuffix(name, ".auth.client_id"))
+			continue
+		}
+		rest[k] = fe[k]
+	}
+	if len(needy) > 0 {
+		rest.add("microsoft.client_id", "信箱 "+strings.Join(needy, "、")+" 沒有自己的應用程式識別碼，需要這裡的設定；要清空請先在那些信箱的進階設定填入識別碼")
+	}
+	return rest.only(microsoftPaths...)
 }
 
 // checkCredentials verifies the admin's current password (when password is true) and TOTP

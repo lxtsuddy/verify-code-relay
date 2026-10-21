@@ -621,8 +621,6 @@
     if (port && port.value !== "") { port.value = ""; flashFilled(port); }
     var auth = form.querySelector('input[name="auth_type"][value="' + (radio.dataset.auth || "password") + '"]');
     if (auth && !auth.checked) { auth.checked = true; auth.dispatchEvent(new Event("change", { bubbles: true })); }
-    var tenant = field(form, "tenant");
-    if (radio.value === "outlook" && tenant && !tenant.value) { tenant.value = "consumers"; flashFilled(tenant); }
     probeStale(form);
   }
 
@@ -1776,6 +1774,37 @@
         liveNote(true, "分頁在背景，已暫停更新");
       } else boardFetch();
     });
+  });
+
+  /* ---------- Microsoft application (settings) ----------
+
+    form[data-ms-app]   系統設定的「Microsoft 應用程式」卡片。伺服器在 data-stored-client_id／data-stored-tenant
+                        放已儲存的值，在 data-confirm-client／-tenant／-both 放改了識別碼、tenant 或兩者時會被
+                        清除的授權（沒有就是空字串）。欄位一改就依改了哪些重設 data-confirm，送出時由共用的
+                        data-confirm 處理確認；tenant 留空等於 common。
+  */
+
+  function msTenant(v) { v = (v || "").trim(); return v === "" ? "common" : v; }
+
+  function msAppConfirm(form) {
+    var id = field(form, "ms_client_id");
+    var tn = field(form, "ms_tenant");
+    if (!id || !tn) return;
+    var idChanged = id.value.trim() !== (form.getAttribute("data-stored-client_id") || "");
+    var tnChanged = msTenant(tn.value) !== msTenant(form.getAttribute("data-stored-tenant"));
+    var key = idChanged && tnChanged ? "both" : idChanged ? "client" : tnChanged ? "tenant" : "";
+    var text = key ? form.getAttribute("data-confirm-" + key) : "";
+    if (text) form.dataset.confirm = "儲存 Microsoft 應用程式設定？\n" + text + "。";
+    else delete form.dataset.confirm;
+  }
+
+  document.addEventListener("input", function (e) {
+    var form = e.target && e.target.form;
+    if (form && form.hasAttribute("data-ms-app")) msAppConfirm(form);
+  });
+
+  ready(function () {
+    document.querySelectorAll("form[data-ms-app]").forEach(msAppConfirm);
   });
 
   ready(snapshotForms);

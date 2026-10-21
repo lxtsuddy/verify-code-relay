@@ -704,3 +704,61 @@ func TestProbeMicrosoftUsesEffectiveApp(t *testing.T) {
 		}
 	}
 }
+
+// The mailbox form takes client_id and tenant as optional overrides of the microsoft section.
+func TestMailboxFormMicrosoftAppDefaults(t *testing.T) {
+	e := newEnv(t, nil)
+	e.login()
+	const needsGlobal = "請先到系統設定填寫 Microsoft 應用程式"
+	_, body := e.get("/mailboxes/new")
+	if !strings.Contains(body, needsGlobal) || !strings.Contains(body, `href="/settings#microsoft"`) {
+		t.Error("no pointer to the settings page while no global app is set")
+	}
+	if strings.Contains(body, `name="tenant" type="text" value="consumers"`) {
+		t.Error("a new mailbox must not carry a tenant override by default")
+	}
+	outlook := url.Values{"name": {"o"}, "host": {"outlook.office365.com"}, "username": {"me@outlook.com"},
+		"auth_type": {"microsoft_oauth"}, "client_id": {""}, "tenant": {""}, "targets": {"me"}}
+	resp, body := e.postForm("/mailboxes/new", outlook)
+	if resp.StatusCode != 422 || !strings.Contains(body, "未設定：請在系統設定填寫 Microsoft 應用程式，或在信箱進階設定覆寫") {
+		t.Fatalf("without any client_id = %d", resp.StatusCode)
+	}
+	if !strings.Contains(body, `<details class="card advanced" open>`) {
+		t.Error("advanced section not opened for the client_id error")
+	}
+
+	raw, _, _ := runtime.LoadConfig(context.Background(), e.st)
+	raw.Microsoft = config.Microsoft{ClientID: "global-app", Tenant: "consumers"}
+	saveRaw(e, raw)
+	_, body = e.get("/mailboxes/new")
+	if strings.Contains(body, needsGlobal) {
+		t.Error("pointer to the settings page although a global app is set")
+	}
+	if !strings.Contains(body, `placeholder="global-app"`) || !strings.Contains(body, `placeholder="consumers"`) {
+		t.Error("overrides do not show the global values as placeholders")
+	}
+	if resp, body := e.postForm("/mailboxes/new", outlook); resp.StatusCode != 303 {
+		t.Fatalf("create with the global app = %d %s", resp.StatusCode, body)
+	}
+	raw, _, _ = runtime.LoadConfig(context.Background(), e.st)
+	if a := raw.Mailboxes["o"].Auth; a != (config.Auth{Type: "microsoft_oauth"}) {
+		t.Errorf("stored auth = %+v, want no overrides", a)
+	}
+}
+
+// A stored mailbox with its own client_id (every Microsoft mailbox before the microsoft
+// section existed) keeps it as an override and is not told to set a global app.
+func TestMailboxFormKeepsLegacyOverride(t *testing.T) {
+	e := newEnv(t, withOutlookMailbox)
+	e.login()
+	_, body := e.get("/mailboxes/outlook")
+	if strings.Contains(body, "請先到系統設定填寫 Microsoft 應用程式") {
+		t.Error("legacy mailbox told to set a global app")
+	}
+	if !strings.Contains(body, `value="00000000-0000-0000-0000-000000000001"`) || !strings.Contains(body, `name="tenant" type="text" value="consumers"`) {
+		t.Error("legacy overrides not shown")
+	}
+	if resp, _ := e.postForm("/mailboxes/outlook", outlookForm("display_name", "Outlook")); e.flash(resp) != msgNoChange {
+		t.Errorf("saving the legacy mailbox unchanged = %q", e.flash(resp))
+	}
+}

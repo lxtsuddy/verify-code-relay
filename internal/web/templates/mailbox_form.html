@@ -58,13 +58,8 @@
         <div class="preset-hint" data-preset-hint="outlook">
           {{template "icon" "info"}}
           <div>
-            <p>Microsoft 已停用 IMAP 的密碼登入，需要先在 Azure 註冊一個應用程式：</p>
-            <ol class="mini-steps">
-              <li>Azure 入口網站 → Microsoft Entra ID → 應用程式註冊 → 新增註冊。個人帳號選「僅限個人 Microsoft 帳戶」；重新導向 URI 不需要。</li>
-              <li>「驗證」→ 進階設定 →「允許公用用戶端流程」設為「是」。</li>
-              <li>「API 權限」→ 新增委派的權限 <code>IMAP.AccessAsUser.All</code> 與 <code>offline_access</code>。</li>
-              <li>把「應用程式（用戶端）識別碼」填到下方；個人帳號的 tenant 填 <code>consumers</code>。</li>
-            </ol>
+            <p>Microsoft 已停用 IMAP 的密碼登入，改用 Microsoft 授權：Azure 應用程式在<a href="/settings#microsoft">系統設定的「Microsoft 應用程式」</a>設定一次，所有 Microsoft 信箱共用。</p>
+            <p>填好帳號後儲存信箱，再按「授權」到 Microsoft 的網頁登入。個別信箱要用別的應用程式時，在進階設定覆寫。</p>
           </div>
         </div>
         <div class="preset-hint" data-preset-hint="custom">
@@ -137,10 +132,9 @@
       </div>
 
       <div class="auth-panel auth-ms">
-        <div class="grid-2">
-          {{template "mb-input" (dict "ID" "f-client" "Name" "client_id" "Label" "應用程式（用戶端）識別碼" "Value" $f.ClientID "Err" (fieldErr $e "client_id") "Mono" true "Placeholder" "00000000-0000-0000-0000-000000000000" "Hint" "Azure 應用程式註冊的「概觀」頁。")}}
-          {{template "mb-input" (dict "ID" "f-tenant" "Name" "tenant" "Label" "Tenant" "Opt" "選填" "Value" $f.Tenant "Err" (fieldErr $e "tenant") "Mono" true "Placeholder" "common" "Hint" "個人帳號（Outlook.com、Hotmail）填 consumers；公司帳號填組織的 tenant；留空為 common。")}}
-        </div>
+        {{if $d.NeedsGlobal}}
+        <div class="callout callout-warn">{{template "icon" "alert"}}<p>請先到系統設定填寫 Microsoft 應用程式：<a href="/settings#microsoft">系統設定 → Microsoft 應用程式</a>。只有這個信箱要用自己的應用程式時，才在下方「進階設定」填入識別碼。</p></div>
+        {{end}}
         <div class="oauth-state"{{if $d.StoredMicrosoft}} data-oauth-state="{{$d.Name}}" data-stored-username="{{$d.Stored.Username}}" data-stored-client_id="{{$d.Stored.ClientID}}" data-stored-tenant="{{$d.Stored.Tenant}}"{{end}}>
           {{if and $d.StoredMicrosoft $d.NeedsLogin}}
           <span class="oauth-icon is-warn">{{template "icon" "alert"}}</span>
@@ -230,11 +224,18 @@
     <summary class="card-head advanced-summary">
       <div>
         <h2 class="card-title">進階設定</h2>
-        <p class="card-desc">時效、保留時間、輪詢間隔與這個信箱專用的訊息範本。{{if $d.AdvancedSet}}<span class="tag">已自訂 {{$d.AdvancedSet}} 項</span>{{end}}</p>
+        <p class="card-desc">時效、保留時間、輪詢間隔、這個信箱專用的訊息範本<span class="auth-ms">與 Microsoft 應用程式</span>。{{if $d.AdvancedSet}}<span class="tag">已自訂 {{$d.AdvancedSet}} 項</span>{{end}}</p>
       </div>
       <span class="advanced-chevron" aria-hidden="true"></span>
     </summary>
     <div class="card-body form">
+      <div class="auth-panel auth-ms">
+        <div class="grid-2">
+          {{template "mb-input" (dict "ID" "f-client" "Name" "client_id" "Label" "應用程式（用戶端）識別碼" "Opt" "選填" "Value" $f.ClientID "Err" (fieldErr $e "client_id") "Mono" true "Placeholder" (or $d.MS.ClientID "00000000-0000-0000-0000-000000000000") "Hint" (or (and $d.MS.ClientID "留空沿用系統設定的 Microsoft 應用程式（欄位中的灰字）。") "系統設定還沒有填 Microsoft 應用程式，這個信箱要在這裡填入識別碼才能授權。"))}}
+          {{template "mb-input" (dict "ID" "f-tenant" "Name" "tenant" "Label" "Tenant" "Opt" "選填" "Value" $f.Tenant "Err" (fieldErr $e "tenant") "Mono" true "Placeholder" (or $d.MS.Tenant "common") "Hint" "留空沿用系統設定（灰字）。個人帳號填 consumers；公司帳號填 organizations 或租戶 ID。")}}
+        </div>
+        <p class="hint">只有這個信箱要用別的 Azure 應用程式時才填。改了識別碼或 tenant 需要重新授權。</p>
+      </div>
       <div class="grid-3">
         {{template "mb-input" (dict "ID" "f-max-age" "Name" "max_age" "Label" "郵件時效" "Value" $f.MaxAge "Err" (fieldErr $e "max_age") "Mono" true "Placeholder" $d.Defaults.MaxAge "Hint" "超過這段時間的信不轉發。")}}
         {{template "mb-input" (dict "ID" "f-ttl" "Name" "ttl" "Label" "待發訊息保留" "Value" $f.TTL "Err" (fieldErr $e "ttl") "Mono" true "Placeholder" $d.Defaults.TTL "Hint" "送不出去時最多等多久。")}}

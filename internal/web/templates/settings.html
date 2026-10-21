@@ -3,7 +3,7 @@
 <header class="page-head">
   <div>
     <h1 class="page-title">系統設定</h1>
-    <p class="page-desc">轉發的預設值、通知對象與登入安全。每次儲存都會留下一個設定版本，隨時可以還原。</p>
+    <p class="page-desc">轉發的預設值、通知對象、Microsoft 應用程式與登入安全。每次儲存都會留下一個設定版本，隨時可以還原。</p>
   </div>
   <div class="page-actions">
     <a class="btn" href="/settings/versions">{{template "icon" "logs"}}<span>版本歷史</span>{{with .Data.Version}}<span class="tag">#{{.}}</span>{{end}}</a>
@@ -64,6 +64,55 @@
   </div>
   <footer class="card-foot">
     <span class="foot-note">儲存後立即套用，信箱連線會重新建立。</span>
+    <button type="submit" class="btn btn-primary" data-busy-text="套用中…">{{template "icon" "check"}}<span>儲存並套用</span></button>
+  </footer>
+</form>
+
+{{$ms := .Data.MS}}
+<form class="card ms-app" id="microsoft" method="post" action="/settings/microsoft#microsoft" novalidate aria-labelledby="ms-title" data-ms-app data-stored-client_id="{{$ms.StoredClientID}}" data-stored-tenant="{{$ms.StoredTenant}}" data-confirm-client="{{$ms.ConfirmClient}}" data-confirm-tenant="{{$ms.ConfirmTenant}}" data-confirm-both="{{$ms.ConfirmBoth}}" data-confirm-ok="儲存並清除授權" data-confirm-danger>
+  {{template "csrf" .}}
+  <header class="card-head">
+    <div>
+      <h2 class="card-title" id="ms-title">Microsoft 應用程式</h2>
+      <p class="card-desc">Outlook、Hotmail 與 Microsoft 365 信箱登入時使用的 Azure 應用程式。在這裡設定一次，所有 Microsoft 信箱共用；個別信箱可在進階設定改用自己的。</p>
+    </div>
+    {{if $ms.StoredClientID}}<span class="badge badge-ok">已設定</span>{{else}}<span class="badge badge-idle">未設定</span>{{end}}
+  </header>
+  <div class="card-body ms-app-body">
+    <div class="form ms-app-fields">
+      {{$idErr := fieldErr .Errors "microsoft.client_id"}}
+      <div class="field">
+        <label class="label" for="f-ms-client">應用程式（用戶端）識別碼</label>
+        <input class="input input-mono" id="f-ms-client" name="ms_client_id" type="text" value="{{$ms.ClientID}}" placeholder="00000000-0000-0000-0000-000000000000" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="f-ms-client-hint{{if $idErr}} f-ms-client-err{{end}}"{{if $idErr}} aria-invalid="true"{{end}}>
+        <p class="hint" id="f-ms-client-hint">Azure 應用程式註冊的「概觀」頁。</p>
+        <div id="f-ms-client-err">{{template "field-error" $idErr}}</div>
+      </div>
+      {{$tnErr := fieldErr .Errors "microsoft.tenant"}}
+      <div class="field">
+        <label class="label" for="f-ms-tenant">預設 Tenant<span class="opt">選填</span></label>
+        <input class="input input-mono" id="f-ms-tenant" name="ms_tenant" type="text" value="{{$ms.Tenant}}" placeholder="common" autocomplete="off" autocapitalize="none" spellcheck="false" aria-describedby="f-ms-tenant-hint{{if $tnErr}} f-ms-tenant-err{{end}}"{{if $tnErr}} aria-invalid="true"{{end}}>
+        <p class="hint" id="f-ms-tenant-hint">{{if $ms.Suggested}}已預先填入建議值，儲存後才生效。{{end}}個人帳號（Outlook.com、Hotmail）填 <code>consumers</code>；公司或學校帳號填 <code>organizations</code> 或租戶 ID；留空為 <code>common</code>。</p>
+        <div id="f-ms-tenant-err">{{template "field-error" $tnErr}}</div>
+      </div>
+      {{if or $ms.Using $ms.Own}}
+      <dl class="ip-facts ms-uses">
+        <div><dt>沿用這裡的設定</dt><dd>{{range $ms.Using}}<span class="ms-box mono">{{.}}</span>{{else}}<span class="muted">（沒有）</span>{{end}}</dd></div>
+        {{with $ms.Own}}<div><dt>使用自己的應用程式</dt><dd>{{range .}}<span class="ms-box mono">{{.}}</span>{{end}}</dd></div>{{end}}
+      </dl>
+      {{end}}
+    </div>
+    <details class="ms-guide"{{if not $ms.StoredClientID}} open{{end}}>
+      <summary class="ms-guide-title">{{template "icon" "info"}}<span>在 Azure 註冊應用程式</span><span class="ms-guide-chevron" aria-hidden="true"></span></summary>
+      <ol class="mini-steps">
+        <li>Azure 入口網站 → Microsoft Entra ID → 應用程式註冊 → 新增註冊。支援的帳戶類型：只用個人帳號選「僅限個人 Microsoft 帳戶」，也有公司或學校帳號選「任何組織目錄中的帳戶及個人 Microsoft 帳戶」。重新導向 URI 不需要。</li>
+        <li>「驗證」→ 進階設定 →「允許公用用戶端流程」設為「是」。</li>
+        <li>「API 權限」→ 新增委派的權限 <code>IMAP.AccessAsUser.All</code> 與 <code>offline_access</code>。</li>
+        <li>把「概觀」頁的「應用程式（用戶端）識別碼」填進這張卡片，儲存後到信箱頁按「授權」。</li>
+      </ol>
+    </details>
+  </div>
+  <footer class="card-foot">
+    <span class="foot-note">換了識別碼或 tenant，沿用它的信箱都需要重新授權。</span>
     <button type="submit" class="btn btn-primary" data-busy-text="套用中…">{{template "icon" "check"}}<span>儲存並套用</span></button>
   </footer>
 </form>

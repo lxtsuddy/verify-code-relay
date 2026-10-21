@@ -25,6 +25,7 @@ func (s *Server) routes() {
 
 	m.HandleFunc("GET /settings", s.authed(s.getSettings))
 	m.HandleFunc("POST /settings/general", s.authed(s.postSettingsGeneral))
+	m.HandleFunc("POST /settings/microsoft", s.authed(s.postSettingsMicrosoft))
 	m.HandleFunc("POST /settings/password", s.authed(s.postSettingsPassword))
 	m.HandleFunc("POST /settings/totp", s.authed(s.postSettingsTOTP))
 	m.HandleFunc("GET /settings/versions", s.authed(s.getVersions))
