@@ -21,9 +21,10 @@ import (
 //	 "preview":{"html","buttons","length","max","unsupported"}}
 //
 // or {"ok":false,"error":"…","errors":{path:message}}. The message stays in memory: the
-// body cap (maxMailTestBody) is below the ParseMultipartForm memory limit
-// (mailTestMemory), so no part spills to a temporary file. Nothing is stored or logged —
-// the trace holds codes and links.
+// body cap (maxMailTestBody) is below the multipart memory limit, so no part spills to a
+// temporary file. That limit is mailTestMemory here, and Go's default 32 MiB where the
+// CSRF check falls back to PostFormValue (no X-CSRF-Token header) and so parses the form
+// first. Nothing is stored or logged — the trace holds codes and links.
 
 const (
 	mailTestPath    = "/api/rules/test"
@@ -31,9 +32,12 @@ const (
 	mailTestMemory  = 32 << 20 // must stay above maxMailTestBody
 	mailTestText    = 500      // runes of the body shown
 
-	msgMailTooBig  = "信件超過 5 MiB，實際運作時也會略過不辨識"
+	msgMailTooBig  = "信件超過 5 MiB，實際運作時也會略過不辨識" // app.js shows it too
 	msgMailMissing = "請上傳 .eml 檔，或貼上信件原始碼"
 )
+
+// The multipart memory limit must exceed the body cap (see above); this fails to compile otherwise.
+const _ = uint(mailTestMemory - maxMailTestBody - 1)
 
 func (s *Server) postAPIRulesTest(w http.ResponseWriter, r *http.Request) {
 	bad := func(msg string) { s.json(w, http.StatusOK, map[string]any{"ok": false, "error": msg}) }

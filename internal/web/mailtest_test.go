@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"mime/multipart"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"verify-code-relay/internal/pipeline"
 	"verify-code-relay/internal/runtime"
 )
 
@@ -196,5 +198,18 @@ func TestRulesPageListsMailboxes(t *testing.T) {
 	_, body := e.get("/rules")
 	if !strings.Contains(body, `value="gmail"`) || !strings.Contains(body, "個人 Gmail") {
 		t.Fatalf("rules page lacks the mailbox option")
+	}
+}
+
+// The page checks the size before sending, with the server's wording and limit.
+func TestMailTestScriptChecksSize(t *testing.T) {
+	js, err := staticFS.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{msgMailTooBig, fmt.Sprintf("MT_MAX_BYTES = %d", pipeline.MaxMessageSize)} {
+		if !strings.Contains(string(js), want) {
+			t.Errorf("app.js lacks %q", want)
+		}
 	}
 }

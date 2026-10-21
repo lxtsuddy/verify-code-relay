@@ -1578,6 +1578,9 @@
   */
 
   var MT_FILE_HINT = "拖放 .eml 檔到這裡，或點此選擇";
+  // the server's cap (pipeline.MaxMessageSize, msgMailTooBig): a bigger mail is refused without uploading it
+  var MT_MAX_BYTES = 5242880;
+  var MT_TOO_BIG = "信件超過 5 MiB，實際運作時也會略過不辨識";
 
   function mtMode(form) {
     var tab = form.querySelector('[data-mt-mode][aria-selected="true"]');
@@ -1872,10 +1875,13 @@
     if (mtMode(form) === "file") {
       var file = byId("mt-eml").files[0];
       if (!file) { fail("請先選擇 .eml 檔"); done(); return; }
+      if (file.size > MT_MAX_BYTES) { fail(MT_TOO_BIG); done(); return; }
       fd.append("eml", file);
     } else {
       var paste = byId("mt-text").value;
       if (!paste.trim()) { fail("請先貼上信件原始碼"); done(); return; }
+      // counted in UTF-8 with CRLF line ends, as the server stores it
+      if (new Blob([paste.replace(/\r?\n/g, "\r\n")]).size > MT_MAX_BYTES) { fail(MT_TOO_BIG); done(); return; }
       fd.append("eml_text", paste);
     }
     var box = byId("mt-mailbox");
